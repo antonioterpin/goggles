@@ -1,0 +1,5 @@
+time_per_experiment: 10
+group_name: "example_experiment"
+experiments:
+  - { name: "experiment_1", hope: 0.9, seed: 42 }
+  - { name: "experiment_2", hope: 0.8, seed: 43 }

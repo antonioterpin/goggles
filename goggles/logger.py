@@ -1,0 +1,383 @@
+"""The goggles logger."""
+
+import os
+import json
+import tempfile
+import hashlib
+import inspect
+from filelock import FileLock
+from enum import Enum
+import wandb
+from multiprocessing import Process, Queue
+from datetime import datetime
+from typing import Iterable
+from .config import PrettyConfig, load_configuration
+
+
+class Severity(Enum):
+    """Severity levels for logging."""
+
+    DEBUG = 10
+    INFO = 20
+    WARNING = 30
+    ERROR = 40
+
+    def to_json(self):
+        """Convert severity to JSON-compatible string."""
+        return self.name
+
+    @classmethod
+    def from_json(cls, name):
+        """Convert JSON-compatible string to Severity enum."""
+        return Severity[name.upper()]
+
+
+class SeverityEncoder(json.JSONEncoder):
+    """Custom JSON encoder for Severity enum."""
+
+    def default(self, obj):
+        """Encode Severity enum as its name."""
+        if isinstance(obj, Severity):
+            return obj.name
+        return super().default(obj)
+
+
+class Goggles:
+    """Goggles logger for structured logging."""
+
+    # ANSI color codes for terminal
+    _COLOR_MAP = {
+        Severity.DEBUG: "[34m",  # blue
+        Severity.INFO: "[32m",  # green
+        Severity.WARNING: "[33m",  # yellow
+        Severity.ERROR: "[31m",  # red
+    }
+    _COLOR_RESET = "[0m"
+    # Compute a project-specific hash (first 16 hex chars of SHA256 of this file’s path)
+    _project_hash = hashlib.sha256(os.path.abspath(__file__).encode()).hexdigest()[:16]
+
+    # Build filenames that combine both
+    _config_filename = f"goggles_logger_{_project_hash}.json"
+    _default_config = {
+        "level": Severity.DEBUG,
+        "to_file": True,
+        "to_terminal": False,
+        "wandb_project": None,
+        "wandb_run_id": None,
+        "name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+        "logdir": os.path.expanduser("~/logdir"),
+        "config": {},
+    }
+
+    _lock_filename = _config_filename + ".lock"
+    _config_path = os.path.join(tempfile.gettempdir(), _config_filename)
+    _lock_path = os.path.join(tempfile.gettempdir(), _lock_filename)
+
+    # Create a lock on that unique lock-filename
+    _lock = FileLock(_lock_path)
+
+    # Scheduler internals
+    _task_queue = None
+    _workers = []
+
+    # Wandb utils
+    _run_id = None
+
+    @classmethod
+    def init_scheduler(cls, num_workers: int = 2):
+        """Initialize the scheduler with a specified number of worker processes."""
+        if cls._task_queue is None:
+            cls._task_queue = Queue()
+            for _ in range(num_workers):
+                p = Process(
+                    target=cls._worker_loop, args=(cls._task_queue,), daemon=True
+                )
+                p.start()
+                cls._workers.append(p)
+
+    @staticmethod
+    def _worker_loop(queue: Queue):
+        """Worker loop to process scheduled tasks."""
+        while True:
+            val = queue.get()
+            if val is None:
+                # Signal to stop the worker
+                break
+            fn, args, kwargs = val
+            try:
+                fn(*args, **kwargs)
+            except Exception:
+                Goggles.error(
+                    f"Error executing scheduled function {fn.__name__} with "
+                    f"args {args} and kwargs {kwargs}"
+                )
+
+    @classmethod
+    def stop_workers(cls):
+        """Stop all worker processes."""
+        if cls._task_queue is not None:
+            Goggles.info("Stopping Goggles workers...")
+            for _ in range(len(cls._workers)):
+                cls._task_queue.put(None)
+            for worker in cls._workers:
+                worker.join()
+
+    @classmethod
+    def schedule_log(cls, fn, *args, **kwargs):
+        """Schedule a function to be executed by the worker processes."""
+        cls.init_scheduler()
+        cls._task_queue.put((fn, args, kwargs))
+
+    @staticmethod
+    def timeit(severity=Severity.INFO, name=None):
+        """Decorator to measure the execution time of a function."""
+
+        def decorator(func):
+            import time
+            import os
+
+            def wrapper(*args, **kwargs):
+                start = time.perf_counter()
+                result = func(*args, **kwargs)
+                duration = time.perf_counter() - start
+                fname = (
+                    name
+                    or f"{os.path.basename(func.__code__.co_filename)}:{func.__name__}"
+                )
+                Goggles._log(severity, f"{fname} took {duration:.6f}s")
+                return result
+
+            return wrapper
+
+        return decorator
+
+    @staticmethod
+    def trace_on_error():
+        """Decorator to trace errors and log function parameters."""
+
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    # collect parameters
+                    data = {"args": args, "kwargs": kwargs}
+                    # if method, collect self attributes
+                    if args and hasattr(args[0], "__dict__"):
+                        data["self"] = args[0].__dict__
+                    Goggles.error(f"Exception in {func.__name__}: {e}; state: {data}")
+                    raise
+
+            return wrapper
+
+        return decorator
+
+    @classmethod
+    def get_config(cls):
+        """Load the configuration from the JSON file."""
+        with cls._lock:
+            if os.path.exists(cls._config_path):
+                config = load_configuration(cls._config_path)
+            else:
+                config = cls._default_config.copy()
+                with open(cls._config_path, "w") as f:
+                    json.dump(config, f, cls=SeverityEncoder)
+        config["file_path"] = os.path.join(config["logdir"], config["name"])
+        return PrettyConfig(config)
+
+    @classmethod
+    def set_config(
+        cls,
+        name: str = None,
+        wandb_project: str = None,
+        to_file: bool = False,
+        to_terminal: bool = False,
+        level: Severity = Severity.INFO,
+        wandb_run_id: str = None,
+        logdir: str = os.path.expanduser("~/logdir"),
+        config: dict = {},
+    ):
+        """Set the configuration for Goggles logger.
+
+        Args:
+            name (str): Name of the log file. If None, uses default name with timestamp.
+            wandb_project (str): Name of the Weights & Biases project.
+            to_file (bool): Whether to log to a file.
+            to_terminal (bool): Whether to log to the terminal.
+            level (Severity): Logging level.
+            wandb_run_id (str): Optional W&B run ID to resume.
+            logdir (str): Directory to store logs.
+            config (dict): Additional configuration parameters to log.
+        """
+        name = (
+            name.replace("{timestamp}", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+            if name
+            else cls._default_config["name"]
+        )
+        with cls._lock:
+            data = {
+                "logdir": logdir,
+                "name": name,
+                "wandb_project": wandb_project,
+                "to_file": to_file,
+                "to_terminal": to_terminal,
+                "level": level.name,
+                "wandb_run_id": wandb_run_id,
+                "config": config,
+            }
+
+            if not wandb_run_id or (cls._run_id and wandb_run_id != cls._run_id):
+                cls._run_id = None  # ensure re-initialization of W&B
+
+            # write JSON (all values now primitives)
+            with open(cls._config_path, "w") as f:
+                json.dump(data, f, cls=SeverityEncoder)
+
+            os.makedirs(logdir, exist_ok=True)
+            with open(os.path.join(logdir, name), "a") as f:
+                # create empty log file
+                pass
+
+    @classmethod
+    def _init_wandb(cls):
+        """Initialize Weights & Biases (W&B) logging."""
+        cfg = cls.get_config()
+        init_args = {}
+        init_args["project"] = cfg["wandb_project"]
+        init_args["name"] = cfg["name"]
+        init_args["config"] = cfg.get("config", {})
+        run_id = cfg.get("wandb_run_id")
+        if run_id:
+            if run_id == cls._run_id:
+                return
+            init_args["id"] = run_id
+            init_args["resume"] = "allow"
+        if not cls._run_id:
+            run = wandb.init(**init_args, reinit="finish_previous")
+            cls._run_id = run.id
+            cfg["wandb_run_id"] = run.id
+            cls.set_config(
+                wandb_run_id=run.id,
+                wandb_project=cfg["wandb_project"],
+                name=cfg["name"],
+                to_file=cfg["to_file"],
+                to_terminal=cfg["to_terminal"],
+                level=Severity[cfg["level"]],
+            )
+
+    @classmethod
+    def _log(cls, severity: Severity, message: str):
+        """Log a message with the specified severity level.
+
+        Args:
+            severity (Severity): The severity level of the log message.
+            message (str): The log message to be recorded.
+        """
+        cfg = cls.get_config()
+        lvl = cfg["level"]
+        lvl = lvl if isinstance(lvl, Severity) else Severity[lvl]
+        if severity.value < lvl.value:
+            return
+        frame = inspect.stack()[2]
+        filename = os.path.basename(frame.filename)
+        line_no = frame.lineno
+        line = f"[{severity.name}][{filename}:{line_no}] {message}"
+        if cfg.get("to_terminal"):
+            color = cls._COLOR_MAP.get(severity, "")
+            print(f"{color}{line}{cls._COLOR_RESET}")
+        if cfg.get("to_file"):
+            with open(cfg["file_path"], "a") as f:
+                f.write(line + "\n")
+        if cfg.get("wandb_run_id"):
+            cls._init_wandb()
+            wandb.log({"log": wandb.Html(line)})
+
+    @classmethod
+    def debug(cls, message: str):
+        """Log a debug message.
+
+        Args:
+            message (str): The debug message to be logged.
+        """
+        cls._log(Severity.DEBUG, message)
+
+    @classmethod
+    def info(cls, message: str):
+        """Log an informational message.
+
+        Args:
+            message (str): The informational message to be logged.
+        """
+        cls._log(Severity.INFO, message)
+
+    @classmethod
+    def warning(cls, message: str):
+        """Log a warning message.
+
+        Args:
+            message (str): The warning message to be logged.
+        """
+        cls._log(Severity.WARNING, message)
+
+    @classmethod
+    def error(cls, message: str):
+        """Log an error message.
+
+        Args:
+            message (str): The error message to be logged.
+        """
+        cls._log(Severity.ERROR, message)
+
+    @classmethod
+    def scalar(cls, name: str, value: int | float):
+        """Log a scalar value with the specified name.
+
+        Args:
+            name (str): The name of the scalar value.
+            value (int | float): The scalar value to be logged.
+        """
+        cfg = cls.get_config()
+        if cfg.get("wandb_project"):
+            cls._init_wandb()
+            wandb.log({name: value})
+
+    @classmethod
+    def vector(cls, name: str, values: Iterable):
+        """Log a vector of values with the specified name.
+
+        Args:
+            name (str): The name of the vector.
+            values (Iterable): The vector of values to be logged.
+        """
+        cfg = cls.get_config()
+        if cfg.get("wandb_project"):
+            cls._init_wandb()
+            wandb.log({name: wandb.Histogram(values)})
+
+    @classmethod
+    def image(cls, name: str, image):
+        """Log an image with the specified name.
+
+        Args:
+            name (str): The name of the image.
+            image: The image to be logged.
+        """
+        cfg = cls.get_config()
+        if cfg.get("wandb_project"):
+            cls._init_wandb()
+            wandb.log({name: wandb.Image(image)})
+
+    @classmethod
+    def video(cls, name: str, video, fps: int = 10, format: str = "mp4"):
+        """Log a video with the specified name.
+
+        Args:
+            name (str): The name of the video.
+            video: The video to be logged.
+            fps (int): Frames per second for the video.
+            format (str): Format of the video file.
+        """
+        cfg = cls.get_config()
+        if cfg.get("wandb_project"):
+            cls._init_wandb()
+            wandb.log({name: wandb.Video(video, fps=fps, format=format)})
