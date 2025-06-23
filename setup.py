@@ -14,10 +14,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     packages=["goggles"],
     include_package_data=True,
-    install_requires=[
-        "wandb[media]",
-        "rich",
-    ],
+    install_requires=["wandb[media]", "rich", "filelock", "ruamel.yaml"],
     extras_require={
         "dev": ["pytest"],
         "examples": ["matplotlib", "numpy<2"],

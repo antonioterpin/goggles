@@ -1,5 +1,6 @@
 """The goggles logger."""
 
+import wandb
 import os
 import json
 import tempfile
@@ -7,7 +8,6 @@ import hashlib
 import inspect
 from filelock import FileLock
 from enum import Enum
-import wandb
 from multiprocessing import Process, Queue
 from datetime import datetime
 from typing import Iterable
@@ -30,6 +30,26 @@ class Severity(Enum):
     def from_json(cls, name):
         """Convert JSON-compatible string to Severity enum."""
         return Severity[name.upper()]
+
+
+# Attempt to load project-level defaults from .goggles-default.yaml in the project root
+_project_yaml_path = os.path.join(os.getcwd(), ".goggles-default.yaml")
+_loaded_project_defaults = {
+    "level": Severity.DEBUG,
+    "to_file": False,
+    "to_terminal": False,
+    "wandb_project": None,
+    "wandb_run_id": None,
+    "name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+    "logdir": os.path.expanduser("~/logdir"),
+    "config": {},
+}
+if os.path.exists(_project_yaml_path):
+    try:
+        _loaded_project_defaults.update(load_configuration(_project_yaml_path))
+    except Exception:
+        # If parsing fails, ignore and continue with built-in defaults
+        pass
 
 
 class SeverityEncoder(json.JSONEncoder):
@@ -58,16 +78,6 @@ class Goggles:
 
     # Build filenames that combine both
     _config_filename = f"goggles_logger_{_project_hash}.json"
-    _default_config = {
-        "level": Severity.DEBUG,
-        "to_file": False,
-        "to_terminal": True,
-        "wandb_project": None,
-        "wandb_run_id": None,
-        "name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-        "logdir": os.path.expanduser("~/logdir"),
-        "config": {},
-    }
 
     _lock_filename = _config_filename + ".lock"
     _config_path = os.path.join(tempfile.gettempdir(), _config_filename)
@@ -179,11 +189,23 @@ class Goggles:
             if os.path.exists(cls._config_path):
                 config = load_configuration(cls._config_path)
             else:
-                config = cls._default_config.copy()
+                config = _loaded_project_defaults.copy()
                 with open(cls._config_path, "w") as f:
                     json.dump(config, f, cls=SeverityEncoder)
         config["file_path"] = os.path.join(config["logdir"], config["name"])
         return PrettyConfig(config)
+
+    @classmethod
+    def cleanup(cls):
+        """Clean up the logger by removing the lock file and resetting the run ID."""
+        cls.stop_workers()
+        with cls._lock:
+            if os.path.exists(cls._lock_path):
+                os.remove(cls._lock_path)
+            if os.path.exists(cls._config_path):
+                os.remove(cls._config_path)
+            cls._run_id = None
+            cls._task_queue = None
 
     @classmethod
     def set_config(
@@ -212,7 +234,7 @@ class Goggles:
         name = (
             name.replace("{timestamp}", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
             if name
-            else cls._default_config["name"]
+            else _loaded_project_defaults["name"]
         )
         with cls._lock:
             data = {
@@ -282,7 +304,7 @@ class Goggles:
         filename = os.path.basename(frame.filename)
         line_no = frame.lineno
         # timestamp in ISO 8601 format
-        timestamp = datetime.now().isoformat(sep=' ', timespec='milliseconds')
+        timestamp = datetime.now().isoformat(sep=" ", timespec="milliseconds")
         line = f"[{severity.name}][{filename}:{line_no}][{timestamp}] {message}"
         if cfg.get("to_terminal"):
             color = cls._COLOR_MAP.get(severity, "")
@@ -290,7 +312,7 @@ class Goggles:
         if cfg.get("to_file"):
             with open(cfg["file_path"], "a") as f:
                 f.write(line + "\n")
-        if cfg.get("wandb_run_id"):
+        if cfg.get("wandb_project"):
             cls._init_wandb()
             wandb.log({"log": wandb.Html(line)})
 

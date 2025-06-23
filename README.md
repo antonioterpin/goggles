@@ -35,6 +35,9 @@ Goggles.debug("Debugging details...")
 Goggles.info("Experiment started")
 Goggles.warning("This is a warning")
 Goggles.error("An error occurred")
+
+# Cleanup artifacts / future runs will not resume current logging
+Goggles.cleanup()
 ```
 
 You can modify the config (e.g., to switch runs):
@@ -49,6 +52,8 @@ Goggles.set_config(
     wandb_project="my_wandb_project"
 )
 ```
+
+And you can set the defaults in a file `.goggles-default.yaml` in your working directory.
 
 ## Configuration
 
