@@ -418,20 +418,48 @@ class Goggles:
             wandb.log({name: wandb.Image(image)})
 
     @classmethod
-    def video(cls, name: str, video, fps: int = 10):
-        """Log a video with the specified name."""
+    def video(
+        cls,
+        name: str,
+        video,
+        fps: int = 10,
+        bitrate: str = "150k",
+        crf: int = 30,
+    ):
+        """Log a WebM/VP9 video for maximal compression."""
         cfg = cls.get_config()
-
-        # Write the numpy stack out to a real .mp4
-        out_dir = f"{cfg['logdir']}/{cfg['name']}/videos"
+        out_dir = os.path.join(cfg["logdir"], cfg["name"], "videos")
         os.makedirs(out_dir, exist_ok=True, mode=0o777)
-        local_path = os.path.join(out_dir, f"{name}.mp4")
-        # video: numpy array of shape (T, H, W, 3), dtype uint8
-        imageio.mimsave(local_path, video, fps=fps)
-        cls.info(f"Saved video to {local_path}")
+        path = os.path.join(out_dir, f"{name}.webm")
 
-        # If WandB is configured, upload that file
+        writer = imageio.get_writer(
+            path,
+            fps=fps,
+            codec="libvpx-vp9",
+            bitrate=bitrate,
+            ffmpeg_params=[
+                "-pix_fmt",
+                "yuv420p",
+                "-crf",
+                str(crf),
+                "-row-mt",
+                "1",
+                "-auto-alt-ref",
+                "1",
+                "-lag-in-frames",
+                "25",
+            ],
+        )
+        for frame in video:
+            writer.append_data(frame)
+        writer.close()
+
+        cls.info(f"Saved high-compression WebM → {path}")
+
+        # log to W&B
         if cfg.get("wandb_project"):
             cls._init_wandb()
-            wandb.log({name: wandb.Video(local_path, fps=fps)})
+            import wandb
+
+            wandb.log({name: wandb.Video(path, fps=fps, format="webm")})
             cls.info("Uploaded video to WandB.")
