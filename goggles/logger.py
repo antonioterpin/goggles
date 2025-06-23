@@ -49,6 +49,10 @@ if os.path.exists(_project_yaml_path):
         custom_defaults = load_configuration(_project_yaml_path)
         if "level" in custom_defaults:
             custom_defaults["level"] = Severity.from_json(custom_defaults["level"])
+        if "name" in custom_defaults:
+            custom_defaults["name"] = custom_defaults["name"].replace(
+                "{timestamp}", datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            )
         _loaded_project_defaults.update(custom_defaults)
     except Exception:
         # If parsing fails, ignore and continue with built-in defaults
