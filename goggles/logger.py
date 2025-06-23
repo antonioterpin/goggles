@@ -3,8 +3,6 @@
 import wandb
 import os
 import json
-import tempfile
-import hashlib
 import inspect
 from filelock import FileLock
 from enum import Enum
@@ -12,6 +10,7 @@ from multiprocessing import Process, Queue
 from datetime import datetime
 from typing import Iterable, Optional
 from .config import PrettyConfig, load_configuration
+from .utils import safe_chmod
 
 
 class Severity(Enum):
@@ -32,6 +31,16 @@ class Severity(Enum):
         return Severity[name.upper()]
 
 
+class SeverityEncoder(json.JSONEncoder):
+    """Custom JSON encoder for Severity enum."""
+
+    def default(self, obj):
+        """Encode Severity enum as its name."""
+        if isinstance(obj, Severity):
+            return obj.name
+        return super().default(obj)
+
+
 # Attempt to load project-level defaults from .goggles-default.yaml in the project root
 _project_yaml_path = os.path.join(os.getcwd(), ".goggles-default.yaml")
 _loaded_project_defaults = {
@@ -47,26 +56,34 @@ _loaded_project_defaults = {
 if os.path.exists(_project_yaml_path):
     try:
         custom_defaults = load_configuration(_project_yaml_path)
+        t = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         if "level" in custom_defaults:
             custom_defaults["level"] = Severity.from_json(custom_defaults["level"])
         if "name" in custom_defaults:
-            custom_defaults["name"] = custom_defaults["name"].replace(
-                "{timestamp}", datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            custom_defaults["name"] = custom_defaults["name"].replace("{timestamp}", t)
+        if "logdir" in custom_defaults:
+            custom_defaults["logdir"] = custom_defaults["logdir"].replace(
+                "{timestamp}", t
             )
+            custom_defaults["logdir"] = os.path.expanduser(custom_defaults["logdir"])
         _loaded_project_defaults.update(custom_defaults)
     except Exception:
         # If parsing fails, ignore and continue with built-in defaults
         pass
 
+# Build filenames that combine both
+_config_path = os.path.join(_loaded_project_defaults["logdir"], "goggles_logger.json")
+# Create a lock on that unique lock-filename
+_lock = FileLock(
+    os.path.join(_loaded_project_defaults["logdir"], "goggles_logger.json.lock"),
+    mode=0o666,
+)
 
-class SeverityEncoder(json.JSONEncoder):
-    """Custom JSON encoder for Severity enum."""
-
-    def default(self, obj):
-        """Encode Severity enum as its name."""
-        if isinstance(obj, Severity):
-            return obj.name
-        return super().default(obj)
+# Ensure the file paths exist
+os.makedirs(_loaded_project_defaults["logdir"], exist_ok=True, mode=0o777)
+with open(_config_path, "w") as f:
+    json.dump(_loaded_project_defaults, f, cls=SeverityEncoder)
+safe_chmod(_config_path, 0o666)  # Ensure the file is writable by any process
 
 
 class Goggles:
@@ -80,18 +97,6 @@ class Goggles:
         Severity.ERROR: "[31m",  # red
     }
     _COLOR_RESET = "[0m"
-    # Compute a project-specific hash (first 16 hex chars of SHA256 of this file’s path)
-    _project_hash = hashlib.sha256(os.path.abspath(__file__).encode()).hexdigest()[:16]
-
-    # Build filenames that combine both
-    _config_filename = f"goggles_logger_{_project_hash}.json"
-
-    _lock_filename = _config_filename + ".lock"
-    _config_path = os.path.join(tempfile.gettempdir(), _config_filename)
-    _lock_path = os.path.join(tempfile.gettempdir(), _lock_filename)
-
-    # Create a lock on that unique lock-filename
-    _lock = FileLock(_lock_path)
 
     # Scheduler internals
     _task_queue = None
@@ -138,6 +143,8 @@ class Goggles:
                 cls._task_queue.put(None)
             for worker in cls._workers:
                 worker.join()
+            cls._task_queue = None
+            cls._workers = []
 
     @classmethod
     def schedule_log(cls, fn, *args, **kwargs):
@@ -194,13 +201,8 @@ class Goggles:
     @classmethod
     def get_config(cls):
         """Load the configuration from the JSON file."""
-        with cls._lock:
-            if os.path.exists(cls._config_path):
-                config = load_configuration(cls._config_path)
-            else:
-                config = _loaded_project_defaults.copy()
-                with open(cls._config_path, "w") as f:
-                    json.dump(config, f, cls=SeverityEncoder)
+        with _lock:
+            config = load_configuration(_config_path)
         config["file_path"] = os.path.join(config["logdir"], config["name"])
         return PrettyConfig(config)
 
@@ -209,7 +211,7 @@ class Goggles:
         """Clean up the logger by removing the lock file and resetting the run ID."""
         cls.stop_workers()
 
-        with cls._lock:
+        with _lock:
             cfg = cls.get_config()
             if cfg.get("wandb_project"):
                 try:
@@ -219,10 +221,6 @@ class Goggles:
                 except Exception:
                     pass
 
-            if os.path.exists(cls._lock_path):
-                os.remove(cls._lock_path)
-            if os.path.exists(cls._config_path):
-                os.remove(cls._config_path)
             cls._run_id = None
             cls._task_queue = None
 
@@ -255,7 +253,7 @@ class Goggles:
             if name
             else _loaded_project_defaults["name"]
         )
-        with cls._lock:
+        with _lock:
             # build a dict of only the non‐None overrides
             overrides = {
                 k: v
@@ -272,23 +270,22 @@ class Goggles:
                 if v is not None
             }
 
-            # merge defaults + overrides
-            data = {
-                **_loaded_project_defaults,
-                **overrides,
-            }
+            data = _loaded_project_defaults
+            data.update(overrides)
 
             if not wandb_run_id or (cls._run_id and wandb_run_id != cls._run_id):
                 cls._run_id = None  # ensure re-initialization of W&B
 
             # write JSON (all values now primitives)
-            with open(cls._config_path, "w") as f:
+            with open(_config_path, "w") as f:
                 json.dump(data, f, cls=SeverityEncoder)
 
             os.makedirs(data["logdir"], exist_ok=True)
             with open(os.path.join(data["logdir"], name), "a") as f:
                 # create empty log file
                 pass
+            # Ensure the file is writable by any process
+            safe_chmod(os.path.join(data["logdir"], name), 0o666)
 
     @classmethod
     def _init_wandb(cls):
@@ -342,6 +339,8 @@ class Goggles:
         if cfg.get("to_file"):
             with open(cfg["file_path"], "a") as f:
                 f.write(line + "\n")
+            # Ensure the file is writable by any process
+            safe_chmod(cfg["file_path"], 0o666)
 
     @classmethod
     def debug(cls, message: str):
