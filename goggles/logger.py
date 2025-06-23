@@ -46,7 +46,10 @@ _loaded_project_defaults = {
 }
 if os.path.exists(_project_yaml_path):
     try:
-        _loaded_project_defaults.update(load_configuration(_project_yaml_path))
+        custom_defaults = load_configuration(_project_yaml_path)
+        if "level" in custom_defaults:
+            custom_defaults["level"] = Severity.from_json(custom_defaults["level"])
+        _loaded_project_defaults.update(custom_defaults)
     except Exception:
         # If parsing fails, ignore and continue with built-in defaults
         pass
