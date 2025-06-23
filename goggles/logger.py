@@ -281,7 +281,9 @@ class Goggles:
         frame = inspect.stack()[2]
         filename = os.path.basename(frame.filename)
         line_no = frame.lineno
-        line = f"[{severity.name}][{filename}:{line_no}] {message}"
+        # timestamp in ISO 8601 format
+        timestamp = datetime.now().isoformat(sep=' ', timespec='milliseconds')
+        line = f"[{severity.name}][{filename}:{line_no}][{timestamp}] {message}"
         if cfg.get("to_terminal"):
             color = cls._COLOR_MAP.get(severity, "")
             print(f"{color}{line}{cls._COLOR_RESET}")
