@@ -16,6 +16,7 @@ setuptools.setup(
     include_package_data=True,
     install_requires=[
         "wandb[media]",
+        "rich",
     ],
     extras_require={
         "dev": ["pytest"],

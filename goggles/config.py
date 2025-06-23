@@ -1,7 +1,6 @@
 """Utilities for loading and pretty-printing configuration files."""
 
 from ruamel.yaml import YAML
-from importlib.resources import files
 from rich.console import Console
 from rich.pretty import Pretty
 
@@ -33,12 +32,8 @@ def load_configuration(file_path: str) -> PrettyConfig:
         FileNotFoundError: If the specified file does not exist.
     """
     yaml = YAML(typ="safe", pure=True)
-    path = files("flow_estimator").joinpath("config", file_path)
-    if not path.exists():
-        # Fallback to the provided file path
-        path = file_path
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         data = yaml.load(f) or {}
         # Wrap the loaded dict in our PrettyConfig
         return PrettyConfig(data)
