@@ -75,7 +75,7 @@ class Goggles:
     # ANSI color codes for terminal
     _COLOR_MAP = {
         Severity.DEBUG: "[34m",  # blue
-        Severity.INFO: "[32m",  # green
+        Severity.INFO: "",  # white "[32m",  # green
         Severity.WARNING: "[33m",  # yellow
         Severity.ERROR: "[31m",  # red
     }
@@ -208,7 +208,17 @@ class Goggles:
     def cleanup(cls):
         """Clean up the logger by removing the lock file and resetting the run ID."""
         cls.stop_workers()
+
         with cls._lock:
+            cfg = cls.get_config()
+            if cfg.get("wandb_project"):
+                try:
+                    artifact = wandb.Artifact("training-logs", type="log")
+                    artifact.add_file(cfg["file_path"])
+                    wandb.run.log_artifact(artifact)
+                except Exception:
+                    pass
+
             if os.path.exists(cls._lock_path):
                 os.remove(cls._lock_path)
             if os.path.exists(cls._config_path):
@@ -332,9 +342,6 @@ class Goggles:
         if cfg.get("to_file"):
             with open(cfg["file_path"], "a") as f:
                 f.write(line + "\n")
-        if cfg.get("wandb_project"):
-            cls._init_wandb()
-            wandb.log({"log": wandb.Html(line)})
 
     @classmethod
     def debug(cls, message: str):
