@@ -3,6 +3,7 @@
 import wandb
 import os
 import json
+import imageio
 import inspect
 from filelock import FileLock
 from enum import Enum
@@ -203,7 +204,13 @@ class Goggles:
         """Load the configuration from the JSON file."""
         with _lock:
             config = load_configuration(_config_path)
-        config["file_path"] = os.path.join(config["logdir"], config["name"])
+        logdir = os.path.join(config["logdir"], config["name"])
+        os.makedirs(logdir, exist_ok=True, mode=0o777)
+        config["file_path"] = os.path.join(logdir, "log.txt")
+        if not os.path.exists(config["file_path"]):
+            with open(config["file_path"], "w") as f:
+                f.write("")
+            safe_chmod(config["file_path"], 0o666)
         return PrettyConfig(config)
 
     @classmethod
@@ -279,13 +286,6 @@ class Goggles:
             # write JSON (all values now primitives)
             with open(_config_path, "w") as f:
                 json.dump(data, f, cls=SeverityEncoder)
-
-            os.makedirs(data["logdir"], exist_ok=True)
-            with open(os.path.join(data["logdir"], name), "a") as f:
-                # create empty log file
-                pass
-            # Ensure the file is writable by any process
-            safe_chmod(os.path.join(data["logdir"], name), 0o666)
 
     @classmethod
     def _init_wandb(cls):
@@ -418,16 +418,20 @@ class Goggles:
             wandb.log({name: wandb.Image(image)})
 
     @classmethod
-    def video(cls, name: str, video, fps: int = 10, format: str = "mp4"):
-        """Log a video with the specified name.
-
-        Args:
-            name (str): The name of the video.
-            video: The video to be logged.
-            fps (int): Frames per second for the video.
-            format (str): Format of the video file.
-        """
+    def video(cls, name: str, video, fps: int = 10):
+        """Log a video with the specified name."""
         cfg = cls.get_config()
+
+        # Write the numpy stack out to a real .mp4
+        out_dir = f"{cfg['logdir']}/{cfg['name']}/videos"
+        os.makedirs(out_dir, exist_ok=True, mode=0o777)
+        local_path = os.path.join(out_dir, f"{name}.mp4")
+        # video: numpy array of shape (T, H, W, 3), dtype uint8
+        imageio.mimsave(local_path, video, fps=fps)
+        cls.info(f"Saved video to {local_path}")
+
+        # If WandB is configured, upload that file
         if cfg.get("wandb_project"):
             cls._init_wandb()
-            wandb.log({name: wandb.Video(video, fps=fps, format=format)})
+            wandb.log({name: wandb.Video(local_path, fps=fps)})
+            cls.info("Uploaded video to WandB.")

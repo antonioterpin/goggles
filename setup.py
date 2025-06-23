@@ -14,10 +14,10 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     packages=["goggles"],
     include_package_data=True,
-    install_requires=["wandb[media]", "rich", "filelock", "ruamel.yaml"],
+    install_requires=["wandb[media]", "rich", "filelock", "ruamel.yaml", "numpy<2"],
     extras_require={
         "dev": ["pytest"],
-        "examples": ["matplotlib", "numpy<2"],
+        "examples": ["matplotlib"],
     },
     classifiers=[
         "Intended Audience :: Science/Research",
