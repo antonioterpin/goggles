@@ -139,7 +139,7 @@ class Goggles:
         cls._task_queue.put((fn, args, kwargs))
 
     @staticmethod
-    def timeit(severity=Severity.INFO, name=None):
+    def timeit(severity=Severity.INFO, name=None, to_wandb=False):
         """Decorator to measure the execution time of a function."""
 
         def decorator(func):
@@ -155,6 +155,8 @@ class Goggles:
                     or f"{os.path.basename(func.__code__.co_filename)}:{func.__name__}"
                 )
                 Goggles._log(severity, f"{fname} took {duration:.6f}s")
+                if to_wandb:
+                    Goggles.scalar(f"{fname}_execution_time", duration)
                 return result
 
             return wrapper
