@@ -60,8 +60,8 @@ class Goggles:
     _config_filename = f"goggles_logger_{_project_hash}.json"
     _default_config = {
         "level": Severity.DEBUG,
-        "to_file": True,
-        "to_terminal": False,
+        "to_file": False,
+        "to_terminal": True,
         "wandb_project": None,
         "wandb_run_id": None,
         "name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
@@ -191,7 +191,7 @@ class Goggles:
         name: str = None,
         wandb_project: str = None,
         to_file: bool = False,
-        to_terminal: bool = False,
+        to_terminal: bool = True,
         level: Severity = Severity.INFO,
         wandb_run_id: str = None,
         logdir: str = os.path.expanduser("~/logdir"),
