@@ -10,7 +10,7 @@ from filelock import FileLock
 from enum import Enum
 from multiprocessing import Process, Queue
 from datetime import datetime
-from typing import Iterable
+from typing import Iterable, Optional
 from .config import PrettyConfig, load_configuration
 
 
@@ -211,13 +211,13 @@ class Goggles:
     def set_config(
         cls,
         name: str = None,
-        wandb_project: str = None,
-        to_file: bool = False,
-        to_terminal: bool = True,
-        level: Severity = Severity.INFO,
-        wandb_run_id: str = None,
-        logdir: str = os.path.expanduser("~/logdir"),
-        config: dict = {},
+        wandb_project: Optional[str] = None,
+        to_file: Optional[bool] = None,
+        to_terminal: Optional[bool] = True,
+        level: Optional[Severity] = None,
+        wandb_run_id: Optional[None] = None,
+        logdir: Optional[str] = None,
+        config: Optional[dict] = {},
     ):
         """Set the configuration for Goggles logger.
 
@@ -237,15 +237,26 @@ class Goggles:
             else _loaded_project_defaults["name"]
         )
         with cls._lock:
+            # build a dict of only the non‐None overrides
+            overrides = {
+                k: v
+                for k, v in {
+                    "name": name,
+                    "wandb_project": wandb_project,
+                    "to_file": to_file,
+                    "to_terminal": to_terminal,
+                    "level": level,
+                    "wandb_run_id": wandb_run_id,
+                    "logdir": logdir,
+                    "config": config,
+                }.items()
+                if v is not None
+            }
+
+            # merge defaults + overrides
             data = {
-                "logdir": logdir,
-                "name": name,
-                "wandb_project": wandb_project,
-                "to_file": to_file,
-                "to_terminal": to_terminal,
-                "level": level.name,
-                "wandb_run_id": wandb_run_id,
-                "config": config,
+                **_loaded_project_defaults,
+                **overrides,
             }
 
             if not wandb_run_id or (cls._run_id and wandb_run_id != cls._run_id):
@@ -255,8 +266,8 @@ class Goggles:
             with open(cls._config_path, "w") as f:
                 json.dump(data, f, cls=SeverityEncoder)
 
-            os.makedirs(logdir, exist_ok=True)
-            with open(os.path.join(logdir, name), "a") as f:
+            os.makedirs(data["logdir"], exist_ok=True)
+            with open(os.path.join(data["logdir"], name), "a") as f:
                 # create empty log file
                 pass
 
