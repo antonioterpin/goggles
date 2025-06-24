@@ -82,9 +82,6 @@ _lock = FileLock(
 
 # Ensure the file paths exist
 os.makedirs(_loaded_project_defaults["logdir"], exist_ok=True, mode=0o777)
-with open(_config_path, "w") as f:
-    json.dump(_loaded_project_defaults, f, cls=SeverityEncoder)
-safe_chmod(_config_path, 0o666)  # Ensure the file is writable by any process
 
 
 class Goggles:
@@ -203,15 +200,23 @@ class Goggles:
     def get_config(cls):
         """Load the configuration from the JSON file."""
         with _lock:
-            config = load_configuration(_config_path)
-        logdir = os.path.join(config["logdir"], config["name"])
-        os.makedirs(logdir, exist_ok=True, mode=0o777)
-        config["file_path"] = os.path.join(logdir, "log.txt")
-        if not os.path.exists(config["file_path"]):
-            with open(config["file_path"], "w") as f:
-                f.write("")
-            safe_chmod(config["file_path"], 0o666)
-        return PrettyConfig(config)
+            try:
+                config = load_configuration(_config_path)
+            except Exception:
+                # Configuration is invalid or missing, use defaults
+                with open(_config_path, "w") as f:
+                    json.dump(_loaded_project_defaults, f, cls=SeverityEncoder)
+                # Ensure the file is writable by any process
+                safe_chmod(_config_path, 0o666)
+                config = _loaded_project_defaults.copy()
+            logdir = os.path.join(config["logdir"], config["name"])
+            config["file_path"] = os.path.join(logdir, "log.txt")
+            if not os.path.exists(config["file_path"]):
+                os.makedirs(logdir, exist_ok=True, mode=0o777)
+                with open(config["file_path"], "w") as f:
+                    f.write("")
+                safe_chmod(config["file_path"], 0o666)
+            return PrettyConfig(config)
 
     @classmethod
     def cleanup(cls):
@@ -260,29 +265,34 @@ class Goggles:
             if name
             else _loaded_project_defaults["name"]
         )
+        data = _loaded_project_defaults
+        data["wandb_project"] = wandb_project
+        data["wandb_run_id"] = wandb_run_id
+        data["config"] = config or {}
+        if name is not None:
+            data["name"] = name
+        if to_file is not None:
+            data["to_file"] = to_file
+        if to_terminal is not None:
+            data["to_terminal"] = to_terminal
+        if level is not None:
+            if isinstance(level, Severity):
+                data["level"] = level
+            else:
+                data["level"] = Severity.from_json(level)
+        if logdir is not None:
+            data["logdir"] = logdir.replace(
+                "{timestamp}", datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            )
+            data["logdir"] = os.path.expanduser(data["logdir"])
+
+        if wandb_run_id is None or (
+            cls._run_id is not None and wandb_run_id != cls._run_id
+        ):
+            wandb.finish()
+            cls._run_id = None
+
         with _lock:
-            # build a dict of only the non‐None overrides
-            overrides = {
-                k: v
-                for k, v in {
-                    "name": name,
-                    "wandb_project": wandb_project,
-                    "to_file": to_file,
-                    "to_terminal": to_terminal,
-                    "level": level,
-                    "wandb_run_id": wandb_run_id,
-                    "logdir": logdir,
-                    "config": config,
-                }.items()
-                if v is not None
-            }
-
-            data = _loaded_project_defaults
-            data.update(overrides)
-
-            if not wandb_run_id or (cls._run_id and wandb_run_id != cls._run_id):
-                cls._run_id = None  # ensure re-initialization of W&B
-
             # write JSON (all values now primitives)
             with open(_config_path, "w") as f:
                 json.dump(data, f, cls=SeverityEncoder)
@@ -302,7 +312,7 @@ class Goggles:
             init_args["id"] = run_id
             init_args["resume"] = "allow"
         if not cls._run_id:
-            run = wandb.init(**init_args, reinit="finish_previous")
+            run = wandb.init(**init_args)
             cls._run_id = run.id
             cfg["wandb_run_id"] = run.id
             cls.set_config(
@@ -312,6 +322,8 @@ class Goggles:
                 to_file=cfg["to_file"],
                 to_terminal=cfg["to_terminal"],
                 level=Severity[cfg["level"]],
+                logdir=cfg["logdir"],
+                config=cfg.get("config", {}),
             )
 
     @classmethod
@@ -337,10 +349,11 @@ class Goggles:
             color = cls._COLOR_MAP.get(severity, "")
             print(f"{color}{line}{cls._COLOR_RESET}")
         if cfg.get("to_file"):
-            with open(cfg["file_path"], "a") as f:
-                f.write(line + "\n")
-            # Ensure the file is writable by any process
-            safe_chmod(cfg["file_path"], 0o666)
+            with _lock:
+                with open(cfg["file_path"], "a") as f:
+                    f.write(line + "\n")
+                # Ensure the file is writable by any process
+                safe_chmod(cfg["file_path"], 0o666)
 
     @classmethod
     def debug(cls, message: str):
@@ -425,6 +438,7 @@ class Goggles:
         fps: int = 10,
         bitrate: str = "150k",
         crf: int = 30,
+        to_file: bool = True,
     ):
         """Log a WebM/VP9 video for maximal compression."""
         cfg = cls.get_config()
@@ -459,7 +473,9 @@ class Goggles:
         # log to W&B
         if cfg.get("wandb_project"):
             cls._init_wandb()
-            import wandb
-
             wandb.log({name: wandb.Video(path, fps=fps, format="webm")})
             cls.info("Uploaded video to WandB.")
+
+        if not to_file:
+            # delete the file after logging
+            os.remove(path)
