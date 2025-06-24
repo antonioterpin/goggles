@@ -5,13 +5,12 @@ import os
 import json
 import imageio
 import inspect
-from filelock import FileLock
 from enum import Enum
 from multiprocessing import Process, Queue
 from datetime import datetime
 from typing import Iterable, Optional
 from .config import PrettyConfig, load_configuration
-from .utils import safe_chmod
+from .utils import safe_chmod, FileRWLock
 
 
 class Severity(Enum):
@@ -75,9 +74,8 @@ if os.path.exists(_project_yaml_path):
 # Build filenames that combine both
 _config_path = os.path.join(_loaded_project_defaults["logdir"], "goggles_logger.json")
 # Create a lock on that unique lock-filename
-_lock = FileLock(
+_rwlock = FileRWLock(
     os.path.join(_loaded_project_defaults["logdir"], "goggles_logger.json.lock"),
-    mode=0o666,
 )
 
 # Ensure the file paths exist
@@ -199,7 +197,7 @@ class Goggles:
     @classmethod
     def get_config(cls):
         """Load the configuration from the JSON file."""
-        with _lock:
+        with _rwlock.read_lock():
             try:
                 config = load_configuration(_config_path)
             except Exception:
@@ -223,7 +221,7 @@ class Goggles:
         """Clean up the logger by removing the lock file and resetting the run ID."""
         cls.stop_workers()
 
-        with _lock:
+        with _rwlock.write_lock():
             cfg = cls.get_config()
             if cfg.get("wandb_project"):
                 try:
@@ -292,7 +290,7 @@ class Goggles:
             wandb.finish()
             cls._run_id = None
 
-        with _lock:
+        with _rwlock.write_lock():
             # write JSON (all values now primitives)
             with open(_config_path, "w") as f:
                 json.dump(data, f, cls=SeverityEncoder)
@@ -349,7 +347,7 @@ class Goggles:
             color = cls._COLOR_MAP.get(severity, "")
             print(f"{color}{line}{cls._COLOR_RESET}")
         if cfg.get("to_file"):
-            with _lock:
+            with _rwlock.write_lock():
                 with open(cfg["file_path"], "a") as f:
                     f.write(line + "\n")
                 # Ensure the file is writable by any process
