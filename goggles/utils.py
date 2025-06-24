@@ -25,7 +25,10 @@ class FileRWLock:
             flags (int): Flags for opening the file (default: O_RDWR | O_CREAT).
             mode (int): File mode for the lock file (default: 0o666).
         """
-        self.path = path
+        # ensure parent directory exists
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True, mode=0o777)
         self.fd = os.open(path, flags, mode)
 
     @contextmanager

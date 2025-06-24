@@ -4,6 +4,7 @@ import wandb
 import os
 import json
 import imageio
+import signal
 import inspect
 from enum import Enum
 from multiprocessing import Process, Queue
@@ -52,7 +53,9 @@ _loaded_project_defaults = {
     "name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
     "logdir": os.path.expanduser("~/logdir"),
     "config": {},
+    "enable_signal_handler": False,
 }
+
 if os.path.exists(_project_yaml_path):
     try:
         custom_defaults = load_configuration(_project_yaml_path)
@@ -166,7 +169,7 @@ class Goggles:
                 )
                 Goggles._log(severity, f"{fname} took {duration:.6f}s")
                 if to_wandb:
-                    Goggles.scalar(f"{fname}_execution_time", duration)
+                    Goggles.scalar(f"timings/{fname}", duration)
                 return result
 
             return wrapper
@@ -219,6 +222,7 @@ class Goggles:
     @classmethod
     def cleanup(cls):
         """Clean up the logger by removing the lock file and resetting the run ID."""
+        cls.debug("Cleaning up Goggles logger...")
         cls.stop_workers()
 
         with _rwlock.write_lock():
@@ -477,3 +481,28 @@ class Goggles:
         if not to_file:
             # delete the file after logging
             os.remove(path)
+
+
+# Capture the pre-existing handler before we overwrite it:
+_prev_sigint_handler = signal.getsignal(signal.SIGINT)
+
+
+# Install signal handlers if enabled
+def _handle_sigint(signum, frame):
+    Goggles.cleanup()
+    # put back whatever was there before
+    signal.signal(signal.SIGINT, _prev_sigint_handler)
+
+    if _prev_sigint_handler in (signal.SIG_DFL, signal.SIG_IGN):
+        # If the previous handler was the default, raise to stop execution.
+        # SIG_DFL -> default behavior (KeyboardInterrupt)
+        # SIG_IGN -> ignored; fall back to KeyboardInterrupt so user can still kill
+        raise KeyboardInterrupt
+    else:
+        # Otherwise, delegate to it.
+        _prev_sigint_handler(signum, frame)
+
+
+# only install the handler if the flag is enabled
+if _loaded_project_defaults.get("enable_signal_handler"):
+    signal.signal(signal.SIGINT, _handle_sigint)
