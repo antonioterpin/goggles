@@ -8,156 +8,118 @@ pip install "goggles @ git+ssh://git@github.com/antonioterpin/goggles.git"
 
 ## Features
 
-* 🤖 **Multi-process compatible**: Thought for robots, Goggles synchronize the logging of all processes in your project.
-* 🎯 **Multi-output logging**: Log to terminal, file, or both.
-* 🕒 **Performance profiling**: `@Goggles.timeit` decorator to profile runtimes.
-* 🐞 **Error tracing**: `@Goggles.trace_on_error` to capture stack traces on failure.
-* 📊 **Metrics tracking**: Log scalars, vectors, images, and videos to W\&B.
-* 🚦 **Graceful Sshutdown**: Handle interrupts with cleanup logic.
-* ⚙️ **Asynchronous scheduling**: Offload heavy logging tasks to worker threads.
-* 📁 **Pretty configuration logging**: Load settings from YAML and print them nicely.
+- 🤖 **Multi-process compatible**
+  Synchronize logs from all spawned processes via shared memory.
+
+- 🎯 **Multi-output logging**
+  Log to terminal and/or file (configurable via `.goggles-default.yaml`).
+
+- 🕒 **Performance profiling**
+  `@goggles.timeit` decorator measures and logs runtime.
+
+- 🐞 **Error tracing**
+  `@goggles.trace_on_error` auto-logs full stack on exceptions.
+
+- 📊 **Metrics tracking**
+  `goggles.scalar`, `goggles.vector`, `goggles.image`, `goggles.video` → Weights & Biases.
+
+- 🚦 **Graceful shutdown**
+  Call `goggles.cleanup()` (or hook into your own `signal` handler).
+
+- ⚙️ **Asynchronous scheduling**
+  Offload heavy logging tasks via `goggles.schedule_log(...)`.
+
+- 📁 **Pretty configuration loading**
+  `goggles.load_configuration(...)` loads YAML with validation.
 
 ## Quickstart
 
-```python
-from goggles import Goggles, Severity
+1. **Create `.goggles-default.yaml`** in your project root:
 
-# Configure logging to both terminal and file at DEBUG level
-Goggles.set_config(
-    name="my-experiment",
-    to_terminal=True,
-    to_file=True,
-    level=Severity.DEBUG
-)
+   ```yaml
+   logdir: ~/my_logs
+   to_terminal: true
+   to_file: true
+   level: INFO
+   wandb_project: demo_project
+   enable_signal_handler: false
 
-# Log messages
-Goggles.debug("Debugging details...")
-Goggles.info("Experiment started")
-Goggles.warning("This is a warning")
-Goggles.error("An error occurred")
+2. **Ready to log**:
 
-# Cleanup artifacts / future runs will not resume current logging
-Goggles.cleanup()
-```
+    ```python
+    import goggles
 
-You can modify the config (e.g., to switch runs):
-```python
-from goggles import Goggles, Severity
+    goggles.debug("Debugging details…")
+    goggles.info("Experiment started")
+    goggles.warning("This is a warning")
+    goggles.error("An error occurred")
+    ```
 
-Goggles.set_config(
-    name="new-run-name",
-    to_file=False,
-    to_terminal=True,
-    level=Severity.WARNING,
-    wandb_project="my_wandb_project"
-)
-```
-
-And you can set the defaults in a file `.goggles-default.yaml` in your working directory.
+We cleanup all the resources automatically at exit.
 
 ## Configuration
 
 Pretty logging of configuration files.
 
 ```python
-from goggles import load_configuration
+import goggles
 
 # Load from examples/example_config.yaml
-config = load_configuration("examples/example_config.yaml")
+config = goggles.load_configuration("examples/example_config.yaml")
 print(config)
 
 # Access as dict
 print(f"time_per_experiment = {config['time_per_experiment']}")
 ```
 
-## Decorators
-
-### `@Goggles.timeit`
+## Decorators: `@goggles.timeit` and `@goggles.trace_on_error`
 
 Measure execution time of methods or functions:
 
 ```python
-from goggles import Goggles, Severity
+import goggles
 
-class MyWorker:
-    @Goggles.timeit(severity=Severity.DEBUG)
+class Worker:
+    @goggles.timeit(severity=goggles.Severity.DEBUG)
     def compute_heavy(self, n):
         return sum(range(n))
 
-Goggles.set_config(
-    to_terminal=True, level=Severity.DEBUG)
-MyWorker().compute_heavy(1000000)
-```
-
-### `@Goggles.trace_on_error`
-
-Automatically log a full stack trace when an exception is raised:
-
-```python
-from goggles import Goggles
-
-class Processor:
-    @Goggles.trace_on_error()
-    def divide(self, x, y):
+    @goggles.trace_on_error()
+    def risky_division(self, x, y):
         return x / y
 
-Goggles.set_config(to_terminal=True)
+g = Worker()
+g.compute_heavy(1_000_000)
+
 try:
-    Processor().divide(10, 0)
+    g.risky_division(1, 0)
 except ZeroDivisionError:
-    pass  # trace will have been printed
+    pass  # Full traceback was logged
 ```
 
 ## File & Terminal Logging
 
-```python
-from goggles import Goggles, Severity
-
-# Default config
-print(Goggles.get_config())
-
-# File + terminal, DEBUG
-Goggles.set_config(name="run1", to_file=True, to_terminal=True, level=Severity.DEBUG)
-Goggles.info("Hello file + terminal")
-
-# Terminal only, WARNING
-Goggles.set_config(to_file=False, to_terminal=True, level=Severity.WARNING)
-Goggles.info("This won't show up")
-Goggles.warning("Visible in terminal only")
-```
+All driven by your .goggles-default.yaml.
 
 ## W\&B Integration
 
 Log scalars, vectors, images, and videos directly to Weights & Biases:
 
 ```python
-from goggles import Goggles, Severity
+import goggles
 from PIL import Image
 import numpy as np
 
-Goggles.set_config(wandb_project="demo_project")
+# Start or switch a W&B run
+goggles.new_wandb_run(name="exp-run", config={"lr":1e-3, "batch":32})
 
-# Scalars and vectors
-Goggles.scalar("accuracy", 0.92)
-Goggles.vector("loss_curve", [0.5, 0.4, 0.35, 0.3])
+# Scalars & histograms
+goggles.scalar("accuracy", 0.92)
+goggles.vector("loss_curve", [0.5,0.4,0.3])
 
 # Images
 img = Image.fromarray((np.random.rand(64,64,3)*255).astype(np.uint8))
-Goggles.image("random_image", img)
-```
-
-Switch W\&B runs or log configuration:
-
-```python
-Goggles.set_config(name="new-run", wandb_project="demo_project")
-Goggles.image("after_switch", img)
-
-# Log custom config dict
-Goggles.set_config(
-    name="config-log",
-    wandb_project="demo_project",
-    config={"lr": 1e-3, "batch_size": 32}
-)
+goggles.image("random_image", img)
 ```
 
 ## Graceful Shutdown
@@ -165,18 +127,21 @@ Goggles.set_config(
 Cleanly handle interrupts (e.g., Ctrl-C) and perform cleanup:
 
 ```python
-import time
-from goggles import Goggles, Severity, GracefulShutdown
+import goggles
+from PIL import Image
+import numpy as np
 
-Goggles.set_config(to_terminal=True, level=Severity.DEBUG)
-Goggles.info("Press Ctrl-C to stop loop.")
+# Start or switch a W&B run
+goggles.new_wandb_run(name="exp-run", config={"lr":1e-3, "batch":32})
 
-with GracefulShutdown("Shutting down...") as gs:
-    while not gs.stop:
-        Goggles.debug("Running...")
-        time.sleep(1)
+# Scalars & histograms
+goggles.scalar("accuracy", 0.92)
+goggles.vector("loss_curve", [0.5,0.4,0.3])
 
-Goggles.info("Exited cleanly.")
+# Images
+img = Image.fromarray((np.random.rand(64,64,3)*255).astype(np.uint8))
+goggles.image("random_image", img)
+
 ```
 
 ## Asynchronous Logging & Video
@@ -184,33 +149,41 @@ Goggles.info("Exited cleanly.")
 Offload heavy logging tasks to worker threads and log video sequences:
 
 ```python
-import numpy as np
-import matplotlib.pyplot as plt
+import goggles, numpy as np, time
 from PIL import Image
-from goggles import Goggles
 
-# Initialize
-Goggles.set_config(wandb_project="video_demo")
-Goggles.init_scheduler(num_workers=4)
+goggles.new_wandb_run("video_demo", {})
+goggles.init_scheduler(num_workers=4)
 
-# Generate and schedule logging of flow fields
+def save_and_log_frame(frame, idx):
+    path = f"/tmp/frame_{idx}.png"
+    frame.save(path)
+    goggles.image(f"frame_{idx}", frame)
+
 for i in range(100):
-    flow = np.random.uniform(-1,1,(16,16,2))
-    # Schedule async save + video log
-    Goggles.schedule_log(lambda f,i: np.save(f"/tmp/f{i}.npy", f), flow, i)
-    Goggles.scalar("queue_size", Goggles._task_queue.qsize())
+    arr = (np.random.rand(64,64,3)*255).astype(np.uint8)
+    img = Image.fromarray(arr)
+    goggles.schedule_log(save_and_log_frame, img, i)
+    goggles.scalar("queue_size", goggles._task_queue.qsize())
 
-# Stop workers and log video
-Goggles.stop_workers()
-# ... then stack frames and call Goggles.video()
+goggles.stop_workers()
 ```
 
-## Full working examples
-We provide full working examples in the `examples` folder.
+## Full Examples
+
+See the `examples/` folder for scripts covering:
+
+- Config loading
+- Decorators
+- File vs. terminal logs
+- W&B scalar/vector/image/video
+- Graceful shutdown
+- Async scheduling
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome! Please open a GitHub issue or submit a pull request.
+PRs, issues, and feature requests are welcome! Open an issue or submit a PR on GitHub.
+
 
 ## License
 

@@ -3,8 +3,8 @@
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from goggles.logger import Goggles
 import os
+import goggles
 
 os.makedirs("/tmp/flows", exist_ok=True)
 
@@ -61,27 +61,27 @@ def viz_and_log(n_steps):
         rgb = plt.cm.hsv(hsv[..., 0])[:, :, :3] * hsv[..., 2][..., None]
         frames.append((rgb * 255).astype(np.uint8))
 
-    Goggles.video("flow_viz", np.stack(frames, axis=0))
+    goggles.video("flow_viz", np.stack(frames, axis=0))
 
 
 # Configure Goggles
-Goggles.set_config(wandb_project="test")
-Goggles.init_scheduler(num_workers=4)
+goggles.init_scheduler(num_workers=4)
 N_FLOWS = 1000
 
 for i in range(N_FLOWS):
     flow = generate_random_flow()
 
-    queue_size = Goggles._task_queue.qsize()
-    Goggles.scalar("queue_size", queue_size)
+    queue_size = goggles._task_queue.qsize()
+    goggles.scalar("queue_size", queue_size)
     # Schedule asynchronous logs
     start = time.perf_counter()
-    Goggles.schedule_log(save_flow_to_file, flow, i)
+    goggles.schedule_log(save_flow_to_file, flow, i)
     schedule_time = time.perf_counter() - start
 
     # Log how much time it took to generate the flow and schedule the log
-    Goggles.scalar("schedule_time", schedule_time)
+    goggles.scalar("schedule_time", schedule_time)
 
-Goggles.stop_workers()
+goggles.stop_workers()
+
 # Now visualize and log the flows
 viz_and_log(N_FLOWS)

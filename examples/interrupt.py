@@ -2,9 +2,7 @@
 
 import signal
 import time
-from goggles import Goggles
-
-Goggles.set_config(to_terminal=True, level="DEBUG")
+import goggles
 
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 
@@ -26,7 +24,7 @@ print("Started. Press Ctrl-C")
 try:
     counter = 0
     while True:
-        print(f"Working... {counter}")
+        goggles.info(f"Working... {counter}")
         counter += 1
         time.sleep(1)
 except KeyboardInterrupt:

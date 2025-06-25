@@ -4,7 +4,7 @@ import time
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
-from goggles.logger import Goggles
+import goggles
 
 
 def generate_random_flow(width=64, height=64):
@@ -46,22 +46,21 @@ def viz_and_log(flow, idx):
     viz = Image.fromarray((rgb * 255).astype(np.uint8))
 
     # Log the visualization
-    Goggles.image(f"flow_viz_{idx}", viz)
+    goggles.image(f"flow_viz_{idx}", viz)
 
 
 # Configure Goggles
-Goggles.set_config(wandb_project="test")
-Goggles.init_scheduler(num_workers=10)
+goggles.init_scheduler(num_workers=10)
 
 for i in range(1000):
     flow = generate_random_flow()
 
-    queue_size = Goggles._task_queue.qsize()
-    Goggles.scalar("queue_size", queue_size)
+    queue_size = goggles._task_queue.qsize()
+    goggles.scalar("queue_size", queue_size)
     # Schedule visualization and logging
     start = time.perf_counter()
-    Goggles.schedule_log(viz_and_log, flow, i)
+    goggles.schedule_log(viz_and_log, flow, i)
     schedule_time = time.perf_counter() - start
-    Goggles.scalar("schedule_time", schedule_time)
+    goggles.scalar("schedule_time", schedule_time)
 
-Goggles.stop_workers()
+goggles.cleanup()
