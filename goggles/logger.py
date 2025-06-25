@@ -1,9 +1,9 @@
 """The goggles logger."""
 
 import os
+import traceback
 import pathlib
 from types import MappingProxyType
-import inspect
 from datetime import datetime
 import wandb
 import imageio
@@ -133,9 +133,18 @@ def _log(severity: Severity, message: str):
         return  # Skip logging if below configured level
 
     # Get caller information
-    frame = inspect.currentframe().f_back
-    caller_filename = frame.f_code.co_filename
-    caller_line = frame.f_lineno
+    this_file = os.path.abspath(__file__)
+    # get a list of FrameSummary objects
+    stack = traceback.extract_stack()
+    # walk from the end (most recent call) backwards
+    for frame_summary in reversed(stack[:-1]):  # skip the last entry (this line)
+        if os.path.abspath(frame_summary.filename) != this_file:
+            caller_filename = frame_summary.filename
+            caller_line = frame_summary.lineno
+            break
+    else:
+        caller_filename = "<unknown>"
+        caller_line = 0
 
     # Get current timestamp
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
