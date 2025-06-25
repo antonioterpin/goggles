@@ -373,6 +373,14 @@ def schedule_log(fn, *args, **kwargs):
     _task_queue.put((fn, args, kwargs))
 
 
+def ensure_tasks_finished(polling_time: float = 0.01):
+    """Ensure all scheduled tasks are finished."""
+    global _task_queue, _workers
+    if _task_queue is not None:
+        while not _task_queue.empty():
+            time.sleep(polling_time)
+
+
 def cleanup():
     """Cleanup resources and finish wandb runs."""
     debug("Cleaning up Goggles logger...")
