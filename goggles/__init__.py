@@ -14,6 +14,7 @@ from .logger import (
     stop_workers,
     cleanup,
     new_wandb_run,
+    ensure_tasks_finished,
 )
 from .config import load_configuration, PrettyConfig
 from .shutdown import GracefulShutdown
@@ -40,6 +41,7 @@ __all__ = [
     "cleanup",
     "stop_workers",
     "new_wandb_run",
+    "ensure_tasks_finished",
 ]
 
 import atexit

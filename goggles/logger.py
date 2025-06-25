@@ -206,6 +206,7 @@ def stop_wandb_run():
 
 def new_wandb_run(name: str, config: dict = None):
     """Start a new wandb run with the given name and configuration."""
+    stop_workers()
     stop_wandb_run()
     run = wandb.init(
         project=_consts["wandb_project"],
@@ -292,9 +293,8 @@ def video(
         fps=fps,
         codec="libvpx-vp9",
         bitrate=bitrate,
+        pixelformat="yuv420p",
         ffmpeg_params=[
-            "-pix_fmt",
-            "yuv420p",
             "-crf",
             str(crf),
             "-row-mt",
@@ -313,7 +313,7 @@ def video(
 
     # log to W&B
     if _wandb():
-        wandb.log({name: wandb.Video(path, fps=fps, format="webm")})
+        wandb.log({name: wandb.Video(path, format="webm")})
         info("Uploaded video to WandB.")
 
     if not to_file:
@@ -346,10 +346,10 @@ def _worker_loop(queue: Queue):
         fn, args, kwargs = val
         try:
             fn(*args, **kwargs)
-        except Exception:
+        except Exception as e:
             error(
                 f"Error executing scheduled function {fn.__name__} with "
-                f"args {args} and kwargs {kwargs}"
+                f"args {args} and kwargs {kwargs}:\n{e}"
             )
 
 
