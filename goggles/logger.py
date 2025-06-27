@@ -41,9 +41,9 @@ _consts["level"] = Severity.from_str(_consts["level"])
 _consts = MappingProxyType(_consts)  # make it immutable
 
 # runtime params to be shared across all instances
-_config_fingerprint = hashlib.sha256(_consts["logdir"].encode("utf-8")).hexdigest()
+_config_fingerprint = hashlib.sha256(_consts["logdir"].encode("utf-8")).hexdigest()[:16]
 _SHM_NAME = f"goggles_shm_{_config_fingerprint}"
-_SHM_SIZE = 4 * 1024  # 4 KiB
+_SHM_SIZE = 1024
 
 created = False
 while not created:
