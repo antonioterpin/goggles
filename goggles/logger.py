@@ -55,6 +55,12 @@ while not created:
             shm = shared_memory.SharedMemory(
                 name=_SHM_NAME, create=True, size=_SHM_SIZE
             )
+            # ensure the segment is accessible by all users
+            try:
+                shm_path = f"/dev/shm/{_SHM_NAME}"
+                os.chmod(shm_path, 0o666)
+            except Exception as e:
+                print(f"Warning: could not set permissions on shared memory: {e}")
         except FileExistsError:
             # Another process created it in the meantime, try again
             created = False
