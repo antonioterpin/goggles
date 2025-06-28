@@ -216,6 +216,15 @@ def new_wandb_run(name: str, config: dict = None):
     """Start a new wandb run with the given name and configuration."""
     stop_workers()
     stop_wandb_run()
+
+    global wandb
+    if wandb is None:
+        try:
+            import wandb
+        except ImportError:
+            warning("wandb is not installed, skipping W&B logging.")
+            return
+
     run = wandb.init(
         project=_consts["wandb_project"],
         name=name,
@@ -241,16 +250,9 @@ def _is_wandb_active() -> bool:
 
 def _wandb() -> bool:
     """Check if we can log to wandb."""
-    if _consts["wandb_project"] is None:
+    if _consts["wandb_project"] is None or wandb is None:
         return False
 
-    global wandb
-    if wandb is None:
-        try:
-            import wandb
-        except ImportError:
-            warning("wandb is not installed, skipping W&B logging.")
-            return False
     wandb_running_in_this_process = _is_wandb_active()
     _shared = _read_shm()
     shared_run_id = _shared.get("wandb_run_id", None)
