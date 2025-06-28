@@ -3,6 +3,7 @@
 from ruamel.yaml import YAML
 from rich.console import Console
 from rich.pretty import Pretty
+from yaml.representer import SafeRepresenter
 
 
 class PrettyConfig(dict):
@@ -17,6 +18,14 @@ class PrettyConfig(dict):
         return capture.get()
 
     __repr__ = __str__
+
+
+def represent_prettyconfig(dumper, data):
+    """Represent PrettyConfig as a YAML mapping."""
+    return dumper.represent_mapping("tag:yaml.org,2002:map", dict(data))
+
+
+SafeRepresenter.add_representer(PrettyConfig, represent_prettyconfig)
 
 
 def load_configuration(file_path: str) -> PrettyConfig:
