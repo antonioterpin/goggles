@@ -5,7 +5,6 @@ import traceback
 import pathlib
 from types import MappingProxyType
 from datetime import datetime
-import wandb
 import imageio
 from multiprocessing import Process, Queue
 import json
@@ -18,10 +17,11 @@ from contextlib import contextmanager
 from .config import load_configuration
 from .severity import Severity
 
+wandb = None
+
 # --- Load defaults, which are constant across all instances and immutable ---
 _consts = {
     "level": Severity.DEBUG,
-    "to_file": False,
     "to_terminal": False,
     "wandb_project": None,
     "enable_signal_handler": False,
@@ -163,11 +163,13 @@ def _log(severity: Severity, message: str):
         color = severity.to_color()
         print(f"{color}{formatted_message}{severity.reset_color()}")
 
-    log_path = _get_log_file_path()
-    if log_path is not None:
-        # TODO: add lock
-        with open(log_path, "a") as log_file:
-            log_file.write(formatted_message + "\n")
+    # Log to wandb if enabled
+    if _wandb():
+        log_path = _get_log_file_path()
+        if log_path is not None:
+            # TODO: add lock
+            with open(log_path, "a") as log_file:
+                log_file.write(formatted_message + "\n")
 
 
 def info(message: str):
@@ -239,6 +241,16 @@ def _is_wandb_active() -> bool:
 
 def _wandb() -> bool:
     """Check if we can log to wandb."""
+    if _consts["wandb_project"] is None:
+        return False
+
+    global wandb
+    if wandb is None:
+        try:
+            import wandb
+        except ImportError:
+            warning("wandb is not installed, skipping W&B logging.")
+            return False
     wandb_running_in_this_process = _is_wandb_active()
     _shared = _read_shm()
     shared_run_id = _shared.get("wandb_run_id", None)

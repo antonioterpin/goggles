@@ -39,7 +39,6 @@ pip install "goggles @ git+ssh://git@github.com/antonioterpin/goggles.git"
    ```yaml
    logdir: ~/my_logs
    to_terminal: true
-   to_file: true
    level: INFO
    wandb_project: demo_project
    enable_signal_handler: false
