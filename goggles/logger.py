@@ -228,9 +228,7 @@ def new_wandb_run(name: str, config: dict = None):
             warning("wandb is not installed, skipping W&B logging.")
             return
 
-    run = wandb.init(
-        project=_consts["wandb_project"], name=name, config=config, reinit="create_new"
-    )
+    run = wandb.init(project=_consts["wandb_project"], name=name, config=config)
     # Set the shared run id in shared memory
     _write_shm(
         {
