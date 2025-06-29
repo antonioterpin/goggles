@@ -13,11 +13,11 @@ import time
 import random
 from multiprocessing import shared_memory
 from contextlib import contextmanager
+import wandb
 
 from .config import load_configuration
 from .severity import Severity
 
-wandb = None
 
 # --- Load defaults, which are constant across all instances and immutable ---
 _consts = {
@@ -213,6 +213,7 @@ def stop_wandb_run():
             info("WandB run finished successfully.")
         except Exception as e:
             error(f"Warning: wandb.finish() failed: {e}")
+    _write_shm({"wandb_run_id": None, "name": None})
 
 
 def new_wandb_run(name: str, config: dict = None):
@@ -220,15 +221,6 @@ def new_wandb_run(name: str, config: dict = None):
     stop_workers()
     stop_wandb_run()
 
-    global wandb
-    if wandb is None:
-        try:
-            import wandb
-        except ImportError:
-            warning("wandb is not installed, skipping W&B logging.")
-            return
-
-    wandb.run = None  # Reset any existing run
     run = wandb.init(
         project=_consts["wandb_project"],
         name=name,
@@ -247,6 +239,8 @@ def new_wandb_run(name: str, config: dict = None):
     # Make sure logdir exists
     run_logdir = os.path.join(_consts["logdir"], name)
     os.makedirs(run_logdir, exist_ok=True, mode=0o777)
+
+    info(f"Started new W&B run: {name} (ID: {run.id})")
 
 
 def _is_wandb_active() -> bool:
