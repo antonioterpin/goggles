@@ -156,7 +156,9 @@ def _log(severity: Severity, message: str):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Format the log message
-    formatted_message = f"[{timestamp}] {caller_filename}:{caller_line} - {message}"
+    formatted_message = (
+        f"[{severity.name}][{timestamp}] {caller_filename}:{caller_line} - {message}"
+    )
 
     # Log to terminal if enabled
     if _consts["to_terminal"]:
