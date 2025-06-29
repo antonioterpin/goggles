@@ -208,6 +208,7 @@ def stop_wandb_run():
 
         try:
             wandb.finish()
+            info("WandB run finished successfully.")
         except Exception as e:
             error(f"Warning: wandb.finish() failed: {e}")
 
@@ -226,9 +227,7 @@ def new_wandb_run(name: str, config: dict = None):
             return
 
     run = wandb.init(
-        project=_consts["wandb_project"],
-        name=name,
-        config=config,
+        project=_consts["wandb_project"], name=name, config=config, reinit="create_new"
     )
     # Set the shared run id in shared memory
     _write_shm(
