@@ -230,7 +230,11 @@ def new_wandb_run(name: str, config: dict = None):
 
     wandb.run = None  # Reset any existing run
     run = wandb.init(
-        project=_consts["wandb_project"], name=name, config=config, resume="never"
+        project=_consts["wandb_project"],
+        name=name,
+        config=config,
+        resume="never",
+        reinit="create_new",
     )
     # Set the shared run id in shared memory
     _write_shm(
