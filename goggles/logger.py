@@ -228,6 +228,7 @@ def new_wandb_run(name: str, config: dict = None):
             warning("wandb is not installed, skipping W&B logging.")
             return
 
+    wandb.run = None  # Reset any existing run
     run = wandb.init(
         project=_consts["wandb_project"], name=name, config=config, resume="never"
     )
