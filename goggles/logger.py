@@ -208,12 +208,12 @@ def stop_wandb_run():
             else:
                 os.remove(logfile)
 
-        try:
-            wandb.finish()
-            info("WandB run finished successfully.")
-        except Exception as e:
-            error(f"Warning: wandb.finish() failed: {e}")
+    try:
+        wandb.finish()
+    except Exception as e:
+        print(f"Warning: wandb.finish() failed: {e}")
     _write_shm({"wandb_run_id": None, "name": None})
+    wandb.run = None
 
 
 def new_wandb_run(name: str, config: dict = None):
@@ -221,18 +221,16 @@ def new_wandb_run(name: str, config: dict = None):
     stop_workers()
     stop_wandb_run()
 
-    run = wandb.init(
+    wandb.init(
         project=_consts["wandb_project"],
         name=name,
         config=config,
-        resume="never",
-        reinit="create_new",
     )
     # Set the shared run id in shared memory
     _write_shm(
         {
             "name": name,
-            "wandb_run_id": run.id,
+            "wandb_run_id": wandb.run.id,
         }
     )
 
@@ -240,31 +238,20 @@ def new_wandb_run(name: str, config: dict = None):
     run_logdir = os.path.join(_consts["logdir"], name)
     os.makedirs(run_logdir, exist_ok=True, mode=0o777)
 
-    info(f"Started new W&B run: {name} (ID: {run.id})")
-
-
-def _is_wandb_active() -> bool:
-    """Check if a wandb run is currently active."""
-    return wandb.run is not None
+    info(f"Started new W&B run: {name} (ID: {wandb.run.id})")
 
 
 def _wandb() -> bool:
     """Check if we can log to wandb."""
-    if _consts["wandb_project"] is None or wandb is None:
+    if _consts["wandb_project"] is None:
         return False
 
-    wandb_running_in_this_process = _is_wandb_active()
     _shared = _read_shm()
     shared_run_id = _shared.get("wandb_run_id", None)
 
-    if wandb_running_in_this_process and wandb.run.id == shared_run_id:
-        # If wandb is running and the shared run id matches,
-        # we can log to the existing run.
+    if wandb.run is not None and wandb.run.id == shared_run_id:
         return True
-
-    elif not wandb_running_in_this_process:
-        # If wandb is not running, but we have a shared run id,
-        # start a new wandb run with that id.
+    elif shared_run_id is not None:
         wandb.init(
             project=_consts["wandb_project"],
             id=shared_run_id,
