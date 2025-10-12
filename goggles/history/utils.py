@@ -4,9 +4,7 @@
 from __future__ import annotations
 from typing import Dict, Optional
 import jax.numpy as jnp
-
-Array = jnp.ndarray
-HistoryDict = Dict[str, Array]
+from goggles.history.types import Array, HistoryDict
 
 
 def slice_history(
