@@ -3,9 +3,10 @@
 
 from __future__ import annotations
 from typing import Dict, Optional
-import jax.numpy as jnp
 from .spec import HistorySpec
-from goggles.types import PRNGKey, Array, HistoryDict
+from .types import PRNGKey, Array, HistoryDict
+
+
 def create_history(
     spec: HistorySpec, batch_size: int, rng: Optional[PRNGKey] = None
 ) -> HistoryDict:

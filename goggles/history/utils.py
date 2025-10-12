@@ -2,9 +2,8 @@
 """Utility functions for history slicing and inspection."""
 
 from __future__ import annotations
-from typing import Dict, Optional
-import jax.numpy as jnp
-from goggles.history.types import Array, HistoryDict
+from typing import Optional
+from .types import Array, HistoryDict
 
 
 def slice_history(
