@@ -14,14 +14,29 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     packages=["goggles"],
     include_package_data=True,
-    install_requires=["wandb[media]", "rich", "filelock", "ruamel.yaml", "numpy<2"],
+    install_requires=[
+        "wandb[media]",
+        "rich",
+        "filelock",
+        "ruamel.yaml",
+        "numpy>=1.23",
+    ],
     extras_require={
-        "dev": ["pytest"],
+        # Development and examples
+        "dev": ["pytest", "pytest-cov"],
         "examples": ["matplotlib"],
+        # Optional JAX-based GPU history subsystem
+        "jax": [
+            "jax>=0.4.0",
+            "jaxlib>=0.4.0",
+        ],
     },
     classifiers=[
         "Intended Audience :: Science/Research",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+        "Operating System :: OS Independent",
     ],
+    python_requires=">=3.9",
 )
