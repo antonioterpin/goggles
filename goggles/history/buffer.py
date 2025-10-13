@@ -121,9 +121,8 @@ def update_history(
                 elif init_mode == "ones":
                     return jnp.ones_like(hrow)
                 elif init_mode == "randn":
-                    # At runtime (outside jitted/traced contexts) we enforce rng
-                    if rng is None:
-                        raise ValueError(f"Field '{name}' requires rng for randn reset")
+                    # RNG presence is validated outside before vmap; here we
+                    # just generate per-row random values using the provided key.
                     return jax.random.normal(k, hrow.shape, hrow.dtype)
                 else:
                     raise ValueError(
