@@ -6,4 +6,4 @@ import jax.numpy as jnp
 
 PRNGKey = jnp.ndarray
 Array = jnp.ndarray
-HistoryDict = Dict[str, Array]
+History = Dict[str, Array]

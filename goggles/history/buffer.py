@@ -1,14 +1,52 @@
 """Creation and update interfaces for device-resident history buffers."""
+
 import jax
 import jax.numpy as jnp
 from typing import Dict, Optional
 from .spec import HistorySpec
-from .types import PRNGKey, Array, HistoryDict
+from .types import PRNGKey, Array, History
+
+
+def _apply_reset(hist_row, new_row, reset, init_mode, key=None):
+    """Shift and optionally reset a single history row.
+
+    This uses JAX-friendly control flow (lax.cond) so it can be jitted/vmap'd
+    without attempting Python-level boolean conversions of tracers.
+
+    Args:
+        hist_row: Array shaped (T, *shape) for a single batch row.
+        new_row: Array shaped (1, *shape), appended at the end along time.
+        reset: Boolean scalar (0-dim) indicating whether to reset this row.
+        init_mode: One of {"zeros", "ones", "randn", "none"}.
+        key: Optional PRNGKey (shape (2,)) used when `init_mode == "randn"`.
+
+    Returns:
+        Array with the same shape as `hist_row`, updated for this step.
+
+    Raises:
+        ValueError: If `init_mode` is unknown.
+
+    """
+    shifted_row = jnp.concatenate([hist_row[1:], new_row], axis=0)
+
+    if init_mode == "none":
+        return shifted_row
+
+    def do_reset(_):
+        if init_mode == "zeros":
+            return jnp.zeros_like(hist_row)
+        if init_mode == "ones":
+            return jnp.ones_like(hist_row)
+        if init_mode == "randn":
+            return jax.random.normal(key, hist_row.shape, hist_row.dtype)
+        raise ValueError(f"Unknown init mode {init_mode!r}")
+
+    return jax.lax.cond(reset, do_reset, lambda _: shifted_row, operand=None)
 
 
 def create_history(
     spec: HistorySpec, batch_size: int, rng: Optional[PRNGKey] = None
-) -> HistoryDict:
+) -> History:
     """Allocate device-resident history tensors following (B, T, *shape).
 
     Args:
@@ -18,15 +56,16 @@ def create_history(
             of the buffers (e.g., for initial values or noise).
 
     Returns:
-        dict (HistoryDict): Mapping field name to array shaped (B, T, *shape).
+        dict (History): Mapping field name to array shaped (B, T, *shape).
 
     Raises:
         ValueError: If batch_size <= 0 or invalid spec values.
+
     """
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
 
-    history: HistoryDict = {}
+    history: History = {}
     for name, field in spec.fields.items():
         # Validate length
         if field.length <= 0:
@@ -52,33 +91,34 @@ def create_history(
 
 
 def update_history(
-    history: HistoryDict,
+    history: History,
     new_data: Dict[str, Array],
     reset_mask: Optional[Array] = None,
     spec: Optional[HistorySpec] = None,
     rng: Optional[jax.Array] = None,
-) -> HistoryDict:
+) -> History:
     """Shift and append new items along the temporal axis.
 
-    Note: this function can be jitted and vmapped over batch dimensions.
-    RNG handling: if `rng` is provided, it may be either a single PRNGKey
-    or an array of per-batch keys with shape (B, 2). This lets callers
-    supply already-sharded keys for multi-device/pmap scenarios.
+    Note: this function can be jitted and vmapped over batch dimensions. RNG handling:
+    if `rng` is provided, it may be either a single PRNGKey or an array of per-batch
+    keys with shape (B, 2). This lets callers supply already-sharded keys for
+    multi-device/pmap scenarios.
 
     Args:
-        history (HistoryDict): Current history dict (B, T, *shape).
+        history (History): Current history dict (B, T, *shape).
         new_data (Dict[str, Array]): New entries per field, shaped (B, 1, *shape).
         reset_mask (Optional[Array]): Optional boolean mask for resets (B,).
         spec (Optional[HistorySpec]): Optional spec describing reset initialization.
         rng (Optional[jax.Array]): Optional PRNG key for randomized resets.
 
     Returns:
-        HistoryDict: Updated history dict.
+        History: Updated history dict.
 
     Raises:
         ValueError: If shapes, dtypes, or append lengths are invalid.
+
     """
-    updated: HistoryDict = {}
+    updated: History = {}
 
     for name, hist in history.items():
         if name not in new_data:
@@ -96,84 +136,44 @@ def update_history(
             raise ValueError(f"Dtype mismatch for field '{name}'")
 
         # Determine init mode for resets
-        if spec is not None and name in spec.fields:
+        if spec is not None and hasattr(spec, "fields") and name in spec.fields:
             init_mode = spec.fields[name].init
         else:
             init_mode = "zeros"
 
-        def apply_reset(hist_row, new_row, reset, key=None):
-            """Shift and optionally reset a single history row.
-
-            This uses JAX-friendly control flow (lax.cond) so it can be jitted/vmap'd
-            without attempting Python-level boolean conversions of tracers.
-            """
-            shifted_row = jnp.concatenate([hist_row[1:], new_row], axis=0)
-
-            # If 'none', never reset (always return shifted_row).
-            if init_mode == "none":
-                return shifted_row
-
-            # True-branch: produce an initialized buffer for this row.
-            def do_reset(args):
-                hrow, k = args
-                if init_mode == "zeros":
-                    return jnp.zeros_like(hrow)
-                elif init_mode == "ones":
-                    return jnp.ones_like(hrow)
-                elif init_mode == "randn":
-                    # RNG presence is validated outside before vmap; here we
-                    # just generate per-row random values using the provided key.
-                    return jax.random.normal(k, hrow.shape, hrow.dtype)
-                else:
-                    raise ValueError(
-                        f"Unknown init mode {init_mode!r} for field '{name}'"
-                    )
-
-            # Use lax.cond so 'reset' can be a traced boolean.
-            return jax.lax.cond(
-                reset, do_reset, lambda args: shifted_row, (hist_row, key)
-            )
-
+        # Fast path: no reset handling requested.
         if reset_mask is None:
             updated_field = jnp.concatenate([hist[:, 1:, ...], new], axis=1)
-        else:
-            if reset_mask.ndim != 1 or reset_mask.shape[0] != hist.shape[0]:
-                raise ValueError(
-                    f"Invalid reset_mask shape {reset_mask.shape}, expected (B,)"
-                )
+            updated[name] = updated_field
+            continue
 
-            # Determine init mode for resets
-            if init_mode == "randn":
-                # If rng is None but no resets requested: no error; we use dummy keys.
-                if rng is None:
-                    if bool(jnp.any(reset_mask)):
-                        raise ValueError(f"Field '{name}' requires rng for randn reset")
-                    dummy_keys = jnp.zeros((hist.shape[0], 2), dtype=jnp.uint32)
-                    updated_field = jax.vmap(apply_reset)(
-                        hist, new, reset_mask, dummy_keys
-                    )
-                else:
-                    rng_arr = jnp.asarray(rng)
-                    # Single key -> split into per-batch keys.
-                    if rng_arr.ndim == 1:
-                        subkeys = jax.random.split(rng_arr, hist.shape[0])
-                        updated_field = jax.vmap(apply_reset)(
-                            hist, new, reset_mask, subkeys
-                        )
-                    # Per-batch keys -> use directly (must match batch size).
-                    elif rng_arr.ndim == 2 and rng_arr.shape[0] == hist.shape[0]:
-                        updated_field = jax.vmap(apply_reset)(
-                            hist, new, reset_mask, rng_arr
-                        )
-                    else:
-                        raise ValueError(
-                            f"rng must be a PRNGKey or an array of per-batch keys "
-                            f"with shape (B,2); got {rng_arr.shape}"
-                        )
+        # Validate reset mask shape.
+        if reset_mask.ndim != 1 or reset_mask.shape[0] != hist.shape[0]:
+            raise ValueError(
+                f"Invalid reset_mask shape {reset_mask.shape}, expected (B,)"
+            )
+
+        # Prepare per-batch keys when needed.
+        if init_mode == "randn":
+            if rng is None:
+                raise ValueError(f"Field '{name}' requires rng for randn reset")
+            rng_arr = jnp.asarray(rng)
+            if rng_arr.ndim == 1:  # single key (2,)
+                keys = jax.random.split(rng_arr, hist.shape[0])
+            elif rng_arr.ndim == 2 and rng_arr.shape[0] == hist.shape[0]:
+                keys = rng_arr
             else:
-                dummy_keys = jnp.zeros((hist.shape[0], 2), dtype=jnp.uint32)
-                updated_field = jax.vmap(apply_reset)(hist, new, reset_mask, dummy_keys)
+                raise ValueError(
+                    "rng must be a PRNGKey (shape (2,)) or per-batch keys with shape "
+                    f"(B, 2); got {tuple(rng_arr.shape)}"
+                )
+        else:
+            # Dummy keys; ignored unless init_mode == 'randn'.
+            keys = jnp.zeros((hist.shape[0], 2), dtype=jnp.uint32)
 
+        # Vmap over batch. Keep new with time-dim = 1 for concat in helper.
+        apply = lambda h, n, r, k: _apply_reset(h, n, r, init_mode, k)
+        updated_field = jax.vmap(apply)(hist, new[:, 0:1, ...], reset_mask, keys)
         updated[name] = updated_field
 
     return updated

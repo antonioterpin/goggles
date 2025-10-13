@@ -354,14 +354,15 @@ def test_update_history_rng_wrong_shape_raises(batch_size, time_len):
             }
         }
     )
-    with pytest.raises(ValueError, match="rng must be a PRNGKey or an array"):
+    with pytest.raises(ValueError, match=r"rng must be a PRNGKey"):
         update_history(hist, new, reset_mask, spec=spec, rng=bad_rng)
 
 
 @pytest.mark.parametrize("batch_size,time_len", [(2, 3)])
 def test_update_history_randn_no_resets_uses_dummy_keys(batch_size, time_len):
     # If init is randn but reset_mask has no True values and rng is None,
-    # update_history should proceed using dummy keys (no error).
+    # randn now requires an RNG unconditionally; passing rng=None should raise
+    # a ValueError even if reset_mask contains no True values.
     spec = HistorySpec.from_config(
         {
             "r": {
@@ -379,9 +380,8 @@ def test_update_history_randn_no_resets_uses_dummy_keys(batch_size, time_len):
     import numpy as _np
 
     reset_mask = _np.array([False, False])
-    out = update_history(hist, new, reset_mask, spec=spec, rng=None)
-    # No resets => should behave like shift+append for each batch
-    assert out["r"].shape == (batch_size, time_len, 1)
+    with pytest.raises(ValueError, match="requires rng"):
+        update_history(hist, new, reset_mask, spec=spec, rng=None)
 
 
 @pytest.mark.parametrize("batch_size,time_len", [(2, 3)])

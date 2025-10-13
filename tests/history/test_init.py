@@ -1,4 +1,5 @@
-""""Tests for goggles.history module initialization and public API."""
+"""Tests for goggles.history module initialization and public API."""
+
 import builtins
 import importlib
 import sys

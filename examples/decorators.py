@@ -20,7 +20,7 @@ class TestClass:
 
     @goggles.trace_on_error()
     def fail_method(self, y):
-        """A method that intentionally raises a ZeroDivisionError."""
+        """Intentionally raise a ZeroDivisionError."""
         return self.x / y
 
 

@@ -54,7 +54,8 @@ def test_slice_history_dict_and_field_shapes(B, T, shapes, start, length):
 
     # Single-field mode: same checks for one key
     field_name, field_shape = shapes[0]
-    sliced_one = slice_history(history, start=start, length=length, field=field_name)
+    sliced_one = slice_history(history, start=start, length=length, fields=field_name)
+    sliced_one = sliced_one[field_name]
     assert sliced_one.shape == (B, length, *field_shape)
     np.testing.assert_array_equal(
         np.asarray(sliced_one),
@@ -88,7 +89,7 @@ def test_slice_history_errors(B, T, shapes, bad_args):
     # Unknown field
     if bad_args == {"start": 0, "length": 1}:
         with pytest.raises(KeyError):
-            slice_history(history, field="__nope__", **bad_args)
+            slice_history(history, fields="__nope__", **bad_args)
 
 
 @pytest.mark.parametrize("B,T", [(1, 3), (2, 4), (3, 5)])
@@ -146,7 +147,7 @@ def test_slice_history_rank_and_field_errors_additional():
     # unknown field
     history = {"x": jnp.zeros((1, 3, 1), dtype=jnp.int32)}
     with pytest.raises(KeyError):
-        slice_history(history, start=0, length=1, field="nope")
+        slice_history(history, start=0, length=1, fields="nope")
 
     # field with rank <2
     with pytest.raises(TypeError):
@@ -154,7 +155,7 @@ def test_slice_history_rank_and_field_errors_additional():
             {"a": jnp.zeros((1, 3, 1)), "b": jnp.zeros((3,))},
             start=0,
             length=1,
-            field="b",
+            fields="b",
         )
 
 

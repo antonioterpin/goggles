@@ -1,5 +1,4 @@
-# goggles/history/spec.py
-"""Type specifications for GPU-resident history buffers."""
+"""Type specifications for device-resident history buffers."""
 
 from __future__ import annotations
 
@@ -20,6 +19,7 @@ class HistoryFieldSpec:
         shape (tuple[int, ...]): Per-timestep payload shape (no batch/time dims).
         dtype (jnp.dtype): Array dtype.
         init (InitMode): Initialization policy ("zeros" | "ones" | "randn" | "none").
+
     """
 
     length: int
@@ -34,6 +34,7 @@ class HistorySpec:
 
     Attributes:
         fields (Mapping[str, HistoryFieldSpec]): Mapping from field name to spec.
+
     """
 
     fields: Mapping[str, HistoryFieldSpec]
@@ -60,6 +61,7 @@ class HistorySpec:
                 unsupported type, or shapes/dtypes have invalid types.
             ValueError: If required keys are missing or values are invalid
                 (e.g., length < 1, negative dims, unknown init mode).
+
         """
         if not isinstance(config, Mapping):
             raise TypeError("config must be a Mapping[str, Any].")

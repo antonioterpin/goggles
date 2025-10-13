@@ -39,6 +39,7 @@ def load_configuration(file_path: str) -> PrettyConfig:
 
     Raises:
         FileNotFoundError: If the specified file does not exist.
+
     """
     yaml = YAML(typ="safe", pure=True)
 

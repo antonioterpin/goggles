@@ -1,8 +1,7 @@
 """Device-resident temporal history buffers for JAX pipelines.
 
 This package provides typed specifications and interfaces for constructing,
-updating, and slicing temporal histories stored on device. It defines only
-the public API contracts.
+updating, and slicing temporal histories stored on device.
 
 Public API:
     - HistoryFieldSpec
@@ -12,6 +11,7 @@ Public API:
     - slice_history
     - peek_last
 """
+
 from __future__ import annotations
 
 try:
