@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 from .types import Array, History
 
@@ -11,8 +11,8 @@ def slice_history(
     history: History,
     start: int,
     length: int,
-    fields: Optional[Sequence[str] | str] = None,
-) -> History | Array:
+    fields: Optional[Union[Sequence[str], str]] = None,
+) -> History:
     """Return a temporal slice [start : start+length] for selected fields.
 
     Args:

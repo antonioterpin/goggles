@@ -16,7 +16,7 @@ class HistoryFieldSpec:
 
     Attributes:
         length (int): Number of stored timesteps for this field.
-        shape (tuple[int, ...]): Per-timestep payload shape (no batch/time dims).
+        shape (Tuple[int, ...]): Per-timestep payload shape (no batch/time dims).
         dtype (jnp.dtype): Array dtype.
         init (InitMode): Initialization policy ("zeros" | "ones" | "randn" | "none").
 

@@ -7,7 +7,13 @@ from .spec import HistorySpec
 from .types import PRNGKey, Array, History
 
 
-def _apply_reset(hist_row, new_row, reset, init_mode, key=None):
+def _apply_reset(
+    hist_row: Array,
+    new_row: Array,
+    reset: Array,
+    init_mode: str,
+    key: Optional[PRNGKey] = None,
+) -> Array:
     """Shift and optionally reset a single history row.
 
     This uses JAX-friendly control flow (lax.cond) so it can be jitted/vmap'd
@@ -38,7 +44,7 @@ def _apply_reset(hist_row, new_row, reset, init_mode, key=None):
         if init_mode == "ones":
             return jnp.ones_like(hist_row)
         if init_mode == "randn":
-            return jax.random.normal(key, hist_row.shape, hist_row.dtype)
+            return jax.random.normal(key, hist_row.shape, hist_row.dtype)  # type: ignore
         raise ValueError(f"Unknown init mode {init_mode!r}")
 
     return jax.lax.cond(reset, do_reset, lambda _: shifted_row, operand=None)
