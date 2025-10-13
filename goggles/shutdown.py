@@ -14,10 +14,11 @@ class GracefulShutdown:
         self,
         exit_message: Optional[str] = None,
     ):
-        """Initializes the GracefulShutdown context manager.
+        """Initialize the GracefulShutdown context manager.
 
         Args:
             exit_message (str): The message to log upon shutdown.
+
         """
         self.exit_message = exit_message
         # placeholders for original handlers

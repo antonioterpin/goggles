@@ -183,7 +183,94 @@ See the `examples/` folder for scripts covering:
 
 PRs, issues, and feature requests are welcome! Open an issue or submit a PR on GitHub.
 
-
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+## ⚡ Device-Resident History Module (JAX)
+
+Goggles now provides a **device-resident temporal history subsystem** designed for reusable,
+JAX-based on-device memory management.
+
+## Why/When is it needed?
+
+During the development of our fluids control experiments, as well as the estimation framework in FlowGym and subsequent works, we exploited parallelism on accelerators but encountered the need for keeping track of detailed metrics during training. We believe that for long-running pipelines on GPU, in particular when interfacing with hardware (e.g., to train directly on hardware), this is often the case. However, logging comes at a computational price: if done naively, it requires a device-to-host transfer. This goggles module tackles exactly this tradeoff.
+
+### Installation
+
+To use the device history module:
+
+#### CPU only
+
+```bash
+pip install "goggles[jax]"
+```
+
+#### With CUDA (GPU)
+
+Install JAX with GPU support **before** Goggles:
+
+```bash
+# Example for CUDA 12
+pip install --upgrade "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install "goggles[jax]"
+```
+
+### Example
+
+```python
+from goggles.history import HistorySpec, create_history, update_history
+import jax.numpy as jnp
+
+spec = HistorySpec.from_config({
+    "images": {"length": 4, "shape": (64, 64, 2), "dtype": jnp.float32},
+    "flow":   {"length": 2, "shape": (64, 64, 2), "dtype": jnp.float32},
+})
+
+history = create_history(spec, batch_size=8)
+print(history["images"].shape)  # (8, 4, 64, 64, 2)
+```
+
+> 💡 **Why not infer shapes and dtypes automatically?**
+>
+> JAX operates in a **statically-compiled** model: array shapes and dtypes must be
+> known at graph construction time for JIT compilation and efficient on-device
+> memory allocation.
+>
+> Automatically inferring these attributes from runtime data (e.g., the first
+> batch or input) would:
+>
+> - introduce implicit host–device synchronization,
+> - make the API non-deterministic across JIT traces, and
+> - complicate multi-device sharding, where all devices must agree on array shapes.
+>
+> By requiring users to specify `shape` and `dtype` explicitly in the
+> `HistorySpec`, Goggles ensures predictable device allocation, JIT-safety, and
+> reproducible behavior across pipelines.
+
+### Design Notes
+
+- Implements **pure functional**, **JIT-safe** buffer updates using `jax.numpy` and `jax.lax`.
+- Each field follows the convention `(B, T, *shape)`.
+- Supports **per-field history lengths** and **reset masks** for episodic updates.
+- Integrated with FlowGym’s `EstimatorState` for GPU-local temporal memory.
+
+---
+
+📦 **Optional Dependencies**
+
+Goggles keeps JAX optional.
+Install JAX support only if you need GPU-resident histories:
+
+```toml
+[project.optional-dependencies]
+jax = ["jax>=0.4.0", "jaxlib>=0.4.0"]
+```
+
+---
+
+### 🧠 Future Directions
+
+- NumPy backend for CPU-only fallback
+- Device sharding support (GSPMD)
+- Seamless integration with RL replay buffers

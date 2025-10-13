@@ -16,6 +16,7 @@ def generate_random_flow(width=64, height=64):
 
     Returns:
         np.ndarray: A 2D array of shape (height, width, 2)
+
     """
     u = np.random.uniform(-1, 1, size=(height, width))
     v = np.random.uniform(-1, 1, size=(height, width))
@@ -29,6 +30,7 @@ def viz_and_log(flow, idx):
     Args:
         flow (np.ndarray): Optical flow field of shape (height, width, 2).
         idx (int): Index for logging.
+
     """
     u, v = flow[..., 0], flow[..., 1]
     angle = np.arctan2(v, u)  # [-pi, pi]

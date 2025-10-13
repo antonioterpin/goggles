@@ -9,7 +9,7 @@ import goggles
 os.makedirs("/tmp/flows", exist_ok=True)
 
 
-def generate_random_flow(width=16, height=16):
+def generate_random_flow(width: int = 16, height: int = 16):
     """Generate a random optical flow field.
 
     Args:
@@ -18,6 +18,7 @@ def generate_random_flow(width=16, height=16):
 
     Returns:
         np.ndarray: A 2D array of shape (height, width, 2)
+
     """
     u = np.random.uniform(-1, 1, size=(height, width))
     v = np.random.uniform(-1, 1, size=(height, width))
@@ -31,6 +32,7 @@ def save_flow_to_file(flow, idx):
     Args:
         flow (np.ndarray): Optical flow field of shape (height, width, 2).
         idx (int): Index for logging.
+
     """
     np.save(f"/tmp/flows/flow_{idx}.npy", flow)
 
@@ -40,6 +42,7 @@ def viz_and_log(n_steps):
 
     Args:
         n_steps (int): Number of flow fields to visualize.
+
     """
     frames = []
     for i in range(n_steps):

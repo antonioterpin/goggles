@@ -1,12 +1,11 @@
 """Decorators for logging and timing function execution."""
 
-
 from .severity import Severity
 from .logger import _log, error, scalar
 
 
 def timeit(severity=Severity.INFO, name=None, to_wandb=False):
-    """Decorator to measure the execution time of a function."""
+    """Measure the execution time of a function via decorators."""
 
     def decorator(func):
         import time
@@ -30,7 +29,7 @@ def timeit(severity=Severity.INFO, name=None, to_wandb=False):
 
 
 def trace_on_error():
-    """Decorator to trace errors and log function parameters."""
+    """Trace errors and log function parameters via decorators."""
 
     def decorator(func):
         def wrapper(*args, **kwargs):
