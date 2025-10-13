@@ -28,3 +28,14 @@ repos:
       - id: pydocstyle
         exclude: ^(src/fluids_control/actuation/dynamixel_sdk/)
         args: ["--convention=google"]
+
+  - repo: local
+    hooks:
+      - id: verify-docstrings
+        name: Verify Google-style docstrings
+        entry: python scripts/check_docstrings.py
+        language: system
+        stages: [pre-commit, pre-push]
+        pass_filenames: false
+        require_serial: true
+        files: \.py$

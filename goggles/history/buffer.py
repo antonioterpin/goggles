@@ -13,12 +13,13 @@ def create_history(
     """Allocate GPU-resident history tensors following (B, T, *shape).
 
     Args:
-        spec: HistorySpec describing each field.
-        batch_size: Batch size (B).
-        rng: Optional PRNG key for randomized initialization.
+        spec (HistorySpec): Describing each field.
+        batch_size (int): Batch size (B).
+        rng (Optional[PRNGKey]): Optional PRNG key for randomized initialization
+            of the buffers (e.g., for initial values or noise).
 
     Returns:
-        Mapping field → array shaped (B, T, *shape).
+        dict (HistoryDict): Mapping field to array shaped (B, T, *shape).
 
     Raises:
         NotImplementedError: Placeholder until implementation sub-issue.
@@ -34,12 +35,12 @@ def update_history(
     """Shift and append new items along the temporal axis.
 
     Args:
-        history: Current history dict (B, T, *shape).
-        new_data: New entries per field.
-        reset_mask: Optional boolean mask for resets (B,).
+        history (HistoryDict): Current history dict (B, T, *shape).
+        new_data (Dict[str, Array]): New entries per field.
+        reset_mask (Optional[Array]): Optional boolean mask for resets (B,).
 
     Returns:
-        Updated history dict.
+        HistoryDict: Updated history dict.
 
     Raises:
         NotImplementedError: Placeholder until implementation sub-issue.

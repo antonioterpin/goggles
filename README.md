@@ -187,15 +187,18 @@ PRs, issues, and feature requests are welcome! Open an issue or submit a PR on G
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-## ⚡ GPU-Resident History Module (JAX)
+## ⚡ Device-Resident History Module (JAX)
 
-Goggles now provides a **GPU-resident temporal history subsystem** designed for reusable,
+Goggles now provides a **device-resident temporal history subsystem** designed for reusable,
 JAX-based on-device memory management.
-It’s primarily used by FlowGym and other JAX pipelines that need batched temporal buffers.
+
+## Why/When is it needed?
+
+During the development of our fluids control experiments, as well as the estimation framework in FlowGym and subsequent works, we exploited parallelism on accelerators but encountered the need for keeping track of detailed metrics during training. We believe that for long-running pipelines on GPU, in particular when interfacing with hardware (e.g., to train directly on hardware), this is often the case. However, logging comes at a computational price: if done naively, it requires a device-to-host transfer. This goggles module tackles exactly this tradeoff.
 
 ### Installation
 
-To use the GPU history module:
+To use the device history module:
 
 #### CPU only
 
@@ -227,6 +230,23 @@ spec = HistorySpec.from_config({
 history = create_history(spec, batch_size=8)
 print(history["images"].shape)  # (8, 4, 64, 64, 2)
 ```
+
+> 💡 **Why not infer shapes and dtypes automatically?**
+>
+> JAX operates in a **statically-compiled** model: array shapes and dtypes must be
+> known at graph construction time for JIT compilation and efficient on-device
+> memory allocation.
+>
+> Automatically inferring these attributes from runtime data (e.g., the first
+> batch or input) would:
+>
+> - introduce implicit host–device synchronization,
+> - make the API non-deterministic across JIT traces, and
+> - complicate multi-device sharding, where all devices must agree on array shapes.
+>
+> By requiring users to specify `shape` and `dtype` explicitly in the
+> `HistorySpec`, Goggles ensures predictable device allocation, JIT-safety, and
+> reproducible behavior across pipelines.
 
 ### Design Notes
 

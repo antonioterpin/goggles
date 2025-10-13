@@ -1,10 +1,9 @@
 # goggles/history/__init__.py
-"""GPU-resident temporal history buffers for JAX pipelines.
+"""Device-resident temporal history buffers for JAX pipelines.
 
 This package provides typed specifications and interfaces for constructing,
-updating, and slicing temporal histories stored on device.  It defines only
-the public API contracts — functional implementations are provided in later
-development stages.
+updating, and slicing temporal histories stored on device. It defines only
+the public API contracts.
 
 Public API:
     - HistoryFieldSpec

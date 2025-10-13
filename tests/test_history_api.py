@@ -24,24 +24,6 @@ def test_public_api_symbols_exist():
     for name in expected:
         assert hasattr(gh, name), f"Missing public symbol: {name}"
 
-
-def test_classes_have_docstrings():
-    """Classes should have non-empty docstrings."""
-    for cls_name in ["HistoryFieldSpec", "HistorySpec"]:
-        cls = getattr(gh, cls_name)
-        assert inspect.isclass(cls)
-        assert cls.__doc__ and len(cls.__doc__.strip()) > 0
-
-
-def test_functions_have_docstrings():
-    """All exported functions must have a proper docstring."""
-    funcs = ["create_history", "update_history", "slice_history", "peek_last"]
-    for fn in funcs:
-        obj = getattr(gh, fn)
-        assert callable(obj)
-        assert obj.__doc__ and len(obj.__doc__.strip()) > 0
-
-
 def test_history_field_spec_signature():
     """Check HistoryFieldSpec constructor signature."""
     from goggles.history import HistoryFieldSpec

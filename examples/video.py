@@ -9,7 +9,7 @@ import goggles
 os.makedirs("/tmp/flows", exist_ok=True)
 
 
-def generate_random_flow(width=16, height=16):
+def generate_random_flow(width: int = 16, height: int = 16):
     """Generate a random optical flow field.
 
     Args:
