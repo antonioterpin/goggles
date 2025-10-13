@@ -1,4 +1,3 @@
-# goggles/history/utils.py
 """Utility functions for history slicing and inspection."""
 
 from __future__ import annotations

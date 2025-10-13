@@ -1,4 +1,3 @@
-# goggles/history/types.py
 """Shared type aliases for history package."""
 
 from __future__ import annotations

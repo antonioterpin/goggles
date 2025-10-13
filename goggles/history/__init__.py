@@ -1,4 +1,3 @@
-# goggles/history/__init__.py
 """Device-resident temporal history buffers for JAX pipelines.
 
 This package provides typed specifications and interfaces for constructing,

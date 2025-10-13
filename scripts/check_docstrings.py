@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+"""Check that docstrings follow Google style for Args/Returns sections.
+
+Each function/method docstring with an Args or Returns section should
+have properly formatted blocks. This script scans all tracked Python files
+and reports any violations.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -14,8 +20,7 @@ ARGS_BLOCK = re.compile(
     r"(?:[ \t]{4,8}[A-Za-z_]\w* \(.+?\): .+(?:\n[ \t]{8,}.+)*)+"
 )
 RETURNS_BLOCK = re.compile(
-    r"(?ms)^[ \t]{0,4}Returns:\n"
-    r"(?:[ \t]{4,8}.+?: .+(?:\n[ \t]{8,}.+)*)+"
+    r"(?ms)^[ \t]{0,4}Returns:\n" r"(?:[ \t]{4,8}.+?: .+(?:\n[ \t]{8,}.+)*)+"
 )
 
 HAS_ARGS = re.compile(r"(?m)^[ \t]{0,4}Args:\s*$")
@@ -25,7 +30,9 @@ HAS_RETURNS = re.compile(r"(?m)^[ \t]{0,4}Returns:\s*$")
 def list_repo_pyfiles() -> list[Path]:
     """Return tracked Python files (respects `--all-files` in pre-commit)."""
     try:
-        out = subprocess.check_output(["git", "ls-files", "-z", "--", "*.py"], text=False)
+        out = subprocess.check_output(
+            ["git", "ls-files", "-z", "--", "*.py"], text=False
+        )
         return [
             Path(p)
             for p in out.decode("utf-8", "replace").split("\x00")
@@ -97,6 +104,14 @@ def check_file(path: Path) -> list[str]:
 
 
 def main(argv: List[str]) -> int:
+    """Check all tracked Python files for docstring formatting issues.
+
+    Args:
+        argv (List[str]): Command-line arguments (unused).
+
+    Returns:
+        int: Exit code (0 if all good, 1 if issues found).
+    """
     pyfiles = list_repo_pyfiles()
     all_errors: list[str] = []
     for f in pyfiles:
