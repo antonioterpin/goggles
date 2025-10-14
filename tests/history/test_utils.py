@@ -1,10 +1,12 @@
 """Tests for history utils: peek_last and slice_history."""
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from goggles.history.utils import peek_last, slice_history
+from goggles.history.utils import peek_last, slice_history, to_device, to_host
+from goggles.history.types import History
 
 
 def _make_history(B, T, shapes):
@@ -162,3 +164,81 @@ def test_slice_history_rank_and_field_errors_additional():
 def test_peek_last_rank_error_additional():
     with pytest.raises(TypeError):
         peek_last({"a": jnp.zeros((3,))}, k=1)
+
+
+@pytest.fixture
+def sample_history():
+    return {
+        "a": jnp.ones((2, 2)),
+        "b": {"x": jnp.arange(4).reshape(2, 2), "y": 42},  # nested + non-array
+    }
+
+
+def test_to_device_and_to_host_roundtrip(sample_history):
+    # Act
+    device_hist = to_device(sample_history)
+    host_hist = to_host(device_hist)
+
+    # Assert arrays live on device initially
+    for v in jax.tree_util.tree_leaves(device_hist):
+        if isinstance(v, jax.Array):
+            assert v.device in jax.devices()
+
+    # Assert round-trip preserves numerical values
+    np.testing.assert_array_equal(np.array(host_hist["a"]), np.ones((2, 2)))
+    np.testing.assert_array_equal(
+        np.array(host_hist["b"]["x"]), np.arange(4).reshape(2, 2)
+    )
+    assert host_hist["b"]["y"] == 42
+
+
+def test_to_device_subset_keys(sample_history):
+    # Only move key 'a'
+    dev_hist = to_device(sample_history, keys=("a",))
+    assert isinstance(dev_hist["a"], jax.Array)
+    # 'b' remains identical
+    assert dev_hist["b"] is sample_history["b"]
+
+
+def test_to_host_subset_keys(sample_history):
+    # First move to device
+    dev_hist = to_device(sample_history)
+    # Then copy only key 'b'
+    host_hist = to_host(dev_hist, keys=("b",))
+    # 'b' should now be numpy arrays on host
+    assert isinstance(host_hist["b"]["x"], np.ndarray)
+    # 'a' remains jax array
+    assert isinstance(host_hist["a"], jax.Array)
+
+
+def test_to_device_multiple_devices(monkeypatch, sample_history):
+    devices = jax.devices()
+    if len(devices) < 2:
+        pytest.skip("requires at least 2 devices to test round-robin assignment")
+
+    moved = to_device(sample_history, devices=devices[:2])
+    # Check that elements were placed round-robin across devices
+    a_dev = list(moved["a"].sharding.device_set)[0]
+    b_dev = list(jax.tree_util.tree_leaves(moved["b"])[0].sharding.device_set)[0]
+    assert a_dev != b_dev
+
+
+def test_to_device_and_to_host_jittable(sample_history):
+    # Define jitted wrappers
+    jitted_to_device = jax.jit(lambda h: to_device(h))
+    jitted_to_host = jax.jit(lambda h: to_host(h))
+
+    # These should compile and execute without side effects
+    dev_hist = jitted_to_device(sample_history)
+    host_hist = jitted_to_host(dev_hist)
+
+    np.testing.assert_allclose(np.array(host_hist["a"]), np.ones((2, 2)))
+
+
+@pytest.mark.parametrize("func", [to_device, to_host])
+def test_functions_are_pure(sample_history, func):
+    # Act
+    out = func(sample_history)
+    # Assert input not mutated
+    assert sample_history["a"].shape == (2, 2)
+    assert "x" in sample_history["b"]

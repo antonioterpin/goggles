@@ -79,7 +79,7 @@ def test_type_aliases_exist():
     """Check shared type aliases are available in types.py."""
     import goggles.history.types as ht
 
-    for name in ["PRNGKey", "Array", "HistoryDict"]:
+    for name in ["PRNGKey", "Array", "History"]:
         assert hasattr(ht, name)
         obj = getattr(ht, name)
         assert obj is not None

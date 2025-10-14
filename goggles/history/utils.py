@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence, Tuple, Union
 
-from .types import Array, History
+import jax
+import jaxlib.xla_client as xc
+
+Device = xc.Device
+
+from .types import History
 
 
 def slice_history(
@@ -102,3 +107,85 @@ def peek_last(history: History, k: int = 1) -> History:
 
     # Use negative slicing for clarity and to keep JAX-friendly semantics.
     return {k_name: v[:, -k:, ...] for k_name, v in history.items()}
+
+
+def to_device(
+    history: History,
+    devices: Optional[Sequence[Device]] = None,  # type: ignore[type-arg]
+    keys: Optional[Tuple[str, ...]] = None,
+) -> History:
+    """Move selected history arrays to one or more JAX devices.
+
+    This function moves JAX arrays contained in a dictionary (or subset of it)
+    to a target device or set of devices. If multiple devices are provided,
+    arrays are distributed in a simple round-robin fashion across them.
+
+    Non-array values (e.g., metadata, scalars, strings) are left unchanged.
+
+    Args:
+        history (History): Mapping field to array (or PyTree of arrays).
+        devices (Optional[Sequence[Device]]): Target devices. Defaults to first device.
+        keys (Optional[tuple[str, ...]]): Subset of fields to move. If None, move all.
+
+    Returns:
+        History: Copy of the history with selected arrays placed on the target device(s).
+
+    """
+    devices = devices or jax.devices()
+
+    # Select subset of keys if specified
+    subset = history if keys is None else {k: history[k] for k in keys if k in history}
+
+    moved = {}
+    for i, (k, v) in enumerate(subset.items()):
+        device = devices[i % len(devices)]  # Round-robin device selection
+
+        # Recursively move PyTree leaves to the device
+        moved[k] = jax.tree_util.tree_map(
+            lambda x: jax.device_put(x, device) if isinstance(x, jax.Array) else x,
+            v,
+        )
+
+    # If all keys were moved, just return the moved version
+    if keys is None:
+        return moved
+
+    # Otherwise, merge moved subset back into the original dict
+    return {**history, **moved}
+
+
+def to_host(
+    history: History,
+    keys: Optional[Tuple[str, ...]] = None,
+) -> History:
+    """Copy selected history arrays from device to host memory.
+
+    Recursively retrieves device arrays from JAX devices and copies them
+    into host (NumPy) memory. Non-array values are left unchanged.
+
+    Args:
+        history (History): Mapping field to array (or PyTree of arrays).
+        keys (Optional[tuple[str, ...]]): Subset of fields to copy. If None, all.
+
+    Returns:
+        History: Copy of the history with arrays stored in host (NumPy) memory.
+
+    Example:
+        >>> host_history = to_host(device_history)
+        >>> type(host_history["loss"])
+        <class 'numpy.ndarray'>
+
+    """
+    subset = history if keys is None else {k: history[k] for k in keys if k in history}
+
+    moved = {}
+    for k, v in subset.items():
+        # Recursively copy all arrays from device to host
+        moved[k] = jax.tree_util.tree_map(
+            lambda x: jax.device_get(x) if isinstance(x, jax.Array) else x,
+            v,
+        )
+
+    if keys is None:
+        return moved
+    return {**history, **moved}
