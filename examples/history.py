@@ -35,7 +35,7 @@ except ImportError:
 
 def main() -> None:  # noqa: D103
     print("=" * 80)
-    print(" History Module Demonstration")
+    print(" History module demonstration")
     print("=" * 80)
     print(f"Available devices: {[str(d) for d in jax.devices()]}")
 
