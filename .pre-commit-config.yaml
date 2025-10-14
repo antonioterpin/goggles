@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/psf/black
-    rev: 24.8.0
+    rev: 25.9.0
     hooks:
       - id: black
         language_version: python3.10
@@ -10,18 +10,20 @@ repos:
     hooks:
       - id: ruff
         stages: [pre-commit, pre-push]
+        # Use hook-level exclude so it actually skips in pre-commit
+        exclude: ^tests/
         args:
           [
-            "--select=D,PD",
-            "--ignore=D100,D104",
-            "--line-length=90",
             "--fix",
-            "--exclude=tests/"
+            "--line-length=90",
+            # Docstring & pandas rules; D includes D419 so this is enough.
+            "--select=D,PD",
+            # Keep D211 (no-blank-line-before-class) by ignoring conflicts:
           ]
         language_version: python3.10
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v6.0.0
     hooks:
       - id: check-yaml
       - id: end-of-file-fixer
