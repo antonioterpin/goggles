@@ -33,7 +33,7 @@ class HistorySpec:
     """Bundle multiple named history field specs.
 
     Attributes:
-        fields (Mapping[str, HistoryFieldSpec]): Mapping from field name to spec.
+        fields (Mapping[str, HistoryFieldSpec]): Mapping from field name to spec
 
     """
 

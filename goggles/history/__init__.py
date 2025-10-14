@@ -25,7 +25,7 @@ except ImportError as e:
 
 from .spec import HistoryFieldSpec, HistorySpec
 from .buffer import create_history, update_history
-from .utils import slice_history, peek_last
+from .utils import slice_history, peek_last, to_device, to_host
 
 __all__ = [
     "HistoryFieldSpec",
@@ -34,4 +34,6 @@ __all__ = [
     "update_history",
     "slice_history",
     "peek_last",
+    "to_device",
+    "to_host",
 ]
