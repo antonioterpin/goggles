@@ -1,0 +1,146 @@
+"""Core implementation of the run(...) context manager.
+
+This module defines the foundational context manager for managing experiment runs.
+It handles creating a unique run directory, generating a run ID, and writing
+initial metadata. More advanced features like logging handlers and W&B
+integration are handled elsewhere.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+import uuid
+from contextlib import AbstractContextManager
+from contextvars import ContextVar
+from dataclasses import asdict
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from goggles import RunContext
+from .utils import _now_utc_iso, _python_version, _short_id, _write_json
+
+# The currently active run context, if any. Prevents nested run(...) calls.
+_ACTIVE_RUN: ContextVar[RunContext | None] = ContextVar("_g_active_run", default=None)
+
+
+class _RunContextManager(AbstractContextManager[RunContext]):
+    """Core implementation of the run(...) context manager.
+
+    This minimal version performs only the foundational tasks needed to start
+    and finish a run:
+      - Create a uniquely named run directory.
+      - Generate a unique run ID.
+      - Write an initial `metadata.json` file with environment details.
+      - Record user-provided metadata.
+      - On exit, update `metadata.json` with a `finished_at` timestamp.
+
+    No logging handlers, filters, or W&B integrations are initialized here.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: Optional[str],
+        log_dir: Optional[str],
+        user_metadata: Dict[str, Any],
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the context manager with run configuration.
+
+        Args:
+            name: Optional human-readable run name.
+            log_dir: Base directory in which the run subdirectory is created.
+                If None, defaults to './runs/'.
+            user_metadata: Arbitrary key-value pairs provided by the user.
+            **kwargs: Additional arguments (currently unused).
+
+        """
+        self._run_name = name
+        self._base_dir = Path(log_dir) if log_dir else Path("runs")
+        self._user_metadata = dict(user_metadata)
+        self._context: Optional[RunContext] = None
+        self._run_path: Optional[Path] = None
+
+    def __enter__(self) -> RunContext:
+        """Create and register a new RunContext.
+
+        Raises:
+            RuntimeError: If a run is already active in this process.
+
+        Returns:
+            The newly created RunContext object.
+
+        """
+        if _ACTIVE_RUN.get() is not None:
+            raise RuntimeError("A run is already active in this process.")
+
+        # Generate unique identifiers and paths
+        run_id = uuid.uuid4().hex
+        created_at = _now_utc_iso()
+        timestamp = datetime.fromisoformat(created_at).strftime("%Y%m%d_%H%M%S")
+        short_id = _short_id(run_id)
+        human_prefix = self._run_name or "run"
+
+        # Directory pattern: <base>/<name>-<YYYYmmdd_HHMMSS>-<shortid>/
+        run_dir = (self._base_dir / f"{human_prefix}-{timestamp}-{short_id}").resolve()
+        run_dir.mkdir(parents=True, exist_ok=True)
+        self._run_path = run_dir
+
+        # Construct the immutable RunContext
+        run_context = RunContext(
+            run_id=run_id,
+            run_name=self._run_name,
+            log_dir=str(run_dir),
+            created_at=created_at,
+            pid=os.getpid(),
+            host=socket.gethostname(),
+            python=_python_version(),
+            metadata=self._user_metadata,
+            wandb=None,  # TODO: integration handled in next issue
+        )
+        self._context = run_context
+
+        # Write the initial metadata.json
+        metadata = {
+            **asdict(run_context),
+            "goggles_version": os.environ.get("GOGGLES_VERSION", "unknown"),
+            "user": os.environ.get("USER") or os.environ.get("USERNAME") or "unknown",
+        }
+        _write_json(run_dir / "metadata.json", metadata)
+
+        # Publish as the active run for this process
+        _ACTIVE_RUN.set(run_context)
+        return run_context
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        """Finalize the run and update `metadata.json`.
+
+        This method updates the `metadata.json` file with a `finished_at` timestamp.
+        It also clears the active run marker to allow future runs.
+
+        Args:
+            exc_type: Exception type if an exception occurred, else None.
+            exc: Exception instance if an exception occurred, else None.
+            tb: Traceback if an exception occurred, else None.
+
+        """
+        try:
+            if self._context and self._run_path:
+                metadata_path = self._run_path / "metadata.json"
+
+                # Load existing metadata, patch with `finished_at`, and rewrite
+                try:
+                    with metadata_path.open("r", encoding="utf-8") as file:
+                        data = json.load(file)
+                except Exception:
+                    data = asdict(self._context)
+
+                data["finished_at"] = _now_utc_iso()
+                _write_json(metadata_path, data)
+        finally:
+            # Always clear the active run marker to allow future runs
+            _ACTIVE_RUN.set(None)

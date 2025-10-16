@@ -224,8 +224,21 @@ def run(
         ...     log.info("start", step=0)
 
     """
-    raise NotImplementedError(
-        "This is an API contract. Provide an implementation in the core layer."
+    # Lazy import to avoid import-time side effects / cycles
+    from ._core.run import _RunContextManager
+
+    return _RunContextManager(
+        name=name,
+        log_dir=log_dir,
+        user_metadata=metadata,
+        enable_console=enable_console,
+        enable_file=enable_file,
+        enable_jsonl=enable_jsonl,
+        enable_wandb=enable_wandb,
+        log_level=log_level,
+        propagate=propagate,
+        reset_root=reset_root,
+        capture_warnings=capture_warnings,
     )
 
 
