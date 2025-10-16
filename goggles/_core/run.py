@@ -11,15 +11,16 @@ from __future__ import annotations
 import json
 import os
 import socket
-import sys
 import uuid
 from contextlib import AbstractContextManager
 from contextvars import ContextVar, Token
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+import logging
 
+logger = logging.getLogger(__name__)
 from goggles import RunContext
 from .utils import _now_utc_iso, _python_version, _short_id, _write_json
 
@@ -117,13 +118,12 @@ class _RunContextManager(AbstractContextManager[RunContext]):
                     "entity": getattr(self._wandb_run, "entity", None),
                 }
             except ImportError:
-                print(
-                    "[goggles.run] W&B not installed; continuing without integration.",
-                    file=sys.stderr,
+                logger.warning(
+                    "W&B integration requested but wandb package is not installed."
                 )
                 self._enable_wandb = False
             except Exception as err:
-                print(f"[goggles.run] Failed to initialize W&B: {err}", file=sys.stderr)
+                logger.error(f"Failed to initialize W&B: {err}")
                 self._enable_wandb = False
 
         # Build immutable RunContext
@@ -179,10 +179,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
                 try:
                     self._wandb_run.finish()
                 except Exception as err:
-                    print(
-                        f"[goggles.run] Warning: Failed to close W&B run cleanly: {err}",
-                        file=sys.stderr,
-                    )
+                    logger.warning(f"Failed to close W&B run cleanly: {err}")
         finally:
             if self._active_token is not None:
                 _ACTIVE_RUN.reset(self._active_token)
