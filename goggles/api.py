@@ -229,6 +229,10 @@ def run(
     )
 
 
+# Cache the impl after first use to avoid repeated imports
+__get_logger_impl = None
+
+
 def get_logger(name: Optional[str] = None, **bound: Any) -> BoundLogger:
     """Return a structured logger adapter that injects context and bound fields.
 
@@ -260,9 +264,12 @@ def get_logger(name: Optional[str] = None, **bound: Any) -> BoundLogger:
         >>> log.bind(split="test").info("running", step=1)
 
     """
-    raise NotImplementedError(
-        "This is an API contract. Provide an implementation in the core layer."
-    )
+    global __get_logger_impl
+    if __get_logger_impl is None:
+        # Lazy import to avoid import-time side effects / cycles
+        from ._core.logger import get_logger as _get_logger
+
+    return _get_logger(name, **bound)
 
 
 # ---------------------------------------------------------------------------
