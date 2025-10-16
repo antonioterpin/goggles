@@ -1,6 +1,11 @@
+import json
 import logging
 from unittest.mock import MagicMock, patch
 import pytest
+import os
+import tempfile
+from pathlib import Path
+
 
 from goggles._core.logger import CoreBoundLogger, get_logger as core_get_logger
 from goggles import get_logger as api_get_logger, BoundLogger
@@ -136,3 +141,115 @@ def test_bind_non_str_key_raises_typeerror(core_log):
 def test_emit_with_empty_message(core_log, mock_logger):
     core_log.info("")
     mock_logger.info.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Visual test for developer-friendly representation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("to_file", [False, True])
+def test_visual_jsonl_boundlogger_demo(to_file):
+    """Visual demonstration of CoreBoundLogger structured logging.
+
+    This test is *opt-in only*: it is skipped unless the environment variable
+    `GOGGLES_SHOW_LOGS=1` is set. It is meant to help developers *see* how bound
+    fields persist across log calls while per-call fields remain transient.
+
+    Args:
+        to_file (bool): Whether to write logs to a file (in `tests/_logs/`) or
+            print to stdout.
+
+    Notes:
+        When enabled, this test produces JSONL-style output showing the evolving
+        `_g_bound` context of the logger. It does *not* assert anything.
+    """
+    if os.getenv("GOGGLES_SHOW_LOGS") != "1":
+        pytest.skip("Set GOGGLES_SHOW_LOGS=1 to enable visual output demo.")
+
+    # ----------------------------------------------------------------------
+    # 1. Prepare output (safe folder inside repo, not /tmp)
+    # ----------------------------------------------------------------------
+    root = Path(__file__).resolve().parents[2]
+    log_dir = root / "tests" / "_logs"
+    log_dir.mkdir(exist_ok=True)
+    log_path = log_dir / "boundlogger_demo.jsonl"
+
+    # Clear old log file only if writing this time
+    if to_file and log_path.exists():
+        log_path.unlink()
+
+    # ----------------------------------------------------------------------
+    # 2. Set up standard logging -> JSONL handler
+    # ----------------------------------------------------------------------
+    base_logger = logging.getLogger("demo")
+    base_logger.setLevel(logging.INFO)
+    base_logger.handlers.clear()
+    base_logger.propagate = False
+
+    if to_file:
+        handler = logging.FileHandler(log_path)
+    else:
+        handler = logging.StreamHandler()
+
+    class JSONFormatter(logging.Formatter):
+        """Formatter that emits clean JSONL with structured context only."""
+
+        def format(self, record):
+            payload = {"message": record.getMessage()}
+
+            # Include structured Goggles-specific extras only
+            for key, value in record.__dict__.items():
+                # Keep _g_bound (persistent context)
+                if key == "_g_bound":
+                    payload["_g_bound"] = value
+                # Keep transient user-provided fields (non-private and non-default)
+                elif not key.startswith("_") and key not in {
+                    "name",
+                    "msg",
+                    "args",
+                    "levelname",
+                    "levelno",
+                    "pathname",
+                    "filename",
+                    "module",
+                    "exc_info",
+                    "exc_text",
+                    "stack_info",
+                    "lineno",
+                    "funcName",
+                    "created",
+                    "msecs",
+                    "relativeCreated",
+                    "thread",
+                    "threadName",
+                    "processName",
+                    "process",
+                    "taskName",
+                }:
+                    payload[key] = value
+
+            return json.dumps(payload)
+
+    handler.setFormatter(JSONFormatter())
+    base_logger.addHandler(handler)
+
+    # ----------------------------------------------------------------------
+    # 3. Wrap logger with CoreBoundLogger and demonstrate binding
+    # ----------------------------------------------------------------------
+    log = CoreBoundLogger(base_logger).bind(app="synthpix", mode="train")
+    log.info("start", step=0)
+
+    run_log = log.bind(run_id="exp001")
+    run_log.info("running", step=1, lr=1e-3)
+    run_log.info("checkpoint", step=5)
+    log.info("done", step=10)
+
+    # ----------------------------------------------------------------------
+    # 4. Developer feedback
+    # ----------------------------------------------------------------------
+    if to_file:
+        print(f"\n✅ Wrote structured logs to: {log_path}")
+        print("Open this file to inspect bound context evolution.\n")
+    else:
+        print("\n✅ Displayed structured logs above (stdout mode).\n")

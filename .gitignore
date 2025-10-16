@@ -195,3 +195,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 .vscode/
+
+# Test logs
+/tests/_logs/*
