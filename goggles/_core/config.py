@@ -18,19 +18,34 @@ Example usage:
         gg.scalar("train/loss", 0.123, step=0)
 """
 
-_DEFAULTS = {
-    "enable_console": True,
-    "enable_file": True,
-    "enable_jsonl": False,
-    "enable_wandb": False,
-    "log_level": "INFO",
-    "propagate": False,
-    "reset_root": None,
-    "capture_warnings": True,
-}
+from dataclasses import dataclass
+from typing import Any
 
 
-def configure(**defaults):
+@dataclass
+class Defaults:
+    """Process-wide default configuration for goggles logging.
+
+    Attributes:
+        enable_console (bool): Whether to enable console logging by default.
+        enable_file (bool): Whether to enable file logging by default.
+        enable_jsonl (bool): Whether to enable JSONL logging by default.
+        enable_wandb (bool): Whether to enable Weights & Biases logging by default
+        log_level (str): Default log level (e.g., "DEBUG", "INFO").
+        propagate (bool): Whether to propagate logs to ancestor loggers.
+        reset_root (bool | None): Whether to reset the root logger on run start.
+        capture_warnings (bool): Whether to capture Python warnings.
+
+    """
+
+    enable_wandb: bool = False
+    # TODO: The rest of the config options will be added in future iterations
+
+
+_CONFIG = Defaults()
+
+
+def configure(**defaults: Any) -> None:
     """Set global default configuration for goggles logging.
 
     These defaults are used when starting a new run with `run()`, but can be
@@ -52,8 +67,7 @@ def configure(**defaults):
         ValueError: If an unknown configuration key is provided.
 
     """
-    # Validate + merge into _DEFAULTS
-    for k, v in defaults.items():
-        if k not in _DEFAULTS:
-            raise ValueError(f"Unknown key: {k}")
-        _DEFAULTS[k] = v
+    for key, value in defaults.items():
+        if not hasattr(_CONFIG, key):
+            raise ValueError(f"Unknown configuration key: {key}")
+        setattr(_CONFIG, key, value)

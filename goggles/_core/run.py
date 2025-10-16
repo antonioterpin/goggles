@@ -12,18 +12,19 @@ import json
 import os
 import socket
 import uuid
+import logging
 from contextlib import AbstractContextManager
 from contextvars import ContextVar, Token
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
-import logging
 
-logger = logging.getLogger(__name__)
 from goggles import RunContext
+from .integrations import attach_sinks, detach_sinks
 from .utils import _now_utc_iso, _python_version, _short_id, _write_json
 
+logger = logging.getLogger(__name__)
 # The currently active run context, if any. Prevents nested run(...) calls.
 _ACTIVE_RUN: ContextVar[RunContext | None] = ContextVar("_g_active_run", default=None)
 
@@ -66,11 +67,14 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         self._user_metadata = dict(user_metadata) if user_metadata is not None else {}
         self._context: Optional[RunContext] = None
         self._run_path: Optional[Path] = None
-        self._wandb_run: Optional[Any] = None
-        self._enable_wandb = enable_wandb
         self._active_token: Optional[Token] = None
         # Mark kwargs as used so static checkers don't warn about unused parameters.
         del kwargs
+
+        # Sinks for logging (if enabled later)
+        self._overrides: Dict[str, Any] = {}
+        if enable_wandb is not None:
+            self._overrides["enable_wandb"] = enable_wandb
 
     def __enter__(self) -> RunContext:
         """Create and register a new RunContext.
@@ -97,35 +101,24 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         run_dir.mkdir(parents=True, exist_ok=True)
         self._run_path = run_dir
 
-        # Initialize W&B if requested
-        wandb_info: Optional[Dict[str, Any]] = None
-        if self._enable_wandb:
-            try:
-                import wandb
+        # Initialize sinks (e.g., W&B) if enabled
+        extra_meta: Dict[str, Any] = {}
 
-                self._wandb_run = wandb.init(
-                    project=self._user_metadata.get("project", "goggles"),
-                    name=self._run_name,
-                    dir=str(run_dir),
-                    config=self._user_metadata,
-                    reinit=True,
-                    settings=wandb.Settings(start_method="thread"),
+        try:
+            extra_meta = (
+                attach_sinks(
+                    run_id=run_id,
+                    run_dir=run_dir,
+                    run_name=self._run_name,
+                    user_metadata=self._user_metadata,
+                    overrides=self._overrides,
                 )
-                wandb_info = {
-                    "id": self._wandb_run.id,
-                    "url": self._wandb_run.url,
-                    "project": self._wandb_run.project_name(),
-                    "entity": getattr(self._wandb_run, "entity", None),
-                }
-            except ImportError:
-                logger.warning(
-                    "W&B integration requested but wandb package is not installed."
-                )
-                self._enable_wandb = False
-            except Exception as err:
-                logger.error(f"Failed to initialize W&B: {err}")
-                self._enable_wandb = False
+                or {}
+            )
+        except Exception as err:
+            logger.warning("attach_sinks failed: %s", err)
 
+        wandb_info = extra_meta.get("wandb")
         # Build immutable RunContext
         run_context = RunContext(
             run_id=run_id,
@@ -143,6 +136,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         # Write initial metadata file
         metadata = {
             **asdict(run_context),
+            **{k: v for k, v in extra_meta.items() if k != "wandb"},
             "goggles_version": os.environ.get("GOGGLES_VERSION", "unknown"),
             "user": os.environ.get("USER") or os.environ.get("USERNAME") or "unknown",
         }
@@ -154,7 +148,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
     def __exit__(self, exc_type, exc, tb) -> None:
         """Finalize the run and close resources.
 
-        Updates `metadata.json` with `finished_at` and closes the W&B run if active.
+        Updates `metadata.json` with `finished_at` and closes any sink run if active.
 
         Args:
             exc_type: Exception type if raised inside context.
@@ -174,12 +168,11 @@ class _RunContextManager(AbstractContextManager[RunContext]):
                 data["finished_at"] = _now_utc_iso()
                 _write_json(metadata_path, data)
 
-            # Safely close W&B if active
-            if self._enable_wandb and self._wandb_run is not None:
-                try:
-                    self._wandb_run.finish()
-                except Exception as err:
-                    logger.warning(f"Failed to close W&B run cleanly: {err}")
+            try:
+                if self._context:
+                    detach_sinks(run_id=self._context.run_id)
+            except Exception as err:
+                logger.warning("detach_sinks failed: %s", err)
         finally:
             if self._active_token is not None:
                 _ACTIVE_RUN.reset(self._active_token)
