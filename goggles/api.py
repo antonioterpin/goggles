@@ -210,7 +210,7 @@ def run(
         **metadata (Any): User-defined metadata persisted in `metadata.json`.
 
     Returns:
-      AbstractContextManager[RunContext]: A context manager yielding `RunContext`.
+        AbstractContextManager[RunContext]: A context manager yielding `RunContext`.
 
     Raises:
         RuntimeError: If a run is already active in this process.

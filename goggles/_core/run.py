@@ -14,7 +14,7 @@ import socket
 import sys
 import uuid
 from contextlib import AbstractContextManager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +67,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         self._run_path: Optional[Path] = None
         self._wandb_run: Optional[Any] = None
         self._enable_wandb = enable_wandb
+        self._active_token: Optional[Token] = None
         # Mark kwargs as used so static checkers don't warn about unused parameters.
         del kwargs
 
@@ -147,7 +148,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         }
         _write_json(run_dir / "metadata.json", metadata)
 
-        _ACTIVE_RUN.set(run_context)
+        self._active_token = _ACTIVE_RUN.set(run_context)
         return run_context
 
     def __exit__(self, exc_type, exc, tb) -> None:
@@ -183,4 +184,6 @@ class _RunContextManager(AbstractContextManager[RunContext]):
                         file=sys.stderr,
                     )
         finally:
-            _ACTIVE_RUN.set(None)
+            if self._active_token is not None:
+                _ACTIVE_RUN.reset(self._active_token)
+                self._active_token = None
