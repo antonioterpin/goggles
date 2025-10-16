@@ -173,7 +173,7 @@ def run(
     propagate: Optional[bool] = None,
     reset_root: Optional[bool] = None,
     capture_warnings: Optional[bool] = None,
-    **metadata: Dict[str, Any],
+    **metadata: Any,
 ) -> AbstractContextManager[RunContext]:
     """Configure logging sinks for the current process and yield a `RunContext`.
 
@@ -207,7 +207,7 @@ def run(
         propagate (Optional[bool]): Root logger propagation.
         reset_root (Optional[bool]): Remove existing root handlers first.
         capture_warnings (Optional[bool]): Route `warnings` to logging.
-        **metadata (Dict[str, Any]): User-defined metadata persisted in `metadata.json`.
+        **metadata (Any): User-defined metadata persisted in `metadata.json`.
 
     Returns:
       AbstractContextManager[RunContext]: A context manager yielding `RunContext`.

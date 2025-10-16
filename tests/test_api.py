@@ -197,25 +197,6 @@ def test_import_has_no_side_effects(monkeypatch):
     assert all(isinstance(h, logging.NullHandler) for h in g_logger.handlers)
 
 
-def test_import_as_library_and_application(monkeypatch):
-    """Simulate library import vs application entrypoint."""
-    import goggles
-
-    # "Library" scenario: imported but run() never called
-    root_before = list(logging.getLogger().handlers)
-    assert root_before == list(logging.getLogger().handlers)
-    assert hasattr(goggles, "run")
-
-    # "Application" scenario: pretend to call run()
-    # Since run() is a stub, it should raise NotImplementedError, not modify root.
-    with pytest.raises(NotImplementedError):
-        with goggles.run("demo"):
-            pass
-
-    root_after = list(logging.getLogger().handlers)
-    assert root_after == root_before, "run() stub altered root handlers unexpectedly"
-
-
 def test_reimport_is_idempotent():
     """Reloading goggles should not add extra handlers."""
     import goggles
