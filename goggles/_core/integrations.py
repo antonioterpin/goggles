@@ -282,3 +282,74 @@ class _JsonlHandler(Handler):
             self._fp.close()
         finally:
             super().close()
+
+
+def upload_artifacts(
+    run_id: str,
+    files: list[Path],
+    *,
+    name: Optional[str] = None,
+    type: Optional[str] = None,
+) -> None:
+    """Upload a set of files as a W&B Artifact for the given run.
+
+    - No-ops if W&B isn't active for this run.
+    - Silently skips missing files.
+    - Deduplicates paths.
+    - Uses simple defaults when name/type are not provided.
+
+    Args:
+        run_id: Run identifier (used to find the active W&B run).
+        files: List of files to include in the artifact.
+        name: Optional artifact name; defaults to "goggles-run-<short_id>".
+        type: Optional artifact type; defaults to "goggles-run".
+
+    """
+    wb = _WANDB_RUNS.get(run_id)
+    if wb is None:
+        return  # W&B not enabled/initialized for this run
+
+    # Normalize + filter existing files
+    uniq: list[Path] = []
+    seen: set[str] = set()
+    for f in files or []:
+        try:
+            p = Path(f).resolve()
+        except Exception:
+            continue
+        if not p.exists():
+            continue
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(p)
+
+    if not uniq:
+        return
+
+    # Defaults
+    art_name = name or f"goggles-run-{run_id[:8]}"
+    art_type = type or "goggles-run"
+
+    try:
+        import wandb  # type: ignore[import-not-found]
+    except Exception as err:
+        logger.warning("W&B not importable during artifact upload: %s", err)
+        return
+
+    try:
+        artifact = wandb.Artifact(
+            name=art_name,
+            type=art_type,
+            metadata={"run_id": run_id},
+        )
+        for p in uniq:
+            try:
+                artifact.add_file(str(p))
+            except Exception as add_err:
+                logger.warning("Failed to add file to artifact: %s (%s)", p, add_err)
+
+        wb.log_artifact(artifact)
+    except Exception as err:
+        logger.warning("Failed to upload artifacts to W&B: %s", err)

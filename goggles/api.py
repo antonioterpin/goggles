@@ -173,6 +173,9 @@ def run(
     propagate: Optional[bool] = None,
     reset_root: Optional[bool] = None,
     capture_warnings: Optional[bool] = None,
+    enable_artifacts: Optional[bool] = None,
+    artifact_name: Optional[str] = None,
+    artifact_type: Optional[str] = None,
     **metadata: Any,
 ) -> AbstractContextManager[RunContext]:
     """Configure logging sinks for the current process and yield a `RunContext`.
@@ -207,6 +210,9 @@ def run(
         propagate (Optional[bool]): Root logger propagation.
         reset_root (Optional[bool]): Remove existing root handlers first.
         capture_warnings (Optional[bool]): Route `warnings` to logging.
+        enable_artifacts (Optional[bool]): Enable artifact logging.
+        artifact_name (Optional[str]): Default artifact name.
+        artifact_type (Optional[str]): Default artifact type.
         **metadata (Any): User-defined metadata persisted in `metadata.json`.
 
     Returns:
@@ -239,6 +245,9 @@ def run(
         propagate=propagate,
         reset_root=reset_root,
         capture_warnings=capture_warnings,
+        enable_artifacts=enable_artifacts,
+        artifact_name=artifact_name,
+        artifact_type=artifact_type,
     )
 
 

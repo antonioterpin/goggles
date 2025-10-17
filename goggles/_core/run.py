@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from goggles import RunContext
-from .integrations import attach_sinks, detach_sinks
+from goggles._core.config import _CONFIG
+from .integrations import attach_sinks, detach_sinks, upload_artifacts
 from .utils import _now_utc_iso, _python_version, _short_id, _write_json
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         propagate: Optional[bool] = None,
         reset_root: Optional[bool] = None,
         capture_warnings: Optional[bool] = None,
+        enable_artifacts: Optional[bool] = None,
+        artifact_name: Optional[str] = None,
+        artifact_type: Optional[str] = None,
     ) -> None:
         """Initialize the context manager with run configuration.
 
@@ -72,6 +76,9 @@ class _RunContextManager(AbstractContextManager[RunContext]):
             propagate (Optional[bool]): Whether to propagate logs to ancestor loggers.
             reset_root (Optional[bool]): Whether to reset the root logger on run start.
             capture_warnings (Optional[bool]): Whether to capture Python warnings.
+            enable_artifacts (Optional[bool]): Whether to enable artifact uploads.
+            artifact_name (Optional[str]): Default artifact name.
+            artifact_type (Optional[str]): Default artifact type.
 
         """
         self._run_name = name
@@ -83,22 +90,22 @@ class _RunContextManager(AbstractContextManager[RunContext]):
 
         # Sinks for logging overrides
         self._overrides: Dict[str, Any] = {}
-        if enable_console is not None:
-            self._overrides["enable_console"] = enable_console
-        if enable_wandb is not None:
-            self._overrides["enable_wandb"] = enable_wandb
-        if enable_file is not None:
-            self._overrides["enable_file"] = enable_file
-        if enable_jsonl is not None:
-            self._overrides["enable_jsonl"] = enable_jsonl
-        if log_level is not None:
-            self._overrides["log_level"] = log_level
-        if propagate is not None:
-            self._overrides["propagate"] = propagate
-        if reset_root is not None:
-            self._overrides["reset_root"] = reset_root
-        if capture_warnings is not None:
-            self._overrides["capture_warnings"] = capture_warnings
+
+        for key, value in [
+            ("enable_console", enable_console),
+            ("enable_wandb", enable_wandb),
+            ("enable_file", enable_file),
+            ("enable_jsonl", enable_jsonl),
+            ("log_level", log_level),
+            ("propagate", propagate),
+            ("reset_root", reset_root),
+            ("capture_warnings", capture_warnings),
+            ("enable_artifacts", enable_artifacts),
+            ("artifact_name", artifact_name),
+            ("artifact_type", artifact_type),
+        ]:
+            if value is not None:
+                self._overrides[key] = value
 
     def __enter__(self) -> RunContext:
         """Create and register a new RunContext.
@@ -166,8 +173,6 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         }
         _write_json(run_dir / "metadata.json", metadata)
 
-        print("Metadata contents:", metadata)
-
         self._active_token = _ACTIVE_RUN.set(run_context)
         return run_context
 
@@ -183,12 +188,6 @@ class _RunContextManager(AbstractContextManager[RunContext]):
 
         """
         try:
-            try:
-                if self._context:
-                    detach_sinks(run_id=self._context.run_id)
-            except Exception as err:
-                logger.warning("detach_sinks failed: %s", err)
-
             if self._context and self._run_path:
                 metadata_path = self._run_path / "metadata.json"
                 try:
@@ -206,6 +205,41 @@ class _RunContextManager(AbstractContextManager[RunContext]):
 
                 data["finished_at"] = _now_utc_iso()
                 _write_json(metadata_path, data)
+
+                # Handle artifact upload if enabled
+                enable_artifacts = self._overrides.get(
+                    "enable_artifacts", _CONFIG.enable_artifacts
+                )
+                if enable_artifacts:
+                    # files: metadata.json + any sink paths
+                    files = [metadata_path]
+                    for k in ("text", "jsonl"):
+                        p = (data.get("logs") or {}).get(k)
+                        if isinstance(p, str):
+                            files.append(Path(p))
+
+                    # name & type: override > config > fallback
+                    name = self._overrides.get("artifact_name", _CONFIG.artifact_name)
+                    if not name:
+                        short_id = (self._context.run_id or "")[:8]
+                        name = f"goggles-run-{short_id}"
+                    type_ = self._overrides.get("artifact_type", _CONFIG.artifact_type)
+                    try:
+                        upload_artifacts(
+                            run_id=self._context.run_id,
+                            files=files,
+                            name=name,
+                            type=type_,
+                        )
+                    except Exception as err:
+                        logger.warning("upload_artifacts failed: %s", err)
+
+            # Detach sinks
+            try:
+                if self._context:
+                    detach_sinks(run_id=self._context.run_id)
+            except Exception as err:
+                logger.warning("detach_sinks failed: %s", err)
 
         finally:
             if self._active_token is not None:

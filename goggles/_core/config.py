@@ -46,6 +46,9 @@ class Defaults:
     propagate: bool = True
     reset_root: bool | None = None
     capture_warnings: bool = True
+    enable_artifacts: bool = False
+    artifact_name: str = "goggles-artifacts"
+    artifact_type: str = "goggles-run"
 
 
 _CONFIG = Defaults()
@@ -68,6 +71,9 @@ def configure(**defaults: Any) -> None:
                 - propagate (bool): Whether to propagate logs to ancestor loggers.
                 - reset_root (bool | None): Whether to reset the root logger.
                 - capture_warnings (bool): Whether to capture Python warnings.
+                - enable_artifacts (bool): Enable/disable artifact uploads.
+                - artifact_name (str): Default artifact name.
+                - artifact_type (str): Default artifact type.
 
     Raises:
         ValueError: If an unknown configuration key is provided.
