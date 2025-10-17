@@ -198,3 +198,6 @@ cython_debug/
 
 # Test logs
 /tests/_logs/*
+
+# Runs folder
+/runs/
