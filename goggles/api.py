@@ -1,10 +1,12 @@
 """Public API contract for Goggles logging (single-process v1).
 
 This module intentionally defines the *outer interface* and behavioral contract for
-Goggles' logging system. It is *not* a full implementation: functions raise
-`NotImplementedError` and global variables are placeholders. The goal is to provide
-a stable, well-documented surface that downstream packages can import and depend on,
-while implementers fill in the internals elsewhere (e.g., `goggles/_core/...`).
+Goggles' logging system. It is *not* a full implementation: the actual logic lives
+in private submodules (e.g., `_core/run.py`, `_core/logger.py`) to separate concerns
+and avoid import-time side effects.
+
+NOTE: Metrics and media helpers (`scalar`, `image`, `video`) are included here
+as contracts only; their implementations is for now gated behind `NotImplementedError`.
 
 Design principles
 -----------------
@@ -26,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
-# Public data structures
+# Public RunContext dataclass
 # ---------------------------------------------------------------------------
 
 

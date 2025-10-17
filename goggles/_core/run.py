@@ -34,15 +34,10 @@ _ACTIVE_RUN: ContextVar[RunContext | None] = ContextVar("_g_active_run", default
 class _RunContextManager(AbstractContextManager[RunContext]):
     """Core implementation of the run(...) context manager.
 
-    This minimal version performs only the foundational tasks needed to start
-    and finish a run:
-      - Create a uniquely named run directory.
-      - Generate a unique run ID.
-      - Write an initial `metadata.json` file with environment details.
-      - Record user-provided metadata.
-      - On exit, update `metadata.json` with a `finished_at` timestamp.
-
-    No logging handlers, filters, or W&B integrations are initialized here.
+    This class handles the creation and finalization of a run context,
+    including generating unique run IDs, creating run directories, and writing
+    metadata. It also manages the attachment and detachment of logging sinks
+    and artifact uploads.
     """
 
     def __init__(

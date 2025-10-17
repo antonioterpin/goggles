@@ -12,7 +12,7 @@ def main(args):
         gg.scalar("train/loss", 0.123, step=1)
         gg.scalar("train/acc", 0.91, step=1, split="train")
 
-        # Images/videos: we record metadata in JSONL; binar(ies) go to backends (e.g., W&B).
+        # Images/videos: we record metadata in JSONL; binaries go to backends (e.g., W&B).
         try:
             import numpy as np
 
