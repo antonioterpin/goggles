@@ -156,9 +156,9 @@ def configure(**defaults: Any) -> None:
         >>> configure(enable_jsonl=True, log_level="DEBUG")
 
     """
-    raise NotImplementedError(
-        "This is an API contract. Provide an implementation in the core layer."
-    )
+    from ._core.config import configure as _configure
+
+    _configure(**defaults)
 
 
 def run(

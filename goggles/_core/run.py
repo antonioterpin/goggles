@@ -49,6 +49,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         log_dir: Optional[str],
         *,
         user_metadata: Optional[Dict[str, Any]] = None,
+        enable_console: Optional[bool] = None,
         enable_wandb: Optional[bool] = None,
         enable_file: Optional[bool] = None,
         enable_jsonl: Optional[bool] = None,
@@ -60,6 +61,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
             name (Optional[str]): Human-readable run name.
             log_dir (Optional[str]): Base directory for run subdirectory.
             user_metadata (Dict[str, Any]): Arbitrary user metadata.
+            enable_console (bool): Whether to enable console logging.
             enable_wandb (bool): Whether to initialize a Weights & Biases run.
             enable_file (bool): Whether to enable file logging.
             enable_jsonl (bool): Whether to enable JSONL logging.
@@ -75,8 +77,10 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         # Mark kwargs as used so static checkers don't warn about unused parameters.
         del kwargs
 
-        # Sinks for logging (if enabled later)
+        # Sinks for logging overrides
         self._overrides: Dict[str, Any] = {}
+        if enable_console is not None:
+            self._overrides["enable_console"] = enable_console
         if enable_wandb is not None:
             self._overrides["enable_wandb"] = enable_wandb
         if enable_file is not None:

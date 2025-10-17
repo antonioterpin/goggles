@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import json
 from pathlib import Path
+import sys
 from typing import Any, Dict, Optional
 from logging import Handler
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Track per run resources to clean up on exit
 _WANDB_RUNS: Dict[str, Any] = {}
+_CONSOLE_HANDLERS: Dict[str, logging.Handler] = {}
 _FILE_HANDLERS: Dict[str, logging.Handler] = {}
 _ROOT_PREV_LEVEL: Dict[str, int] = {}
 _JSONL_HANDLERS: Dict[str, Handler] = {}
@@ -55,6 +57,17 @@ def attach_sinks(
 
     _ROOT_PREV_LEVEL[run_id] = root.level
     root.setLevel(lvl_value)
+
+    # Console handler
+    enable_console = overrides.get(
+        "enable_console", getattr(_CONFIG, "enable_console", True)
+    )
+    if enable_console:
+        ch = logging.StreamHandler(stream=sys.stdout)
+        ch.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+        logging.getLogger().addHandler(ch)
+        _CONSOLE_HANDLERS[run_id] = ch
+        extra.setdefault("logs", {})["console"] = "stdout"
 
     # Text .log file
     enable_file = overrides.get("enable_file", getattr(_CONFIG, "enable_file", True))
@@ -115,6 +128,18 @@ def detach_sinks(run_id: str) -> None:
         run_id (str): The unique identifier of the run to clean up.
 
     """
+    # Remove console handler
+    ch = _CONSOLE_HANDLERS.pop(run_id, None)
+    if ch is not None:
+        try:
+            ch.flush()
+            ch.close()
+        finally:
+            try:
+                logging.getLogger().removeHandler(ch)
+            except Exception:
+                pass
+
     # Close and remove text file handler
     handler = _FILE_HANDLERS.pop(run_id, None)
     if handler is not None:

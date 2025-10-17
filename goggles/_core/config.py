@@ -38,6 +38,7 @@ class Defaults:
 
     """
 
+    enable_console: bool = True
     enable_wandb: bool = False
     enable_file: bool = True
     enable_jsonl: bool = False
