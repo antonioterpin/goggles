@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Dict, Optional, Protocol, runtime_checkable
 
 # ---------------------------------------------------------------------------
 # Public RunContext dataclass
@@ -253,7 +253,7 @@ def run(
 
 
 # Cache the impl after first use to avoid repeated imports
-__get_logger_impl = None
+__get_logger_impl: Optional[Callable[[Optional[str]], BoundLogger]] = None
 
 
 def get_logger(name: Optional[str] = None, **bound: Any) -> BoundLogger:
@@ -292,7 +292,9 @@ def get_logger(name: Optional[str] = None, **bound: Any) -> BoundLogger:
         # Lazy import to avoid import-time side effects / cycles
         from ._core.logger import get_logger as _get_logger
 
-    return _get_logger(name, **bound)
+        __get_logger_impl = _get_logger
+
+    return __get_logger_impl(name, **bound)
 
 
 # ---------------------------------------------------------------------------
