@@ -40,6 +40,7 @@ class Defaults:
 
     enable_wandb: bool = False
     enable_file: bool = True
+    enable_jsonl: bool = False
     log_level: str = "INFO"
     # TODO: The rest of the config options will be added in future iterations
 

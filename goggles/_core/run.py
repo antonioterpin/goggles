@@ -51,6 +51,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         user_metadata: Optional[Dict[str, Any]] = None,
         enable_wandb: Optional[bool] = None,
         enable_file: Optional[bool] = None,
+        enable_jsonl: Optional[bool] = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the context manager with run configuration.
@@ -61,6 +62,7 @@ class _RunContextManager(AbstractContextManager[RunContext]):
             user_metadata (Dict[str, Any]): Arbitrary user metadata.
             enable_wandb (bool): Whether to initialize a Weights & Biases run.
             enable_file (bool): Whether to enable file logging.
+            enable_jsonl (bool): Whether to enable JSONL logging.
             **kwargs (Any): Reserved for future extensions. TODO: remove before PR
 
         """
@@ -79,6 +81,8 @@ class _RunContextManager(AbstractContextManager[RunContext]):
             self._overrides["enable_wandb"] = enable_wandb
         if enable_file is not None:
             self._overrides["enable_file"] = enable_file
+        if enable_jsonl is not None:
+            self._overrides["enable_jsonl"] = enable_jsonl
 
     def __enter__(self) -> RunContext:
         """Create and register a new RunContext.

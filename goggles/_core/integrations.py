@@ -8,9 +8,10 @@ lifecycle in coordination with the run context.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any, Dict, Optional
+from logging import Handler
 
 from goggles._core.config import _CONFIG
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 _WANDB_RUNS: Dict[str, Any] = {}
 _FILE_HANDLERS: Dict[str, logging.Handler] = {}
 _ROOT_PREV_LEVEL: Dict[str, int] = {}
+_JSONL_HANDLERS: Dict[str, Handler] = {}
 
 
 def attach_sinks(
@@ -45,7 +47,7 @@ def attach_sinks(
 
     root = logging.getLogger()
     # Store previous root log level to restore on detach
-    lvl_name = overrides.get("log_level", _CONFIG.log_level)
+    lvl_name = overrides.get("log_level", getattr(_CONFIG, "log_level", "INFO"))
     try:
         lvl_value = getattr(logging, str(lvl_name).upper())
     except Exception:
@@ -65,6 +67,17 @@ def attach_sinks(
         logging.getLogger().addHandler(handler)
         _FILE_HANDLERS[run_id] = handler
         extra.setdefault("logs", {})["text"] = str(log_path)
+
+    # JSONL file
+    enable_jsonl = overrides.get(
+        "enable_jsonl", getattr(_CONFIG, "enable_jsonl", False)
+    )
+    if enable_jsonl:
+        jsonl_path = Path(run_dir) / "events.jsonl"
+        jh = _JsonlHandler(jsonl_path)
+        logging.getLogger().addHandler(jh)
+        _JSONL_HANDLERS[run_id] = jh
+        extra.setdefault("logs", {})["jsonl"] = str(jsonl_path)
 
     # Weights & Biases
     enable_wandb = overrides.get(
@@ -114,6 +127,18 @@ def detach_sinks(run_id: str) -> None:
             except Exception:
                 pass
 
+    # Close and remove JSONL handler
+    jh = _JSONL_HANDLERS.pop(run_id, None)
+    if jh is not None:
+        try:
+            jh.flush()
+            jh.close()
+        finally:
+            try:
+                logging.getLogger().removeHandler(jh)
+            except Exception:
+                pass
+
     # Finish W&B run if active
     wb = _WANDB_RUNS.pop(run_id, None)
     if wb is not None:
@@ -126,3 +151,54 @@ def detach_sinks(run_id: str) -> None:
     prev_level = _ROOT_PREV_LEVEL.pop(run_id, None)
     if prev_level is not None:
         logging.getLogger().setLevel(prev_level)
+
+
+class _JsonlHandler(Handler):
+    """Write one JSON object per log record (UTF-8, line-delimited).
+
+    Attributes:
+        _fp (TextIO): File pointer to the open JSONL file.
+        _path (Path): Path to the JSONL file.
+
+    """
+
+    def __init__(self, path: Path) -> None:
+        """Initialize the JSONL handler.
+
+        Args:
+            path (Path): Path to the JSONL log file.
+
+        """
+        super().__init__()
+        self._fp = open(path, "a", encoding="utf-8", buffering=1)  # line-buffered
+        self._path = path
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record as a JSON object.
+
+        Args:
+            record (logging.LogRecord): The log record to emit.
+
+        """
+        try:
+            payload = {
+                "message": record.getMessage(),
+                "name": record.name,
+                "level": record.levelno,
+                "levelname": record.levelname,
+                "created": record.created,
+                "process": record.process,
+                "thread": record.thread,
+                "pathname": record.pathname,
+                "lineno": record.lineno,
+            }
+            self._fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            self.handleError(record)
+
+    def close(self) -> None:
+        """Close the JSONL handler and its file pointer."""
+        try:
+            self._fp.close()
+        finally:
+            super().close()
