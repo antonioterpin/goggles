@@ -16,8 +16,10 @@ from goggles._core.config import _CONFIG
 
 logger = logging.getLogger(__name__)
 
-# Keep the active W&B run handle per run_id (if any).
+# Track per run resources to clean up on exit
 _WANDB_RUNS: Dict[str, Any] = {}
+_FILE_HANDLERS: Dict[str, logging.Handler] = {}
+_ROOT_PREV_LEVEL: Dict[str, int] = {}
 
 
 def attach_sinks(
@@ -28,53 +30,99 @@ def attach_sinks(
     user_metadata: Dict[str, Any],
     overrides: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Attach per-run integrations. W&B only (for now).
+    """Attach per-run integrations.
+
+    Supports:
+      - Text log file (events.log)
+      - Weights & Biases (wandb)
 
     Returns:
         Dict[str, Any]: Extra metadata to merge into metadata.json and RunContext.
-                        Includes a "wandb" entry if W&B was started.
+                        Includes "logs.text" and (optionally) "wandb".
 
     """
-    # Resolve effective enable flag: run override -> configured default
-    enable_wandb = overrides.get("enable_wandb", _CONFIG.enable_wandb)
-    if not enable_wandb:
-        return {}
+    extra: Dict[str, Any] = {}
 
+    root = logging.getLogger()
+    # Store previous root log level to restore on detach
+    lvl_name = overrides.get("log_level", _CONFIG.log_level)
     try:
-        import wandb  # type: ignore[import-not-found]
-    except Exception as err:
-        logger.warning("W&B not available; continuing without integration: %s", err)
-        return {}
+        lvl_value = getattr(logging, str(lvl_name).upper())
+    except Exception:
+        lvl_value = logging.INFO
 
-    try:
-        wb = wandb.init(
-            project=user_metadata.get("project", "goggles"),
-            name=run_name,
-            dir=str(run_dir),
-            config=user_metadata,
-            reinit=True,
-            settings=wandb.Settings(start_method="thread"),
+    _ROOT_PREV_LEVEL[run_id] = root.level
+    root.setLevel(lvl_value)
+
+    # Text .log file
+    enable_file = overrides.get("enable_file", getattr(_CONFIG, "enable_file", True))
+    if enable_file:
+        log_path = Path(run_dir) / "events.log"
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
         )
-        _WANDB_RUNS[run_id] = wb
-        return {
-            "wandb": {
+        logging.getLogger().addHandler(handler)
+        _FILE_HANDLERS[run_id] = handler
+        extra.setdefault("logs", {})["text"] = str(log_path)
+
+    # Weights & Biases
+    enable_wandb = overrides.get(
+        "enable_wandb", getattr(_CONFIG, "enable_wandb", False)
+    )
+    if enable_wandb:
+        try:
+            import wandb  # type: ignore[import-not-found]
+
+            wb = wandb.init(
+                project=user_metadata.get("project", "goggles"),
+                name=run_name,
+                dir=str(run_dir),
+                config=user_metadata,
+                reinit=True,
+                settings=wandb.Settings(start_method="thread"),
+            )
+            _WANDB_RUNS[run_id] = wb
+            extra["wandb"] = {
                 "id": wb.id,
                 "url": wb.url,
                 "project": wb.project_name(),
                 "entity": getattr(wb, "entity", None),
             }
-        }
-    except Exception as err:
-        logger.warning("Failed to initialize W&B; continuing without it: %s", err)
-        return {}
+        except Exception as err:
+            logger.warning("Failed to initialize W&B; continuing without it: %s", err)
+
+    return extra
 
 
 def detach_sinks(run_id: str) -> None:
-    """Tear down per-run integrations. W&B only (for now)."""
+    """Tear down per-run integrations. W&B only (for now).
+
+    Args:
+        run_id (str): The unique identifier of the run to clean up.
+
+    """
+    # Close and remove text file handler
+    handler = _FILE_HANDLERS.pop(run_id, None)
+    if handler is not None:
+        try:
+            handler.flush()
+            handler.close()
+        finally:
+            try:
+                logging.getLogger().removeHandler(handler)
+            except Exception:
+                pass
+
+    # Finish W&B run if active
     wb = _WANDB_RUNS.pop(run_id, None)
-    if wb is None:
-        return
-    try:
-        wb.finish()
-    except Exception as err:
-        logger.warning("Failed to close W&B run cleanly: %s", err)
+    if wb is not None:
+        try:
+            wb.finish()
+        except Exception as err:
+            logger.warning("Failed to close W&B run cleanly: %s", err)
+
+    # Restore previous root log level
+    prev_level = _ROOT_PREV_LEVEL.pop(run_id, None)
+    if prev_level is not None:
+        logging.getLogger().setLevel(prev_level)

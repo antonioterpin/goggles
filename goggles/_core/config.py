@@ -30,7 +30,7 @@ class Defaults:
         enable_console (bool): Whether to enable console logging by default.
         enable_file (bool): Whether to enable file logging by default.
         enable_jsonl (bool): Whether to enable JSONL logging by default.
-        enable_wandb (bool): Whether to enable Weights & Biases logging by default
+        enable_wandb (bool): Whether to enable Weights & Biases logging by default.
         log_level (str): Default log level (e.g., "DEBUG", "INFO").
         propagate (bool): Whether to propagate logs to ancestor loggers.
         reset_root (bool | None): Whether to reset the root logger on run start.
@@ -39,6 +39,8 @@ class Defaults:
     """
 
     enable_wandb: bool = False
+    enable_file: bool = True
+    log_level: str = "INFO"
     # TODO: The rest of the config options will be added in future iterations
 
 
