@@ -43,7 +43,9 @@ class Defaults:
     enable_file: bool = True
     enable_jsonl: bool = False
     log_level: str = "INFO"
-    # TODO: The rest of the config options will be added in future iterations
+    propagate: bool = True
+    reset_root: bool | None = None
+    capture_warnings: bool = True
 
 
 _CONFIG = Defaults()

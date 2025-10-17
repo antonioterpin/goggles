@@ -54,20 +54,24 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         enable_file: Optional[bool] = None,
         enable_jsonl: Optional[bool] = None,
         log_level: Optional[str] = None,
-        **kwargs: Any,
+        propagate: Optional[bool] = None,
+        reset_root: Optional[bool] = None,
+        capture_warnings: Optional[bool] = None,
     ) -> None:
         """Initialize the context manager with run configuration.
 
         Args:
             name (Optional[str]): Human-readable run name.
             log_dir (Optional[str]): Base directory for run subdirectory.
-            user_metadata (Dict[str, Any]): Arbitrary user metadata.
-            enable_console (bool): Whether to enable console logging.
-            enable_wandb (bool): Whether to initialize a Weights & Biases run.
-            enable_file (bool): Whether to enable file logging.
-            enable_jsonl (bool): Whether to enable JSONL logging.
-            log_level (str): Log level for the run.
-            **kwargs (Any): Reserved for future extensions. TODO: remove before PR
+            user_metadata (Optional[Dict[str, Any]]): Arbitrary user metadata.
+            enable_console (Optional[bool]): Whether to enable console logging.
+            enable_wandb (Optional[bool]): Whether to initialize a Weights & Biases run.
+            enable_file (Optional[bool]): Whether to enable file logging.
+            enable_jsonl (Optional[bool]): Whether to enable JSONL logging.
+            log_level (Optional[str]): Log level for the run.
+            propagate (Optional[bool]): Whether to propagate logs to ancestor loggers.
+            reset_root (Optional[bool]): Whether to reset the root logger on run start.
+            capture_warnings (Optional[bool]): Whether to capture Python warnings.
 
         """
         self._run_name = name
@@ -76,8 +80,6 @@ class _RunContextManager(AbstractContextManager[RunContext]):
         self._context: Optional[RunContext] = None
         self._run_path: Optional[Path] = None
         self._active_token: Optional[Token] = None
-        # Mark kwargs as used so static checkers don't warn about unused parameters.
-        del kwargs
 
         # Sinks for logging overrides
         self._overrides: Dict[str, Any] = {}
@@ -91,6 +93,12 @@ class _RunContextManager(AbstractContextManager[RunContext]):
             self._overrides["enable_jsonl"] = enable_jsonl
         if log_level is not None:
             self._overrides["log_level"] = log_level
+        if propagate is not None:
+            self._overrides["propagate"] = propagate
+        if reset_root is not None:
+            self._overrides["reset_root"] = reset_root
+        if capture_warnings is not None:
+            self._overrides["capture_warnings"] = capture_warnings
 
     def __enter__(self) -> RunContext:
         """Create and register a new RunContext.

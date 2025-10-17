@@ -24,6 +24,9 @@ _CONSOLE_HANDLERS: Dict[str, logging.Handler] = {}
 _FILE_HANDLERS: Dict[str, logging.Handler] = {}
 _ROOT_PREV_LEVEL: Dict[str, int] = {}
 _JSONL_HANDLERS: Dict[str, Handler] = {}
+_ROOT_PREV_PROPAGATE: Dict[str, bool] = {}
+_ROOT_PREV_HANDLERS: Dict[str, list[logging.Handler]] = {}
+_WARNINGS_PREV: Dict[str, bool] = {}
 
 
 def attach_sinks(
@@ -39,6 +42,15 @@ def attach_sinks(
     Supports:
       - Text log file (events.log)
       - Weights & Biases (wandb)
+      - Console logging
+      - JSONL log file (events.jsonl)
+
+    Args:
+        run_id (str): Unique identifier for the run.
+        run_dir (Path): Directory where run artifacts are stored.
+        run_name (Optional[str]): Human-readable name of the run.
+        user_metadata (Dict[str, Any]): User-provided metadata for the run.
+        overrides (Dict[str, Any]): Configuration overrides for this run.
 
     Returns:
         Dict[str, Any]: Extra metadata to merge into metadata.json and RunContext.
@@ -48,6 +60,29 @@ def attach_sinks(
     extra: Dict[str, Any] = {}
 
     root = logging.getLogger()
+
+    # Reset root handlers if requested
+    reset_root = overrides.get("reset_root", getattr(_CONFIG, "reset_root", False))
+    if reset_root:
+        _ROOT_PREV_HANDLERS[run_id] = root.handlers[:]
+        for h in list(root.handlers):
+            root.removeHandler(h)
+
+    # Propagate setting
+    propagate = overrides.get("propagate", getattr(_CONFIG, "propagate", False))
+    _ROOT_PREV_PROPAGATE[run_id] = root.propagate
+    root.propagate = bool(propagate)
+
+    # Capture warnings (route warnings.warn -> logging)
+    # Note: logging.captureWarnings has no getter; we infer "previous" as whether
+    # py.warnings logger currently has handlers.
+    prev_captured = bool(logging.getLogger("py.warnings").handlers)
+    _WARNINGS_PREV[run_id] = prev_captured
+    capture = overrides.get(
+        "capture_warnings", getattr(_CONFIG, "capture_warnings", True)
+    )
+    logging.captureWarnings(bool(capture))
+
     # Store previous root log level to restore on detach
     lvl_name = overrides.get("log_level", getattr(_CONFIG, "log_level", "INFO"))
     try:
@@ -176,6 +211,26 @@ def detach_sinks(run_id: str) -> None:
     prev_level = _ROOT_PREV_LEVEL.pop(run_id, None)
     if prev_level is not None:
         logging.getLogger().setLevel(prev_level)
+
+    # Restore root propagate
+    prev_prop = _ROOT_PREV_PROPAGATE.pop(run_id, None)
+    if prev_prop is not None:
+        logging.getLogger().propagate = prev_prop
+
+    # Restore previous root handlers if we cleared them
+    prev_handlers = _ROOT_PREV_HANDLERS.pop(run_id, None)
+    if prev_handlers:
+        root = logging.getLogger()
+        for h in prev_handlers:
+            try:
+                root.addHandler(h)
+            except Exception:
+                pass
+
+    # Restore warnings capture state
+    prev_warn = _WARNINGS_PREV.pop(run_id, None)
+    if prev_warn is not None:
+        logging.captureWarnings(prev_warn)
 
 
 class _JsonlHandler(Handler):
