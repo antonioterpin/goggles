@@ -1,3 +1,5 @@
+"""Tests for console logging behavior in RunContext."""
+
 import logging
 import shutil
 import sys
@@ -5,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from goggles import run as public_run
 from goggles._core.run import _RunContextManager
 
 
@@ -27,78 +30,54 @@ def _flush_handlers():
             pass
 
 
-def test_console_emits_when_enabled(tmp_run_dir, capsys):
-    msg = "hello-from-console"
+def _ctx_factory(use_public_api, *, name, log_dir, **kwargs):
+    """
+    Return a context manager producing a RunContext, using either:
+      - public run(...), or
+      - core _RunContextManager(...)
+    """
+    if use_public_api:
+        return public_run(name=name, log_dir=str(log_dir), **kwargs)
+    return _RunContextManager(
+        name=name, log_dir=str(log_dir), user_metadata={}, **kwargs
+    )
 
-    ctx = _RunContextManager(
+
+@pytest.mark.parametrize("use_public_api", [True, False])
+def test_console_emits_when_enabled(tmp_run_dir, capsys, use_public_api):
+    msg = "hello-from-console"
+    ctx = _ctx_factory(
+        use_public_api,
         name="console-on",
-        log_dir=str(tmp_run_dir),
-        user_metadata={},
+        log_dir=tmp_run_dir,
         enable_wandb=False,
         enable_console=True,
         enable_file=False,
         enable_jsonl=False,
+        log_level="INFO",
     )
-
     with ctx:
-        root = logging.getLogger()
-        prev = root.level
-        try:
-            root.setLevel(logging.INFO)
-            logging.getLogger().info(msg)
-            _flush_handlers()
-        finally:
-            root.setLevel(prev)
+        logging.getLogger().info(msg)
+        _flush_handlers()
 
     out, err = capsys.readouterr()
-    # By default we stream to stdout; formatter includes level and logger name.
     assert msg in out
-    assert msg not in err  # sanity: we used stdout, not stderr
+    assert msg not in err  # streaming to stdout by default
 
 
-def test_console_does_not_emit_when_disabled(tmp_run_dir, capsys):
+@pytest.mark.parametrize("use_public_api", [True, False])
+def test_console_does_not_emit_when_disabled(tmp_run_dir, capsys, use_public_api):
     msg = "should-not-appear-on-console"
-
-    ctx = _RunContextManager(
+    ctx = _ctx_factory(
+        use_public_api,
         name="console-off",
-        log_dir=str(tmp_run_dir),
-        user_metadata={},
+        log_dir=tmp_run_dir,
         enable_wandb=False,
         enable_console=False,  # explicit off
         enable_file=False,
         enable_jsonl=False,
+        log_level="INFO",
     )
-
-    with ctx:
-        root = logging.getLogger()
-        prev = root.level
-        try:
-            root.setLevel(logging.INFO)
-            logging.getLogger().info(msg)
-            _flush_handlers()
-        finally:
-            root.setLevel(prev)
-
-    out, err = capsys.readouterr()
-    assert msg not in out
-    assert msg not in err
-
-
-def test_console_respects_log_level(tmp_run_dir, capsys):
-    msg = "info-should-be-filtered"
-
-    ctx = _RunContextManager(
-        name="console-level",
-        log_dir=str(tmp_run_dir),
-        user_metadata={},
-        enable_wandb=False,
-        enable_console=True,
-        enable_file=False,
-        enable_jsonl=False,
-    )
-    # Inject a per-run override for level if public wiring isn't present yet.
-    ctx._overrides["log_level"] = "WARNING"
-
     with ctx:
         logging.getLogger().info(msg)
         _flush_handlers()
@@ -108,29 +87,47 @@ def test_console_respects_log_level(tmp_run_dir, capsys):
     assert msg not in err
 
 
-def test_console_handler_detaches_on_exit(tmp_run_dir, capsys):
-    msg1 = "before-exit"
-    msg2 = "after-exit"
-
-    ctx = _RunContextManager(
-        name="console-detach",
-        log_dir=str(tmp_run_dir),
-        user_metadata={},
+@pytest.mark.parametrize("use_public_api", [True, False])
+def test_console_respects_log_level(tmp_run_dir, capsys, use_public_api):
+    msg = "info-should-be-filtered"
+    ctx = _ctx_factory(
+        use_public_api,
+        name="console-level",
+        log_dir=tmp_run_dir,
         enable_wandb=False,
         enable_console=True,
         enable_file=False,
         enable_jsonl=False,
+        log_level="WARNING",  # INFO should be filtered
     )
-
     with ctx:
-        root = logging.getLogger()
-        prev = root.level
-        try:
-            root.setLevel(logging.INFO)
-            logging.getLogger().info(msg1)
-            _flush_handlers()
-        finally:
-            root.setLevel(prev)
+        assert logging.getLogger().level == logging.WARNING
+        logging.getLogger().info(msg)
+        _flush_handlers()
+
+    out, err = capsys.readouterr()
+    assert msg not in out
+    assert msg not in err
+
+
+@pytest.mark.parametrize("use_public_api", [True, False])
+def test_console_handler_detaches_on_exit(tmp_run_dir, capsys, use_public_api):
+    msg1 = "before-exit"
+    msg2 = "after-exit"
+
+    ctx = _ctx_factory(
+        use_public_api,
+        name="console-detach",
+        log_dir=tmp_run_dir,
+        enable_wandb=False,
+        enable_console=True,
+        enable_file=False,
+        enable_jsonl=False,
+        log_level="INFO",
+    )
+    with ctx:
+        logging.getLogger().info(msg1)
+        _flush_handlers()
 
     out1, err1 = capsys.readouterr()
     assert msg1 in out1
@@ -144,7 +141,8 @@ def test_console_handler_detaches_on_exit(tmp_run_dir, capsys):
     assert msg2 not in err2
 
 
-def test_no_duplicate_console_handlers_across_runs(tmp_run_dir):
+@pytest.mark.parametrize("use_public_api", [True, False])
+def test_no_duplicate_console_handlers_across_runs(tmp_run_dir, use_public_api):
     def count_console_handlers():
         root = logging.getLogger()
         return sum(
@@ -155,15 +153,17 @@ def test_no_duplicate_console_handlers_across_runs(tmp_run_dir):
 
     before = count_console_handlers()
     for i in range(2):
-        with _RunContextManager(
+        ctx = _ctx_factory(
+            use_public_api,
             name=f"console-{i}",
-            log_dir=str(tmp_run_dir),
-            user_metadata={},
+            log_dir=tmp_run_dir,
             enable_wandb=False,
             enable_console=True,
             enable_file=False,
             enable_jsonl=False,
-        ):
+            log_level="INFO",
+        )
+        with ctx:
             pass
     after = count_console_handlers()
     assert after == before
