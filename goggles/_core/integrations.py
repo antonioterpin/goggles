@@ -14,7 +14,7 @@ import sys
 from typing import Any, Dict, Optional
 from logging import Handler
 
-from goggles._core.config import _CONFIG
+import goggles._core.config as _cfg
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ _JSONL_HANDLERS: Dict[str, Handler] = {}
 _ROOT_PREV_PROPAGATE: Dict[str, bool] = {}
 _ROOT_PREV_HANDLERS: Dict[str, list[logging.Handler]] = {}
 _WARNINGS_PREV: Dict[str, bool] = {}
+_PYWARN_ATTACHED: Dict[str, list[logging.Handler]] = {}
+_PYWARN_PREV_PROPAGATE: Dict[str, bool] = {}
 
 
 def attach_sinks(
@@ -62,29 +64,21 @@ def attach_sinks(
     root = logging.getLogger()
 
     # Reset root handlers if requested
-    reset_root = overrides.get("reset_root", getattr(_CONFIG, "reset_root", False))
+    reset_root = overrides.get(
+        "reset_root", _cfg.get_defaults().get("reset_root", False)
+    )
     if reset_root:
         _ROOT_PREV_HANDLERS[run_id] = root.handlers[:]
         for h in list(root.handlers):
             root.removeHandler(h)
 
     # Propagate setting
-    propagate = overrides.get("propagate", getattr(_CONFIG, "propagate", False))
+    propagate = overrides.get("propagate", _cfg.get_defaults().get("propagate", False))
     _ROOT_PREV_PROPAGATE[run_id] = root.propagate
     root.propagate = bool(propagate)
 
-    # Capture warnings (route warnings.warn -> logging)
-    # Note: logging.captureWarnings has no getter; we infer "previous" as whether
-    # py.warnings logger currently has handlers.
-    prev_captured = bool(logging.getLogger("py.warnings").handlers)
-    _WARNINGS_PREV[run_id] = prev_captured
-    capture = overrides.get(
-        "capture_warnings", getattr(_CONFIG, "capture_warnings", True)
-    )
-    logging.captureWarnings(bool(capture))
-
     # Store previous root log level to restore on detach
-    lvl_name = overrides.get("log_level", getattr(_CONFIG, "log_level", "INFO"))
+    lvl_name = overrides.get("log_level", _cfg.get_defaults().get("log_level", "INFO"))
     try:
         lvl_value = getattr(logging, str(lvl_name).upper())
     except Exception:
@@ -95,7 +89,7 @@ def attach_sinks(
 
     # Console handler
     enable_console = overrides.get(
-        "enable_console", getattr(_CONFIG, "enable_console", True)
+        "enable_console", _cfg.get_defaults().get("enable_console", True)
     )
     if enable_console:
         ch = logging.StreamHandler(stream=sys.stdout)
@@ -105,7 +99,9 @@ def attach_sinks(
         extra.setdefault("logs", {})["console"] = "stdout"
 
     # Text .log file
-    enable_file = overrides.get("enable_file", getattr(_CONFIG, "enable_file", True))
+    enable_file = overrides.get(
+        "enable_file", _cfg.get_defaults().get("enable_file", True)
+    )
     if enable_file:
         log_path = Path(run_dir) / "events.log"
         handler = logging.FileHandler(log_path, encoding="utf-8")
@@ -118,7 +114,7 @@ def attach_sinks(
 
     # JSONL file
     enable_jsonl = overrides.get(
-        "enable_jsonl", getattr(_CONFIG, "enable_jsonl", False)
+        "enable_jsonl", _cfg.get_defaults().get("enable_jsonl", False)
     )
     if enable_jsonl:
         jsonl_path = Path(run_dir) / "events.jsonl"
@@ -129,7 +125,7 @@ def attach_sinks(
 
     # Weights & Biases
     enable_wandb = overrides.get(
-        "enable_wandb", getattr(_CONFIG, "enable_wandb", False)
+        "enable_wandb", _cfg.get_defaults().get("enable_wandb", False)
     )
     if enable_wandb:
         try:
@@ -153,6 +149,45 @@ def attach_sinks(
         except Exception as err:
             logger.warning("Failed to initialize W&B; continuing without it: %s", err)
 
+    # Capture warnings (route warnings.warn -> logging)
+    # Note: logging.captureWarnings has no getter; we infer "previous" as whether
+    # py.warnings logger currently has handlers.
+    prev_captured = bool(logging.getLogger("py.warnings").handlers)
+    _WARNINGS_PREV[run_id] = prev_captured
+    capture = overrides.get(
+        "capture_warnings", _cfg.get_defaults().get("capture_warnings", True)
+    )
+    logging.captureWarnings(bool(capture))
+
+    # If warnings are captured, mirror our sinks onto the 'py.warnings' logger
+    if bool(capture):
+        pyw = logging.getLogger("py.warnings")
+
+        # Save and force-propagate, so that if we *don't* attach a given sink here,
+        # warnings can still flow to root handlers as a fallback.
+        _PYWARN_PREV_PROPAGATE[run_id] = pyw.propagate
+        pyw.propagate = True
+
+        attached: list[logging.Handler] = []
+
+        ch = _CONSOLE_HANDLERS.get(run_id)
+        if ch is not None:
+            pyw.addHandler(ch)
+            attached.append(ch)
+
+        fh = _FILE_HANDLERS.get(run_id)
+        if fh is not None:
+            pyw.addHandler(fh)
+            attached.append(fh)
+
+        jh = _JSONL_HANDLERS.get(run_id)
+        if jh is not None:
+            pyw.addHandler(jh)
+            attached.append(jh)
+
+        if attached:
+            _PYWARN_ATTACHED[run_id] = attached
+
     return extra
 
 
@@ -163,6 +198,21 @@ def detach_sinks(run_id: str) -> None:
         run_id (str): The unique identifier of the run to clean up.
 
     """
+    # Detach any handlers we added to 'py.warnings'
+    attached = _PYWARN_ATTACHED.pop(run_id, None)
+    if attached:
+        pyw = logging.getLogger("py.warnings")
+        for h in attached:
+            try:
+                pyw.removeHandler(h)
+            except Exception:
+                pass
+
+    # Restore py.warnings propagate
+    prev_pyw_prop = _PYWARN_PREV_PROPAGATE.pop(run_id, None)
+    if prev_pyw_prop is not None:
+        logging.getLogger("py.warnings").propagate = prev_pyw_prop
+
     # Remove console handler
     ch = _CONSOLE_HANDLERS.pop(run_id, None)
     if ch is not None:
@@ -261,8 +311,10 @@ class _JsonlHandler(Handler):
 
         """
         try:
+            msg = record.getMessage()
             payload = {
-                "message": record.getMessage(),
+                "msg": msg,
+                "message": msg,
                 "name": record.name,
                 "level": record.levelno,
                 "levelname": record.levelname,
@@ -272,6 +324,11 @@ class _JsonlHandler(Handler):
                 "pathname": record.pathname,
                 "lineno": record.lineno,
             }
+            # Preserve BoundLogger-structured context if present
+            if hasattr(record, "_g_bound"):
+                payload["_g_bound"] = getattr(record, "_g_bound")
+            if hasattr(record, "_g_extra"):
+                payload["_g_extra"] = getattr(record, "_g_extra")
             self._fp.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except Exception:
             self.handleError(record)

@@ -26,6 +26,7 @@ from .integrations import attach_sinks, detach_sinks, upload_artifacts
 from .utils import _now_utc_iso, _python_version, _short_id, _write_json
 
 logger = logging.getLogger(__name__)
+
 # The currently active run context, if any. Prevents nested run(...) calls.
 _ACTIVE_RUN: ContextVar[RunContext | None] = ContextVar("_g_active_run", default=None)
 
@@ -245,3 +246,13 @@ class _RunContextManager(AbstractContextManager[RunContext]):
             if self._active_token is not None:
                 _ACTIVE_RUN.reset(self._active_token)
                 self._active_token = None
+
+
+def get_active_run() -> Optional[RunContext]:
+    """Get the currently active RunContext, if any.
+
+    Returns:
+        Optional[RunContext]: The active run context, or None if no run is active.
+
+    """
+    return _ACTIVE_RUN.get()

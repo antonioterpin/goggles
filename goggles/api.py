@@ -110,25 +110,24 @@ class BoundLogger(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Module-level state (read-only for consumers; owned by implementation)
+# Public API functions (contracts only; implementations live in _core)
 # ---------------------------------------------------------------------------
 
-# NOTE: These variables are *owned* by the internal implementation. They are
-# declared here purely to make the state shape explicit to implementers and to
-# help static analyzers in downstream projects.
-_active_run: Optional[RunContext] = None
-"""Holds the currently active run if `run(...)` is entered, else `None`.
 
-Implementation notes:
-- Must be set exactly once at `run(...)` entry and cleared on exit.
-- Nested `run(...)` calls should either raise `RuntimeError` or be a no-op
-  (the former is recommended for clarity and testability).
-"""
+def current_run() -> Optional[RunContext]:
+    """Return the currently active RunContext for this context (or None).
 
+    This is read-only and reflects the active run as tracked by the backend.
+    Implementations should source this from a context-local store (e.g., ContextVar).
 
-# ---------------------------------------------------------------------------
-# Public API functions (contracts only; implementations live elsewhere)
-# ---------------------------------------------------------------------------
+    Returns:
+        Optional[RunContext]: The active run context, or None if no run is active.
+
+    """
+    # Lazy import to avoid import-time side effects / cycles
+    from ._core.run import get_active_run
+
+    return get_active_run()
 
 
 def configure(**defaults: Any) -> None:
@@ -392,6 +391,7 @@ __all__ = [
     "configure",
     "run",
     "get_logger",
+    "current_run",
     "scalar",
     "image",
     "video",
@@ -404,7 +404,9 @@ __all__ = [
 # - Provide real implementations behind a private module hierarchy, e.g.:
 #     goggles/_core/run.py        -> actual run() implementation
 #     goggles/_core/logger.py     -> BoundLogger implementation
-#     goggles/_core/metrics.py    -> scalar/image/video backends
+#     goggles/_core/config.py     -> configure() implementation
+#     goggles/_core/integrations.py -> W&B and other sink integrations
+#
 # - In `goggles/__init__.py`, re-export the symbols from this file so users can:
 #     import goggles as gg
 #     with gg.run(...):

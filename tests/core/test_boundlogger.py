@@ -70,7 +70,7 @@ def test_emit_calls_correct_logger_method(core_log, mock_logger, level):
     assert call_args[0] == "msg"
     extra = call_kwargs["extra"]
     assert "_g_bound" in extra
-    assert extra["step"] == 1
+    assert extra["_g_extra"]["step"] == 1
 
 
 def test_bind_fields_appear_in_extra(core_log, mock_logger):
@@ -79,7 +79,8 @@ def test_bind_fields_appear_in_extra(core_log, mock_logger):
     _, kwargs = mock_logger.info.call_args
     extra = kwargs["extra"]
     assert extra["_g_bound"] == {"task": "train"}
-    assert extra["step"] == 42
+
+    assert extra["_g_extra"]["step"] == 42
 
 
 def test_exception_method_calls_logger_exception(core_log, mock_logger):

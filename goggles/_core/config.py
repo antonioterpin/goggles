@@ -18,8 +18,8 @@ Example usage:
         gg.scalar("train/loss", 0.123, step=0)
 """
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, Dict
 
 
 @dataclass
@@ -33,7 +33,7 @@ class Defaults:
         enable_wandb (bool): Whether to enable Weights & Biases logging by default.
         log_level (str): Default log level (e.g., "DEBUG", "INFO").
         propagate (bool): Whether to propagate logs to ancestor loggers.
-        reset_root (bool | None): Whether to reset the root logger on run start.
+        reset_root (bool): Whether to reset the root logger on run start.
         capture_warnings (bool): Whether to capture Python warnings.
 
     """
@@ -43,8 +43,8 @@ class Defaults:
     enable_file: bool = True
     enable_jsonl: bool = False
     log_level: str = "INFO"
-    propagate: bool = True
-    reset_root: bool | None = None
+    propagate: bool = False
+    reset_root: bool = False
     capture_warnings: bool = True
     enable_artifacts: bool = False
     artifact_name: str = "goggles-artifacts"
@@ -79,7 +79,24 @@ def configure(**defaults: Any) -> None:
         ValueError: If an unknown configuration key is provided.
 
     """
+    global _CONFIG
     for key, value in defaults.items():
         if not hasattr(_CONFIG, key):
             raise ValueError(f"Unknown configuration key: {key}")
-        setattr(_CONFIG, key, value)
+        _CONFIG = replace(_CONFIG, **{key: value})
+
+
+def get_defaults() -> Dict[str, Any]:
+    """Return a copy of the current default as a plain dict.
+
+    Returns:
+        Dict[str, Any]: Current default configuration as a dictionary.
+
+    """
+    return _CONFIG.__dict__.copy()
+
+
+def reset_defaults() -> None:
+    """Reset the global default configuration to its initial state."""
+    global _CONFIG
+    _CONFIG = Defaults()

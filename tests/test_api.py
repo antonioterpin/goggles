@@ -25,6 +25,7 @@ def test_public_exports_match_contract():
         "BoundLogger",
         "configure",
         "run",
+        "current_run",
         "get_logger",
         "scalar",
         "image",

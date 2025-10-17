@@ -16,7 +16,7 @@ not by inheritance.
 import logging
 from typing import Any, Dict, Mapping, Optional
 
-from goggles.api import BoundLogger
+from goggles import BoundLogger, current_run
 
 
 class CoreBoundLogger:
@@ -186,11 +186,24 @@ class CoreBoundLogger:
             **extra: Per-call structured fields.
 
         """
-        # Merge persistent + transient context.
-        merged_extra = {"_g_bound": self._bound, **extra}
+        # Strip reserved keys users shouldn't clobber.
+        extra = {
+            k: v
+            for k, v in (extra or {}).items()
+            if k not in {"_g_bound", "_g_extra", "run"}
+        }
+
+        record_extra: Dict[str, Any] = {
+            "_g_bound": self._bound,
+            "_g_extra": dict(extra),
+        }
+
+        run_ctx = current_run()
+        if run_ctx is not None:
+            record_extra["run"] = run_ctx
 
         # Dispatch to the underlying logger.
-        getattr(self._logger, level)(msg, extra=merged_extra)
+        getattr(self._logger, level)(msg, extra=record_extra)
 
     # -------------------------------------------------------------------------
     # Introspection / representation
