@@ -3,7 +3,6 @@ from pathlib import Path
 import goggles as gg
 
 
-# NOTE: this one doesn't work yet because of missing image/video support.
 def main(args):
     gg.configure(enable_console=False, enable_jsonl=True)
 

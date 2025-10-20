@@ -3,7 +3,8 @@
 from __future__ import annotations
 import warnings
 from typing import Any
-from .api import get_logger, scalar as _scalar, image as _image, video as _video
+from .api import get_logger
+from .logger import scalar as _scalar, image as _image, video as _video
 
 
 def _warn(name: str, repl: str) -> None:
@@ -43,19 +44,22 @@ def error(msg: str, /, **extra: Any) -> None:
 def scalar(tag: str, value: float, *, step: int | None = None, **kw: Any) -> None:
     """Log a scalar metric."""
     _warn("scalar", "goggles.scalar(tag, value, step=..., **kw)")
-    _scalar(tag, value, step=step, **kw)
+    _scalar(tag, value)
 
 
 def image(tag: str, data: Any, *, step: int | None = None, **kw: Any) -> None:
     """Log an image artifact."""
     _warn("image", "goggles.image(tag, data, step=..., **kw)")
-    _image(tag, data, step=step, **kw)
+    _image(tag, data)
 
 
 def video(tag: str, data: Any, *, step: int | None = None, **kw: Any) -> None:
     """Log a video artifact."""
+    print(
+        "DEPRECATION WARNING: goggles.video() is deprecated and will be removed in a future release; use goggles.video(tag, data, step=..., **kw) instead."
+    )
     _warn("video", "goggles.video(tag, data, step=..., **kw)")
-    _video(tag, data, step=step, **kw)
+    _video(tag, data)
 
 
 # Stubs for legacy scheduler/cleanup APIs — keep as no-ops with guidance.

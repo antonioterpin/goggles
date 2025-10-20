@@ -15,9 +15,11 @@ from multiprocessing import shared_memory
 from contextlib import contextmanager
 import wandb
 
+from goggles import get_logger
 from .config import load_configuration
 from .severity import Severity
 
+log = get_logger(__name__)
 
 # --- Load defaults, which are constant across all instances and immutable ---
 _consts = {
@@ -290,8 +292,11 @@ def video(
     to_file: bool = True,
 ):
     """Log a video."""
+    if video is None:
+        log.warning("No video data provided; skipping video logging.")
+        return
     shared = _read_shm()
-    out_dir = os.path.join(_consts["logdir"], shared["name"], "videos")
+    out_dir = os.path.join(_consts["logdir"], str(name), "videos")
     os.makedirs(out_dir, exist_ok=True, mode=0o777)
     path = os.path.join(out_dir, f"{name}.webm")
 
@@ -312,6 +317,7 @@ def video(
             "25",
         ],
     )
+
     for frame in video:
         writer.append_data(frame)
     writer.close()

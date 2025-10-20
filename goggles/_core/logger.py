@@ -178,7 +178,9 @@ class CoreBoundLogger:
         the corresponding method on the underlying `logging.Logger`.
 
         Note: `_g_bound` is reserved for Goggles' internal use and should not
-        be set by users.
+        be set by users. "stacklevel" is also reserved to control the logging stack level.
+        "run" is reserved to attach the current run context. "_g_extra" contains
+        user-provided extra fields.
 
         Args:
             level: Logging level name (e.g., "info", "debug").
@@ -186,11 +188,14 @@ class CoreBoundLogger:
             **extra: Per-call structured fields.
 
         """
+        # Reserve and pop user-provided control kwargs.
+        user_stacklevel = int((extra or {}).pop("stacklevel", 3))
+
         # Strip reserved keys users shouldn't clobber.
         extra = {
             k: v
             for k, v in (extra or {}).items()
-            if k not in {"_g_bound", "_g_extra", "run"}
+            if k not in {"_g_bound", "_g_extra", "run", "stacklevel"}
         }
 
         record_extra: Dict[str, Any] = {
@@ -203,7 +208,9 @@ class CoreBoundLogger:
             record_extra["run"] = run_ctx
 
         # Dispatch to the underlying logger.
-        getattr(self._logger, level)(msg, extra=record_extra)
+        getattr(self._logger, level)(
+            msg, extra=record_extra, stacklevel=user_stacklevel
+        )
 
     # -------------------------------------------------------------------------
     # Introspection / representation

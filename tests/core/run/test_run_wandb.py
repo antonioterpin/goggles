@@ -30,7 +30,7 @@ def test_run_context_manager_wandb_integration(tmp_run_dir, enable):
     fake_run = SimpleNamespace(
         id="abc123",
         url="https://wandb.test/run/abc123",
-        project_name=lambda: "demo_project",
+        project="demo_project",
         entity="test_user",
         finish=MagicMock(),
     )
@@ -120,7 +120,7 @@ def test_configure_defaults_enable_then_run_override_disable(tmp_run_dir, monkey
     fake_run = SimpleNamespace(
         id="abc123",
         url="https://wandb.test/run/abc123",
-        project_name=lambda: "demo_project",
+        project="demo_project",
         entity="test_user",
         finish=MagicMock(),
     )
@@ -152,7 +152,7 @@ def test_configure_enables_when_run_override_is_none(tmp_run_dir):
     fake_run = SimpleNamespace(
         id="abc123",
         url="https://wandb.test/run/abc123",
-        project_name=lambda: "demo_project",
+        project="demo_project",
         entity="test_user",
         finish=MagicMock(),
     )
@@ -179,7 +179,7 @@ def test_metadata_contains_wandb_when_enabled(tmp_run_dir):
     fake_run = SimpleNamespace(
         id="abc123",
         url="https://wandb.test/run/abc123",
-        project_name=lambda: "demo_project",
+        project="demo_project",
         entity="test_user",
         finish=MagicMock(),
     )

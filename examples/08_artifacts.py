@@ -3,14 +3,13 @@ from pathlib import Path
 import goggles as gg
 
 
-# TODO: check if it works with W&B once we have full support for scalars/images/videos.
 def main(args):
     gg.configure(enable_console=False, enable_file=True, enable_artifacts=True)
 
     with gg.run(
         "artifacts",
         log_dir=args.log_dir,
-        enable_artifacts=True,  # can also be set via configure()
+        enable_artifacts=True,
         artifact_name="goggles-artifacts",
         artifact_type="goggles-run",
     ) as ctx:

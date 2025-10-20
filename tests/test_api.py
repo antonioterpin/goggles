@@ -143,6 +143,43 @@ def test_symbols_are_callable_or_types(name):
                     assert hasattr(log, "info")
                 elif name == "configure":
                     obj()
+                elif name == "current_run":
+                    obj()
+                elif name == "RunContext":
+                    obj(
+                        run_id="test",
+                        run_name="test",
+                        log_dir="/tmp",
+                        created_at=0,
+                        pid=0,
+                        host="localhost",
+                        python={},
+                        metadata={},
+                        wandb=None,
+                    )
+                elif name == "BoundLogger":
+
+                    class Dummy:
+                        def __init__(self, name):
+                            self.name = name
+
+                        def bind(self, **kwargs):
+                            pass
+
+                        def info(self, msg, **kwargs):
+                            pass
+
+                        def debug(self, msg, **kwargs):
+                            pass
+
+                        def warning(self, msg, **kwargs):
+                            pass
+
+                        def error(self, msg, **kwargs):
+                            pass
+
+                    log = Dummy("test")
+                    assert isinstance(log, object)
         except NotImplementedError:
             # Allowed for unimplemented stubs
             pass

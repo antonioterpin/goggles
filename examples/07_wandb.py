@@ -3,7 +3,6 @@ import argparse
 import goggles as gg
 
 
-# NOTE: requires wandb and doesn't work yet because of missing scalar/image/video support.
 def main(args):
     gg.configure(enable_console=False, enable_jsonl=True, enable_wandb=True)
 

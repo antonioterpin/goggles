@@ -37,6 +37,9 @@ from .api import (
     run,
     get_logger,
     current_run,
+)
+
+from .legacy import (
     scalar as _scalar_impl,
     image as _image_impl,
     video as _video_impl,

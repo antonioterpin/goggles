@@ -131,20 +131,19 @@ def attach_sinks(
         try:
             import wandb  # type: ignore[import-not-found]
 
-            wb = wandb.init(
+            run = wandb.init(
                 project=user_metadata.get("project", "goggles"),
                 name=run_name,
                 dir=str(run_dir),
                 config=user_metadata,
-                reinit=True,
-                settings=wandb.Settings(start_method="thread"),
+                reinit="finish_previous",
             )
-            _WANDB_RUNS[run_id] = wb
+            _WANDB_RUNS[run_id] = run
             extra["wandb"] = {
-                "id": wb.id,
-                "url": wb.url,
-                "project": wb.project_name(),
-                "entity": getattr(wb, "entity", None),
+                "id": run.id,
+                "url": run.url,
+                "project": run.project,
+                "entity": getattr(run, "entity", None),
             }
         except Exception as err:
             logger.warning("Failed to initialize W&B; continuing without it: %s", err)
