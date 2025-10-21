@@ -21,7 +21,7 @@ operations under load; no blocking backpressure is introduced here.
 import threading
 import time
 from collections import deque, defaultdict
-from typing import Any, Deque, Dict, Optional, Tuple
+from typing import Deque, Dict, Optional, Tuple
 
 from .event import MetricEvent
 
@@ -75,7 +75,7 @@ class MetricsQueue:
             raise ValueError(f"Invalid drop_policy: {drop_policy}")
 
         self._maxsize = maxsize
-        self._queue: Deque[Any] = deque(maxlen=maxsize)
+        self._queue: Deque[MetricEvent] = deque(maxlen=maxsize)
         self._lock = threading.Lock()
         self._rate_limits = rate_limits or {}
         self._timestamps: Dict[str, Deque[float]] = defaultdict(deque)

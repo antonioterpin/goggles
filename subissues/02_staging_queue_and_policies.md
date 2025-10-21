@@ -12,7 +12,7 @@ A bounded queue with rate limits and drop policies ensures predictable performan
 
 - Design a thread-safe, bounded queue for metrics events.
 - Implement per-type rate limiting (e.g., images per N steps).
-- Support drop policies: DROP_OLDEST, DROP_NEWEST, MERGE.
+- Support drop policies: DROP_OLDEST, DROP_NEWEST.
 - Integrate queue with metrics API (`push` enqueues events).
 - Expose queue depth and drop counters for observability.
 
