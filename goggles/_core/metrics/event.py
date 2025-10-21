@@ -38,7 +38,10 @@ import numpy as np
 # Payload type aliases
 # ---------------------------------------------------------------------------
 ArrayLike = Any  # np.ndarray | jax.Array | torch.Tensor | etc.
-MetricPayload = float | int | ArrayLike | list[float] | tuple[float, ...]
+MaterializedPayload = bytes  # PNG, JPEG, MP4, or serialized blob
+MetricPayload = (
+    float | int | ArrayLike | list[float] | tuple[float, ...] | MaterializedPayload
+)
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +116,12 @@ class MetricEvent:
             raise TypeError("tags must be a list of strings.")
         if not isinstance(self.context, dict):
             raise TypeError("context must be a dictionary.")
+
+        state = self.context.get("_state", "raw")
+        if state == "materialized":
+            if not isinstance(self.payload, bytes):
+                raise TypeError("Materialized payloads must be bytes (e.g., PNG, MP4).")
+            return  # Skip further validation for materialized payloads
 
         validator = getattr(self, f"_validate_{self.type}", None)
         if validator is None:

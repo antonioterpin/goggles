@@ -158,6 +158,40 @@ def test_tags_and_context_validation():
 
 
 # ---------------------------------------------------------------------------
+# Materialized payload tests
+# ---------------------------------------------------------------------------
+def test_materialized_event_skips_validation():
+    """Ensure that events with _state='materialized' accept bytes payloads."""
+    payload = b"\x89PNG\r\n\x1a\n..."  # dummy encoded data
+
+    # Should not raise, because _state='materialized' bypasses array validation
+    event = MetricEvent(
+        key="train/image",
+        type="image",
+        step=0,
+        payload=payload,
+        context={"_state": "materialized"},
+    )
+
+    assert event.key == "train/image"
+    assert event.context["_state"] == "materialized"
+    assert isinstance(event.payload, (bytes, bytearray))
+
+
+@pytest.mark.parametrize("bad_payload", [123, np.zeros((8, 8, 3))])
+def test_materialized_event_raises_if_not_bytes(bad_payload):
+    """Ensure that invalid materialized payloads raise TypeError."""
+    with pytest.raises(TypeError):
+        MetricEvent(
+            key="train/image",
+            type="image",
+            step=0,
+            payload=bad_payload,
+            context={"_state": "materialized"},
+        )
+
+
+# ---------------------------------------------------------------------------
 # to_dict utility
 # ---------------------------------------------------------------------------
 def test_to_dict_produces_dict():
