@@ -120,7 +120,7 @@ class MetricsQueue:
             overflow.
 
         """
-        event_type = getattr(event, "event_type", "default")
+        event_type = getattr(event, "type", "default")
 
         with self._lock:
             # Rate limiting check
