@@ -22,7 +22,7 @@ import os
 import tempfile
 import threading
 from dataclasses import replace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Tuple
 
 import numpy as np
 from PIL import Image
@@ -135,7 +135,7 @@ class MaterializerWorker(threading.Thread):
 
             try:
                 out = self.process_event(event)
-            except Exception as err:  # pragma: no cover
+            except Exception as err:
                 self._log.exception("Materializer failed: %s", err)
                 out = self._attach_error(event, f"{type(err).__name__}: {err}")
 
@@ -147,39 +147,26 @@ class MaterializerWorker(threading.Thread):
                 )
 
     def process_event(self, event: MetricEvent) -> MetricEvent:
-        """Materialize a single `MetricEvent`.
-
-        Performs:
-            1. Device-to-host transfer.
-            2. Optional downscaling.
-            3. Quantization to uint8.
-            4. Encoding to image or video bytes.
+        """Materialize and repackage a MetricEvent with encoded payload.
 
         Args:
-            event (MetricEvent): Input event containing an array payload.
+            event (MetricEvent): Input event with array payload.
 
         Returns:
-            MetricEvent: New event with encoded `payload`, `encoding` metadata,
-                and `materialized=True`.
+            MetricEvent: New event with encoded bytes as payload and metadata
+                stored in `context` (encoding info, materialized flag).
 
         Raises:
-            TypeError: If event payload is missing or unsupported.
-            ValueError: If payload has unsupported dimensions.
+            TypeError: If the payload type is unsupported.
+            ValueError: If the array rank is not 2D/3D (image) or 4D (video).
 
         """
-        payload = (
-            getattr(event, "payload", None)
-            if hasattr(event, "payload")
-            else (event.get("payload") if isinstance(event, dict) else None)
-        )
-        if payload is None:
-            raise TypeError("Event has no 'payload'.")
-
+        payload = event.payload
         arr = self._to_numpy(payload)
 
+        # Downscale if requested
         if self._downscale > 1:
             s = self._downscale
-            # Downscale by simple striding for efficiency
             if arr.ndim in (2, 3):
                 arr = arr[::s, ::s, ...]
             elif arr.ndim == 4:
@@ -189,6 +176,7 @@ class MaterializerWorker(threading.Thread):
 
         arr = self._quantize(arr)
 
+        # Encode depending on rank
         if arr.ndim in (2, 3):
             data, meta = self._encode_image(arr, self._image_fmt)
         elif arr.ndim == 4:
@@ -196,23 +184,18 @@ class MaterializerWorker(threading.Thread):
         else:
             raise ValueError("Unsupported payload rank")
 
-        # Preserve event type (dataclass or dict)
-        if hasattr(event, "__dict__"):
-            try:
-                return replace(event, payload=data, encoding=meta, materialized=True)
-            except Exception:
-                setattr(event, "payload", data)
-                setattr(event, "encoding", meta)
-                setattr(event, "materialized", True)
-                return event
-        if isinstance(event, dict):
-            e = dict(event)
-            e["payload"] = data
-            e["encoding"] = meta
-            e["materialized"] = True
-            # Construct and return a MetricEvent so the return type is consistent.
-            return MetricEvent(**e)
-        return event
+        # Build updated context (metadata lives inside context, not as attributes)
+        new_context = {**event.context, "encoding": meta, "_state": "materialized"}
+
+        return MetricEvent(
+            key=event.key,
+            type=event.type,
+            step=event.step,
+            payload=data,
+            ts=event.ts,
+            tags=list(event.tags),
+            context=new_context,
+        )
 
     def _to_numpy(self, x: Any) -> np.ndarray:
         """Convert a supported input to a NumPy array."""
@@ -255,28 +238,51 @@ class MaterializerWorker(threading.Thread):
             y = (x - xmin) * (255.0 / rng)
         return y.astype(np.uint8)
 
-    def _encode_image(self, img: np.ndarray, fmt: str) -> tuple[bytes, dict]:
-        """Encode a 2D or 3D array as PNG or JPEG bytes."""
+    def _encode_image(self, img: np.ndarray, fmt: str) -> Tuple[bytes, dict]:
+        """Encode a 2D or 3D NumPy array as PNG or JPEG bytes.
+
+        Args:
+            img (np.ndarray):
+                Image array of shape (H, W) or (H, W, C) where C ∈ {1, 3, 4}.
+            fmt (str): Output format, must be 'png' or 'jpeg'.
+
+        Returns:
+            Tuple[bytes, dict]: Encoded image bytes and metadata, including
+                content type and shape.
+
+        Raises:
+            ValueError: If channel count or dimensionality is invalid.
+
+        """
+        # Normalize image to 3D if needed
         if img.ndim == 2:
-            pil = Image.fromarray(img, mode="L")
+            arr = img
         elif img.ndim == 3 and img.shape[-1] in (1, 3, 4):
-            mode = {1: "L", 3: "RGB", 4: "RGBA"}[img.shape[-1]]
-            pil = Image.fromarray(
-                img.squeeze(-1) if img.shape[-1] == 1 else img, mode=mode
-            )
+            # Drop singleton channel dimension safely
+            arr = img.squeeze(-1) if img.shape[-1] == 1 else img
         else:
             raise ValueError("Image must be HxW, HxWx1, HxWx3, or HxWx4.")
+
+        try:
+            pil = Image.fromarray(arr)
+        except ValueError:
+            # Fallback for legacy Pillow or unusual array dtypes
+            ch = arr.shape[-1] if arr.ndim == 3 else 1
+            mode = {1: "L", 3: "RGB", 4: "RGBA"}[ch]
+            pil = Image.fromarray(arr, mode)
+
         buf = io.BytesIO()
         save_kwargs = {}
         if fmt == "jpeg":
             save_kwargs.update(quality=90, optimize=True)
         pil.save(buf, format="JPEG" if fmt == "jpeg" else "PNG", **save_kwargs)
+
         return buf.getvalue(), {
             "content_type": "image/jpeg" if fmt == "jpeg" else "image/png",
             "shape": tuple(img.shape),
         }
 
-    def _encode_video(self, vid: np.ndarray, fmt: str, fps: int) -> tuple[bytes, dict]:
+    def _encode_video(self, vid: np.ndarray, fmt: str, fps: int) -> Tuple[bytes, dict]:
         """Encode a 4D array as an MP4 video.
 
         Args:
@@ -285,7 +291,7 @@ class MaterializerWorker(threading.Thread):
             fps (int): Frames per second.
 
         Returns:
-            tuple[bytes, dict]: Encoded bytes and metadata.
+            Tuple[bytes, dict]: Encoded bytes and metadata.
 
         Raises:
             RuntimeError: If `imageio` is unavailable.
@@ -322,13 +328,35 @@ class MaterializerWorker(threading.Thread):
             "fps": fps,
         }
 
-    def _attach_error(self, event: Any, msg: str) -> Any:
-        """Attach an error message to an event."""
-        if hasattr(event, "__dict__"):
-            setattr(event, "materializer_error", msg)
-            return event
-        if isinstance(event, dict):
-            e = dict(event)
-            e["materializer_error"] = msg
-            return e
-        return event
+    def _attach_error(self, event: MetricEvent, msg: str) -> MetricEvent:
+        """Return a new MetricEvent tagged with a materialization error.
+
+        This method creates a new immutable MetricEvent whose context
+        includes the error message and internal state marker.
+
+        Args:
+            event (MetricEvent): Original event that failed processing.
+            msg (str): Error message to attach.
+
+        Returns:
+            MetricEvent: New event with error context.
+
+        """
+        if not isinstance(event, MetricEvent):
+            raise TypeError(f"_attach_error expected MetricEvent, got {type(event)}")
+
+        new_context = {
+            **event.context,
+            "_state": "error",
+            "materializer_error": msg,
+        }
+
+        return MetricEvent(
+            key=event.key,
+            type=event.type,
+            step=event.step,
+            payload=event.payload,
+            ts=event.ts,
+            tags=list(event.tags),
+            context=new_context,
+        )
