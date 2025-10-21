@@ -12,7 +12,6 @@ before serialization/export. It enforces per-type rate limits and supports
 overflow strategies:
   * DROP_OLDEST — evict the oldest event when full,
   * DROP_NEWEST — reject the incoming event,
-  * MERGE — coalesce with the most recent event if it exposes `merge()`.
 
 For observability, drop counters are maintained per event type, and queue depth
 is exposed. The implementation favors predictability and constant-time
@@ -43,7 +42,6 @@ class MetricsQueue:
 
     DROP_OLDEST = "DROP_OLDEST"
     DROP_NEWEST = "DROP_NEWEST"
-    MERGE = "MERGE"
 
     def __init__(
         self,
@@ -61,7 +59,6 @@ class MetricsQueue:
             drop_policy (str): Overflow handling policy:
                 * `"DROP_OLDEST"` — Discard oldest event when full.
                 * `"DROP_NEWEST"` — Drop new event and increment drop counter.
-                * `"MERGE"` — Attempt to merge with last event if possible.
 
         Raises:
             ValueError: If `maxsize` <= 0 or if `drop_policy` is invalid.
@@ -74,7 +71,7 @@ class MetricsQueue:
         """
         if maxsize <= 0:
             raise ValueError("maxsize must be > 0")
-        if drop_policy not in {self.DROP_OLDEST, self.DROP_NEWEST, self.MERGE}:
+        if drop_policy not in {self.DROP_OLDEST, self.DROP_NEWEST}:
             raise ValueError(f"Invalid drop_policy: {drop_policy}")
 
         self._maxsize = maxsize
@@ -122,10 +119,6 @@ class MetricsQueue:
             bool: True if enqueued successfully, False if dropped due to rate limit or
             overflow.
 
-        Notes:
-            - When using the `"MERGE"` policy, if the last queued event defines a callable
-              `merge()` method, it will be invoked with the new event instead of appending.
-
         """
         event_type = getattr(event, "event_type", "default")
 
@@ -142,13 +135,6 @@ class MetricsQueue:
                 elif self._drop_policy == self.DROP_NEWEST:
                     self._drop_counts[event_type] += 1
                     return False
-                elif self._drop_policy == self.MERGE and self._queue:
-                    last = self._queue[-1]
-                    if hasattr(last, "merge") and callable(last.merge):
-                        last.merge(event)
-                        return True
-                    else:
-                        self._queue.popleft()
 
             self._queue.append(event)
             return True
