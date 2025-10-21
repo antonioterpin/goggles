@@ -37,11 +37,8 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # Payload type aliases
 # ---------------------------------------------------------------------------
-ScalarPayload = float | int
-ImagePayload = np.ndarray
-VideoPayload = np.ndarray
-HistogramPayload = np.ndarray | list[float] | tuple[float, ...]
-MetricPayload = ScalarPayload | ImagePayload | VideoPayload | HistogramPayload
+ArrayLike = Any  # np.ndarray | jax.Array | torch.Tensor | etc.
+MetricPayload = float | int | ArrayLike | list[float] | tuple[float, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +96,13 @@ class MetricEvent:
     # Validation logic
     # -------------------------------------------------------------------------
     def __post_init__(self):
-        """Validate field types and payload structure after initialization."""
+        """Validate field types and payload structure after initialization.
+
+        Raises:
+            ValueError: If key is empty, step is negative, or shape is invalid.
+            TypeError: If payload, context, or tag types are invalid.
+
+        """
         if not isinstance(self.key, str) or not self.key:
             raise ValueError("key must be a non-empty string.")
         if not isinstance(self.step, int) or self.step < 0:
@@ -121,70 +124,113 @@ class MetricEvent:
     # -------------------------------------------------------------------------
     @staticmethod
     def _validate_scalar(value: Any) -> None:
-        """Validate scalar payload (must be numeric)."""
+        """Validate scalar payload (must be numeric).
+
+        Args:
+            value (Any): The scalar payload to validate.
+
+        Raises:
+            TypeError: If the payload is not a numeric type.
+
+        """
         if not isinstance(value, numbers.Number):
             raise TypeError(f"Scalar payload must be numeric, got {type(value)}")
 
     @staticmethod
     def _validate_image(value: Any) -> None:
-        """Validate image payload shape and dtype.
+        """Validate image payload with host-aware dtype check.
 
         Args:
-            value (Any): The image payload to validate.
+            value (Any): Image payload to validate.
 
         Raises:
-            TypeError: If the payload is not a NumPy array or has non-numeric dtype
-            ValueError: If the payload does not have 2 or 3 dimensions.
+            TypeError: If the payload is not array-like or has invalid dtype.
+            ValueError: If the payload does not appear to have 2 or 3 dimensions.
 
         """
-        if not isinstance(value, np.ndarray):
-            raise TypeError("Image payload must be a NumPy array.")
-        if value.ndim not in (2, 3):
-            raise ValueError("Image payload must have shape (H, W) or (H, W, C).")
-        if not np.issubdtype(value.dtype, np.number):
-            raise TypeError("Image payload must have numeric dtype.")
+        ndim = getattr(value, "ndim", None)
+        shape = getattr(value, "shape", None)
+
+        if ndim is None and shape is None:
+            raise TypeError("Image payload must expose 'shape' or 'ndim' attributes.")
+
+        if ndim is None and isinstance(shape, (tuple, list)):
+            ndim = len(shape)
+
+        if ndim not in (2, 3):
+            raise ValueError("Image payload must have ndim 2 (H,W) or 3 (H,W,C).")
+
+        # Only enforce dtype check if this is a NumPy array (safe on host)
+        if isinstance(value, np.ndarray):
+            if not np.issubdtype(value.dtype, np.number):
+                raise TypeError(
+                    f"Image payload must have numeric dtype, got {value.dtype}."
+                )
 
     @staticmethod
     def _validate_video(value: Any) -> None:
-        """Validate video payload shape and dtype.
+        """Validate video payload with host-aware dtype check.
 
         Args:
-            value (Any): The video payload to validate.
+            value (Any): Video payload to validate.
 
         Raises:
-            TypeError: If the payload is not a NumPy array or has non-numeric dtype
-            ValueError: If the payload does not have 3 or 4 dimensions.
+            TypeError: If the payload is not array-like or has invalid dtype.
+            ValueError: If the payload does not appear to have 3 or 4 dimensions.
 
         """
-        if not isinstance(value, np.ndarray):
-            raise TypeError("Video payload must be a NumPy array.")
-        if value.ndim not in (3, 4):
-            raise ValueError("Video payload must have shape (T, H, W) or (T, H, W, C).")
-        if not np.issubdtype(value.dtype, np.number):
-            raise TypeError("Video payload must have numeric dtype.")
+        ndim = getattr(value, "ndim", None)
+        shape = getattr(value, "shape", None)
+
+        if ndim is None and shape is None:
+            raise TypeError("Video payload must expose 'shape' or 'ndim' attributes.")
+
+        if ndim is None and isinstance(shape, (tuple, list)):
+            ndim = len(shape)
+
+        if ndim not in (3, 4):
+            raise ValueError("Video payload must have ndim 3 (T,H,W) or 4 (T,H,W,C).")
+
+        if isinstance(value, np.ndarray):
+            if not np.issubdtype(value.dtype, np.number):
+                raise TypeError(
+                    f"Video payload must have numeric dtype, got {value.dtype}."
+                )
 
     @staticmethod
     def _validate_histogram(value: Any) -> None:
-        """Validate histogram payload (1D array or numeric sequence).
+        """Validate histogram payload structure (safe for device arrays).
 
         Args:
-            value (Any): The histogram payload to validate.
+            value (Any): Histogram payload to validate.
 
         Raises:
-            TypeError: If the payload is not a 1D NumPy array or numeric sequence
-            ValueError: If the NumPy array is not 1D.
+            TypeError: If payload is not array-like or numeric sequence.
+            ValueError: If array is not 1D.
 
         """
-        if isinstance(value, np.ndarray):
-            if value.ndim != 1:
-                raise ValueError("Histogram payload must be 1D array or sequence.")
-            if not np.issubdtype(value.dtype, np.number):
-                raise TypeError("Histogram payload must have numeric dtype.")
-        elif isinstance(value, (list, tuple)):
+        ndim = getattr(value, "ndim", None)
+        shape = getattr(value, "shape", None)
+
+        if ndim is not None or shape is not None:
+            if ndim is None and isinstance(shape, (tuple, list)):
+                ndim = len(shape)
+            if ndim != 1:
+                raise ValueError("Histogram payload must be 1-D array or sequence.")
+
+            if isinstance(value, np.ndarray):
+                if not np.issubdtype(value.dtype, np.number):
+                    raise TypeError(
+                        f"Histogram payload must have numeric dtype, got {value.dtype}."
+                    )
+            return
+
+        if isinstance(value, (list, tuple)):
             if not all(isinstance(v, numbers.Number) for v in value):
                 raise TypeError("Histogram sequence must contain only numeric values.")
-        else:
-            raise TypeError("Histogram payload must be array or numeric sequence.")
+            return
+
+        raise TypeError("Histogram payload must be 1-D array-like or numeric sequence.")
 
     # -------------------------------------------------------------------------
     # Utility
