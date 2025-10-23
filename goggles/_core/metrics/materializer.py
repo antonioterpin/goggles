@@ -199,7 +199,7 @@ class MaterializerWorker(threading.Thread):
 
     def _to_numpy(self, x: Any) -> np.ndarray:
         """Convert a supported input to a NumPy array."""
-        if jax is not None and hasattr(jax, "Array") and isinstance(x, jax.Array):  # type: ignore[attr-defined]
+        if jax is not None and hasattr(jax, "Array") and isinstance(x, jax.Array):
             return np.array(x)
         if hasattr(x, "__array__"):
             return np.asarray(x)
