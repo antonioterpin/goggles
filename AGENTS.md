@@ -5,19 +5,15 @@ Goggles is a Python logging and monitoring library tailored for robotics and res
 
 ## Architecture & Key Components
 - **Transitional Structure**: The project is currently migrating to a new API.
-	- `goggles/__init__.py` is the official, up-to-date API entrypoint. All new features and integrations are exposed here.
-	- `goggles/_core/` and `goggles/history/` contain the main implementations for logging, device history, and core logic.
-	- **Legacy code**: Everything in the top-level `goggles/` folder except `__init__.py` is considered legacy. Avoid extending or modifying these unless porting features to the new API.
+    - `goggles/__init__.py` is the official, up-to-date API entrypoint. All new features and integrations are exposed here.
+    - `goggles/_core/` and `goggles/history/` contain the main implementations for logging, device history, and core logic.
+    - **Legacy code**: Everything in the top-level `goggles/` folder except `__init__.py` is considered legacy. Avoid extending or modifying these unless porting features to the new API.
 - **Device History**: See `goggles/history/` and `goggles/history/README.md` for GPU-resident buffers and JAX integration.
 - **Examples**: `examples/` scripts show usage patterns and API features. No side effects on import; only `run(...)` attaches handlers.
 - **Configuration**: The legacy configuration uses `.goggles-default.yaml` (see root and examples/). New approaches may supersede this; treat it as legacy unless otherwise specified.
 
 ## Developer Workflows
-- **Install**: `pip install "goggles @ git+ssh://git@github.com/antonioterpin/goggles.git"`
-- **Run Examples**: `python examples/01_basic_run.py` (see `examples/README.md`)
-- **Testing**: Tests are in `tests/`. Use `pytest` for test runs.
-- **JAX Integration**: For device history, install JAX (see main README for CUDA instructions).
-
+Check out the [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## Patterns & Conventions
 - **API Entry Points**: Use `run(...)` to start a logging run and configure sinks. Use `configure(...)` to set process-wide defaults before starting a run.

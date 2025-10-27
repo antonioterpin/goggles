@@ -1,0 +1,53 @@
+name: Python CI
+
+on:
+    push:
+        branches:
+            - '**'
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+
+        steps:
+            # Step 1: Check out the repository code
+            - name: Check out code
+              uses: actions/checkout@v3
+
+            # Step 2: Set up Python
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: '3.10'
+
+            # Step 3: Install uv
+            - name: Install uv
+              uses: astral-sh/setup-uv@v3
+              with:
+                  version: "latest"
+
+            # Step 4: Install dependencies (+ JAX cpu version)
+            - name: Install dependencies
+              run: |
+                uv sync --extra dev --extra jax
+                uv pip install -e .
+
+            # Step 5: Run tests
+            - name: Run tests with coverage
+              run: uv run pytest
+
+            # Upload the XML as a build artifact so we
+            # (and Codecov) can inspect it
+            - name: Upload coverage.xml artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-xml
+                  path: coverage.xml
+            - name: Upload to Codecov
+              uses: codecov/codecov-action@v5
+              with:
+                  token: ${{ secrets.CODECOV_TOKEN }}
+                  files: coverage.xml
+                  disable_search: true
+                  fail_ci_if_error: true
+                  verbose: true

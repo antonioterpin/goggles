@@ -3,7 +3,7 @@
 from __future__ import annotations
 import warnings
 from typing import Any
-from .api import get_logger
+from . import get_logger
 from .logger import scalar as _scalar, image as _image, video as _video
 
 

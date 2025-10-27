@@ -98,9 +98,11 @@ def test_public_run_api_passes_enable_wandb(monkeypatch, tmp_run_dir):
         called.update(kwargs)
         return SimpleNamespace(finish=lambda: None)
 
-    with patch("goggles._core.run._RunContextManager.__enter__") as enter_mock, patch(
-        "goggles._core.run._RunContextManager.__exit__"
-    ) as exit_mock, patch.dict(sys.modules, {"wandb": MagicMock(init=fake_init)}):
+    with (
+        patch("goggles._core.run._RunContextManager.__enter__") as enter_mock,
+        patch("goggles._core.run._RunContextManager.__exit__") as exit_mock,
+        patch.dict(sys.modules, {"wandb": MagicMock(init=fake_init)}),
+    ):
         enter_mock.return_value = SimpleNamespace(log_dir=str(tmp_run_dir), wandb=None)
 
         with run(enable_wandb=True, log_dir=str(tmp_run_dir)) as ctx:

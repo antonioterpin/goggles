@@ -3,7 +3,6 @@ repos:
     rev: 25.9.0
     hooks:
       - id: black
-        language_version: python3.10
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.1
@@ -20,7 +19,6 @@ repos:
             "--select=D,PD",
             # Keep D211 (no-blank-line-before-class) by ignoring conflicts:
           ]
-        language_version: python3.10
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
