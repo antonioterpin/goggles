@@ -4,8 +4,8 @@ WARNING: This module is an internal implementation detail of Goggles'
 logging system. It is not part of the public API.
 
 External code should not import from this module. Instead, depend on:
-  - `goggles.logger.BoundLogger` (protocol / interface), and
-  - `goggles.logger.get_logger()` (factory returning a BoundLogger)
+  - `goggles.BoundLogger` (protocol / interface), and
+  - `goggles.get_logger()` (factory returning a BoundLogger)
 
 This module adapts the standard `logging.Logger` to support persistent,
 structured context ("bound" fields) that are merged into each log call.
@@ -33,10 +33,6 @@ class CoreBoundLogger:
         * External users should obtain a `BoundLogger` via
           `goggles.get_logger()` and program against the protocol.
 
-    Args:
-        logger: Underlying Python logger.
-        bound: Optional initial persistent context to bind.
-
     Attributes:
         _logger: Underlying `logging.Logger` instance. Internal use only.
         _bound: Persistent structured fields merged into each record.
@@ -56,10 +52,6 @@ class CoreBoundLogger:
         """
         self._logger = logger
         self._bound: Dict[str, Any] = dict(bound or {})
-
-    # -------------------------------------------------------------------------
-    # Persistent-field API
-    # -------------------------------------------------------------------------
 
     def bind(self, **fields: Any) -> CoreBoundLogger:
         """Return a new logger with `fields` merged into persistent context.
@@ -108,10 +100,6 @@ class CoreBoundLogger:
 
         """
         return dict(self._bound)
-
-    # -------------------------------------------------------------------------
-    # Emitters (public API)
-    # -------------------------------------------------------------------------
 
     def debug(self, msg: str, /, **extra: Any) -> None:
         """Log a DEBUG message with optional per-call structured fields.
