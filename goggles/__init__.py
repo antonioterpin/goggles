@@ -21,22 +21,53 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Callable, Dict, Optional, Protocol, runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Callable,
+    Dict,
+    Literal,
+    Mapping,
+    Optional,
+    Protocol,
+    overload,
+    runtime_checkable,
+)
 import logging
 
 # Cache the implementations after first use to avoid repeated imports
-__get_logger_impl: Optional[Callable[[Optional[str]], BoundLogger]] = None
+__get_logger_text_impl: Optional[
+    Callable[[Optional[str], dict[str, Any]], BoundLogger]
+] = None
+__get_logger_metrics_impl: Optional[
+    Callable[[Optional[str], dict[str, Any]], GogglesLogger]
+] = None
 __current_run_impl: Optional[Callable[[], Optional[RunContext]]] = None
 __configure_impl: Optional[Callable[..., None]] = None
 __run_impl: Optional[Callable[..., AbstractContextManager[RunContext]]] = None
+__impl_get_bus: Optional[Callable[[], EventBus]] = None
+__impl_attach: Optional[Callable[[Handler, Literal["global", "run"]], None]] = None
+__impl_detach: Optional[Callable[[Handler, Literal["global", "run"]], None]] = None
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
 
-def get_logger(name: Optional[str] = None, **bound: Any) -> BoundLogger:
-    """Return a structured logger adapter that injects context and bound fields.
+@overload
+def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger: ...
+
+
+@overload
+def get_logger(
+    name: Optional[str] = None, /, *, with_metrics: Literal[True], **bound: Any
+) -> GogglesLogger: ...
+
+
+def get_logger(
+    name: Optional[str] = None, /, *, with_metrics: bool = False, **bound: Any
+) -> BoundLogger | GogglesLogger:
+    """Return a structured logger (text-only by default, metrics-enabled on opt-in).
 
     This is the primary entry point for obtaining Goggles' structured loggers.
     Depending on the active run and configuration, the returned adapter will
@@ -44,30 +75,41 @@ def get_logger(name: Optional[str] = None, **bound: Any) -> BoundLogger:
     into each emitted log record.
 
     Args:
-        name (Optional[str]): Logger name, if provided, else returns the root logger.
-        **bound (Any): Persistent fields injected on every record.
+        name (Optional[str]): Logger name. If None, the root logger is used.
+        with_metrics (bool): If True, return a logger exposing `.metrics`.
+        **bound (Any): Fields persisted and injected into every record.
 
     Returns:
-        BoundLogger: Adapter exposing `bind()` and standard Python logging methods,
-            e.g., `info()`, `debug()`, etc.
+        Union[BoundLogger, GogglesLogger]: A text-only `BoundLogger` by default,
+        or a `GogglesLogger` when `with_metrics=True`.
 
     Examples:
+        >>> # Text-only
         >>> log = get_logger("eval", dataset="CIFAR10")
         >>> log.info("starting")
-        >>> test_log = log.bind(split="test")
-        >>> test_log.info("running", step=1)
-        ...     # Both log records include dataset="CIFAR10" in their context.
-        ...     # The second record also includes split="test".
+        >>>
+        >>> # Explicit metrics surface
+        >>> tlog = get_logger("train", with_metrics=True, seed=0)
+        >>> tlog.metrics.scalar("loss", 0.42, step=1)
 
     """
-    global __get_logger_impl
-    if __get_logger_impl is None:
-        # Lazy import to avoid import-time side effects / cycles
-        from ._core.logger import get_logger as _get_logger
+    global __get_logger_text_impl, __get_logger_metrics_impl
 
-        __get_logger_impl = _get_logger
+    if with_metrics:
+        if __get_logger_metrics_impl is None:
+            # separate factory that wraps the core bound logger and exposes `.metrics`
+            from ._core.logger import get_logger_with_metrics as _get_logger_metrics
 
-    return __get_logger_impl(name, **bound)
+            __get_logger_metrics_impl = _get_logger_metrics
+        # precise return type on the True branch
+        return __get_logger_metrics_impl(name, bound)
+    else:
+        if __get_logger_text_impl is None:
+            from ._core.logger import get_logger as _get_logger_text
+
+            __get_logger_text_impl = _get_logger_text
+        # precise return type on the False/default branch
+        return __get_logger_text_impl(name, bound)
 
 
 @dataclass(frozen=True)
@@ -139,6 +181,171 @@ class BoundLogger(Protocol):
 
     def exception(self, msg: str, /, **extra: Any) -> None:
         """Log an ERROR with current exception info attached."""
+
+
+@runtime_checkable
+class MetricsEmitter(Protocol):
+    """Protocol for metrics and media emission."""
+
+    def push(
+        self, metrics: Mapping[str, float], *, step: Optional[int] = None, **meta: Any
+    ) -> None:
+        """Emit a batch of scalar metrics.
+
+        Args:
+            metrics (Mapping[str, float]): Name→value pairs.
+            step (Optional[int]): Optional global step index.
+            **meta (Any): Additional routing metadata (e.g., split="train").
+
+        """
+
+    def scalar(
+        self, name: str, value: float, *, step: Optional[int] = None, **meta: Any
+    ) -> None:
+        """Emit a single scalar metric."""
+
+    def image(
+        self,
+        name: str,
+        image: bytes,
+        *,
+        step: Optional[int] = None,
+        format: str = "png",
+        **meta: Any,
+    ) -> None:
+        """Emit an image artifact (encoded bytes)."""
+
+    def video(
+        self,
+        name: str,
+        data: bytes,
+        *,
+        step: Optional[int] = None,
+        fps: int = 30,
+        **meta: Any,
+    ) -> None:
+        """Emit a video artifact (encoded bytes)."""
+
+
+@runtime_checkable
+class GogglesLogger(BoundLogger, Protocol):
+    """Protocol for Goggles loggers with metrics support.
+
+    Composite logger combining text logging with a metrics facet.
+
+    Examples:
+        >>> # Text-only
+        >>> log = get_logger("eval", dataset="CIFAR10")
+        >>> log.info("starting")
+        >>>
+        >>> # Explicit metrics surface
+        >>> tlog = get_logger("train", with_metrics=True, seed=0)
+        >>> tlog.metrics.scalar("loss", 0.42, step=1)
+        >>> tlog.info("Training step completed")
+        ...   # Both log records include any persistent bound fields.
+        ...   # The second record also includes run_id="exp42".
+
+    """
+
+    metrics: MetricsEmitter
+
+    def bind(self, **fields: Any) -> "GogglesLogger":
+        """Return a new facade with `fields` merged into persistent state."""
+
+
+@runtime_checkable
+class Handler(Protocol):
+    """Protocol for EventBus handlers.
+
+    Attributes:
+        name (str): Stable handler identifier for diagnostics.
+        capabilities (set[str]): Supported kinds, e.g. {'logs','metrics','artifacts'}.
+        allowed_scopes (set[Literal['global','run']]): Valid scopes for attachment.
+
+    """
+
+    name: str
+    capabilities: set[str]
+    allowed_scopes: set[Literal["global", "run"]]
+
+    def open(self, run: Optional[RunContext] = None) -> None:
+        """Initialize the handler (called when entering a scope)."""
+
+    def handle(self, event: Any) -> None:
+        """Process a single event routed by the EventBus."""
+
+    def close(self) -> None:
+        """Flush and release resources (called when leaving a scope)."""
+
+
+# ---------------------------------------------------------------------------
+# EventBus and run management
+# ---------------------------------------------------------------------------
+class EventBus(Protocol):
+    """Protocol for the process-wide event router."""
+
+    def attach(self, handler: Handler, scope: Literal["global", "run"]) -> None:
+        """Attach a handler under the given scope.
+
+        Raises:
+          ValueError: If the handler disallows the requested scope.
+
+        """
+
+    def emit(self, event: Any) -> None:
+        """Emit an event to eligible handlers (errors isolated per handler)."""
+
+
+def get_bus() -> EventBus:
+    """Return the process-wide EventBus singleton.
+
+    The EventBus owns handlers and routes events based on scope and kind.
+    """
+    global __impl_get_bus
+    if __impl_get_bus is None:
+        from ._core.eventbus import get_bus as _impl_get_bus
+
+        __impl_get_bus = _impl_get_bus
+    return __impl_get_bus()
+
+
+def attach(handler: Handler, scope: Literal["global", "run"]) -> None:
+    """Attach a handler to the EventBus under the given scope.
+
+    Args:
+      handler (Handler): Configured handler to attach.
+      scope (Literal['global','run']): Attachment scope.
+
+    Raises:
+      ValueError: If the handler disallows the requested scope.
+
+    """
+    global __impl_attach
+    if __impl_attach is None:
+        from ._core.eventbus import attach as _impl_attach
+
+        __impl_attach = _impl_attach
+    __impl_attach(handler, scope)
+
+
+def detach(handler: Handler, scope: Literal["global", "run"]) -> None:
+    """Detach a handler from the EventBus under the given scope.
+
+    Args:
+        handler (Handler): Configured handler to detach.
+        scope (Literal['global','run']): Detachment scope.
+
+    Raises:
+        ValueError: If the handler disallows the requested scope.
+        ValueError: If the handler is not attached under the given scope.
+
+    """
+    global __impl_detach
+    if __impl_detach is None:
+        from ._core.eventbus import detach as _impl_detach
+
+        __impl_detach = _impl_detach
+    __impl_detach(handler, scope)
 
 
 def current_run() -> Optional[RunContext]:
@@ -220,7 +427,7 @@ def run(
     artifact_type: Optional[str] = None,
     **metadata: Any,
 ) -> AbstractContextManager[RunContext]:
-    """Configure logging sinks for the current process and yield a `RunContext`.
+    """Configure logging handlers for the current process and yield a `RunContext`.
 
     This is the primary entry point to start a logging run. It sets up
     logging handlers according to the specified configuration, creates a
@@ -306,6 +513,9 @@ __all__ = [
     "run",
     "get_logger",
     "current_run",
+    "get_bus",
+    "attach",
+    "detach",
     "scalar",
     "image",
     "video",
