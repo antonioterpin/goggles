@@ -167,6 +167,9 @@ class BoundLogger(Protocol):
     def bind(self, **fields: Any) -> "BoundLogger":
         """Return a new adapter with `fields` merged into persistent state."""
 
+    def log(self, severity: int, msg: str, /, **extra: Any) -> None:
+        """Log a message at the given severity with optional structured extras."""
+
     def debug(self, msg: str, /, **extra: Any) -> None:
         """Log a DEBUG message with optional structured extras."""
 

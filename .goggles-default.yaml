@@ -1,5 +1,0 @@
-to_terminal: true
-level: DEBUG
-enable_signal_handler: true
-logdir: ~/logdir
-wandb_project: "goggles_test"

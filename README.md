@@ -12,7 +12,7 @@ pip install "goggles @ git+ssh://git@github.com/antonioterpin/goggles.git"
   Synchronize logs from all spawned processes via shared memory.
 
 - 🎯 **Multi-output logging**
-  Log to terminal and/or file (configurable via `.goggles-default.yaml`).
+  Log to terminal and/or file.
 
 - 🕒 **Performance profiling**
   `@goggles.timeit` decorator measures and logs runtime.
@@ -34,14 +34,7 @@ pip install "goggles @ git+ssh://git@github.com/antonioterpin/goggles.git"
 
 ## Quickstart
 
-1. **Create `.goggles-default.yaml`** in your project root:
-
-   ```yaml
-   logdir: ~/my_logs
-   to_terminal: true
-   level: INFO
-   wandb_project: demo_project
-   enable_signal_handler: false
+1. TODO: update
 
 2. **Ready to log**:
 
@@ -95,10 +88,6 @@ try:
 except ZeroDivisionError:
     pass  # Full traceback was logged
 ```
-
-## File & Terminal Logging
-
-All driven by your .goggles-default.yaml.
 
 ## W\&B Integration
 

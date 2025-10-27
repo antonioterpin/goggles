@@ -10,7 +10,6 @@ Goggles is a Python logging and monitoring library tailored for robotics and res
     - **Legacy code**: Everything in the top-level `goggles/` folder except `__init__.py` is considered legacy. Avoid extending or modifying these unless porting features to the new API.
 - **Device History**: See `goggles/history/` and `goggles/history/README.md` for GPU-resident buffers and JAX integration.
 - **Examples**: `examples/` scripts show usage patterns and API features. No side effects on import; only `run(...)` attaches handlers.
-- **Configuration**: The legacy configuration uses `.goggles-default.yaml` (see root and examples/). New approaches may supersede this; treat it as legacy unless otherwise specified.
 
 ## Developer Workflows
 Check out the [CONTRIBUTING.md](./CONTRIBUTING.md)
@@ -19,7 +18,7 @@ Check out the [CONTRIBUTING.md](./CONTRIBUTING.md)
 - **API Entry Points**: Use `run(...)` to start a logging run and configure sinks. Use `configure(...)` to set process-wide defaults before starting a run.
 - **Logger Usage**: Get a structured logger via `get_logger(name, **bound)`. Use `.debug`, `.info`, `.warning`, `.error`, `.exception` methods. Persistent bound fields are supported.
 - **Metrics/Media Logging**: The contracts for `scalar`, `image`, and `video` exist, but are not yet implemented in the new API.
-- **Configuration**: Set options via `configure(...)` or arguments to `run(...)`. The legacy `.goggles-default.yaml` is not used in the new API.
+- **Configuration**: Set options via `configure(...)` or arguments to `run(...)`.
 - **No Decorators**: Profiling and error-tracing decorators (`@timeit`, `@trace_on_error`) are not yet available in the new API.
 - **Single-process**: The current API is single-process; multi-process support is planned but not yet present.
 
@@ -34,7 +33,7 @@ Check out the [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ## Tips for AI Agents
 - Use only `__init__.py` for new features and integrations; legacy code is for reference/porting only.
-- Configure logging via `configure(...)` or `run(...)` arguments, not `.goggles-default.yaml`.
+- Configure logging via `configure(...)` or `run(...)` arguments, not `.
 - Use `get_logger(name, **bound)` for structured logging; bind persistent fields as needed.
 - Metrics/media logging (`scalar`, `image`, `video`) are contracts only; not yet implemented.
 - For JAX device history, require explicit shape/dtype in history specs (see `goggles/history/README.md`).

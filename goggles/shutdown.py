@@ -2,7 +2,10 @@
 
 import signal
 from typing import Optional
-from .logger import info
+
+from . import get_logger
+
+logger = get_logger("goggles.shutdown")
 
 
 class GracefulShutdown:
@@ -34,7 +37,7 @@ class GracefulShutdown:
         def handle_signal(signum, frame):
             self.stop = True
             if self.exit_message:
-                info(self.exit_message)
+                logger.info(self.exit_message)
 
         # register for both SIGINT and SIGTERM
         signal.signal(signal.SIGINT, handle_signal)
