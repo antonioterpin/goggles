@@ -46,7 +46,14 @@ class GracefulShutdown:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        """Unregister the signal handlers, restoring originals."""
+        """Unregister the signal handlers, restoring originals.
+
+        Args:
+            exc_type: Exception type if any.
+            exc_value: Exception value if any.
+            traceback: Traceback if any.
+
+        """
         # restore original handlers
         if self._orig_sigint is not None:
             signal.signal(signal.SIGINT, self._orig_sigint)
