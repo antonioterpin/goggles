@@ -47,3 +47,20 @@ def load_configuration(file_path: str) -> PrettyConfig:
         data = yaml.load(f) or {}
         # Wrap the loaded dict in our PrettyConfig
         return PrettyConfig(data)
+
+
+# TODO: to fix, maybe put inside the PrettyConfig class?
+def _write_json(path: Path, data: Dict[str, Any]) -> None:
+    """Atomically write JSON data to disk.
+
+    Args:
+        path: The file path to write the JSON data to.
+        data: The JSON data to write.
+
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
+        file.write("\n")
+    tmp_path.replace(path)
