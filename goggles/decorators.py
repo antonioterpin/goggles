@@ -4,11 +4,26 @@ from .severity import Severity
 
 from . import get_logger
 
-logger = get_logger("goggles.decorators")
+logger = get_logger("goggles.decorators", with_metrics=True)
 
 
-def timeit(severity=Severity.INFO, name=None, to_wandb=False):
-    """Measure the execution time of a function via decorators."""
+def timeit(severity=Severity.INFO, name=None):
+    """Measure the execution time of a function via decorators.
+
+    Args:
+        severity (Severity): Log severity level for timing message.
+        name (str): Optional name for the timing entry.
+            If None, uses filename:function_name.
+
+    Example:
+    >>> @timeit(severity=Severity.DEBUG, name="my_function_timing")
+    ... def my_function():
+    ...     # function logic here
+    ...     pass
+    >>> my_function()
+    DEBUG: my_function_timing took 0.123456s
+
+    """
 
     def decorator(func):
         import time
@@ -21,8 +36,7 @@ def timeit(severity=Severity.INFO, name=None, to_wandb=False):
             filename = os.path.basename(func.__code__.co_filename)
             fname = name or f"{filename}:{func.__name__}"
             logger.log(severity, f"{fname} took {duration:.6f}s")
-            if to_wandb:
-                logger.scalar(f"timings/{fname}", duration)
+            logger.metrics.scalar(f"timings/{fname}", duration)
             return result
 
         return wrapper
@@ -31,7 +45,17 @@ def timeit(severity=Severity.INFO, name=None, to_wandb=False):
 
 
 def trace_on_error():
-    """Trace errors and log function parameters via decorators."""
+    """Trace errors and log function parameters via decorators.
+
+    Example:
+    >>> @trace_on_error()
+    ... def my_function(x, y):
+    ...     return x / y  # may raise ZeroDivisionError
+    >>> my_function(10, 0)
+    ERROR: Exception in my_function: division by zero, state:
+    {'args': (10, 0), 'kwargs': {}}
+
+    """
 
     def decorator(func):
         def wrapper(*args, **kwargs):

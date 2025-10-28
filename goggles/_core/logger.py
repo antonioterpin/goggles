@@ -1,22 +1,19 @@
-"""Internal Core BoundLogger implementation.
+"""Internal logger implementation.
 
 WARNING: This module is an internal implementation detail of Goggles'
 logging system. It is not part of the public API.
 
 External code should not import from this module. Instead, depend on:
-  - `goggles.BoundLogger` (protocol / interface), and
-  - `goggles.get_logger()` (factory returning a BoundLogger)
-
-This module adapts the standard `logging.Logger` to support persistent,
-structured context ("bound" fields) that are merged into each log call.
-Behavioral compatibility is provided via the `BoundLogger` protocol,
-not by inheritance.
+  - `goggles.BoundLogger`, `goggles.GogglesLogger` (protocol / interface), and
+  - `goggles.get_logger()` (factory returning a BoundLogger/GogglesLogger).
 """
 
 import logging
+import inspect
 from typing import Any, Dict, Mapping, Optional, Self
 
 from goggles import BoundLogger, GogglesLogger, Event
+from goggles.types import Metrics, Image, Video
 
 
 class CoreBoundLogger(BoundLogger):
@@ -37,6 +34,7 @@ class CoreBoundLogger(BoundLogger):
         _logger: Underlying `logging.Logger` instance. Internal use only.
         _bound: Persistent structured fields merged into each record.
             Internal use only.
+        _client: EventBus client for emitting structured events.
 
     """
 
@@ -74,7 +72,7 @@ class CoreBoundLogger(BoundLogger):
             **fields: Key-value pairs to bind into the new logger's context.
 
         Returns:
-            CoreBoundLogger: A new adapter with the merged persistent context.
+            Self: A new adapter with the merged persistent context.
 
         Raises:
             TypeError: If provided keys are not strings (may occur in stricter
@@ -82,7 +80,7 @@ class CoreBoundLogger(BoundLogger):
 
         Examples:
             >>> log = get_logger("goggles")  # via public API
-            >>> run_log = log.bind(run_id="exp42", module="train")
+            >>> run_log = log.bind(scope="exp42", module="train")
             >>> run_log.info("Initialized")
 
         """
@@ -118,11 +116,14 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
+                filepath=filepath,
+                lineno=lineno,
                 level=logging.DEBUG,
                 step=step,
                 time=time,
@@ -149,11 +150,14 @@ class CoreBoundLogger(BoundLogger):
                 Additional structured key-value pairs for this record.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
+                filepath=filepath,
+                lineno=lineno,
                 level=logging.INFO,
                 step=step,
                 time=time,
@@ -179,11 +183,14 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
+                filepath=filepath,
+                lineno=lineno,
                 level=logging.WARNING,
                 step=step,
                 time=time,
@@ -209,12 +216,15 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
                 level=logging.ERROR,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -239,12 +249,15 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
                 level=logging.CRITICAL,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -255,7 +268,8 @@ class CoreBoundLogger(BoundLogger):
         """Return a developer-friendly string representation.
 
         Returns:
-            str: String representation showing the underlying logger and bound context.
+            str: String representation showing the underlying
+                logger and bound context.
 
         """
         return (
@@ -269,7 +283,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
     def push(
         self,
-        metrics: Mapping[str, float],
+        metrics: Metrics,
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -278,19 +292,22 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
         """Emit a batch of scalar metrics.
 
         Args:
-            metrics (Mapping[str, float]): Name→value pairs.
+            metrics (Metrics): (Name,value) pairs.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]):
                 Additional routing metadata (e.g., split="train").
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="metric",
                 scope=self._scope,
                 payload=metrics,
                 level=None,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -300,7 +317,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
     def scalar(
         self,
         name: str,
-        value: float,
+        value: float | int,
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -310,19 +327,32 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
         Args:
             name (str): Metric name.
-            value (float): Metric value.
+            value (float|int): Metric value.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]):
                 Additional routing metadata (e.g., split="train").
 
         """
-        self.push({name: value}, step=step, time=time, **extra)
+        filepath, lineno = _caller_id()
+        self._client.emit(
+            Event(
+                kind="metric",
+                scope=self._scope,
+                payload={name: value},
+                level=None,
+                filepath=filepath,
+                lineno=lineno,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
 
     def image(
         self,
         name: str,
-        image: bytes,
+        image: Image,
         *,
         format: str = "png",
         step: Optional[int] = None,
@@ -333,19 +363,22 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
         Args:
             name (str): Artifact name.
-            image (bytes): Encoded image bytes.
+            image (Image): Image.
             format (str): Image format, e.g., "png", "jpeg".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra: Dict[str, Any]: Additional routing metadata.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="image",
                 scope=self._scope,
                 payload={"name": name, "data": image, "format": format},
                 level=None,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -355,7 +388,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
     def video(
         self,
         name: str,
-        data: bytes,
+        video: Video,
         *,
         fps: int = 30,
         step: Optional[int] = None,
@@ -366,21 +399,40 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
         Args:
             name (str): Artifact name.
-            data (bytes): Encoded video bytes.
+            video (Video): Video.
             fps (int): Frames per second.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
-                kind="artifact",
+                kind="video",
                 scope=self._scope,
-                payload={"name": name, "data": data, "type": "video", "fps": fps},
+                payload={"name": name, "video": video, "fps": fps},
                 level=None,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
             )
         )
+
+
+def _caller_id() -> tuple[str, int]:
+    """Get the caller's filepath and line number for logging purposes.
+
+    Returns:
+        tuple[str, int]: A tuple of (file path, line number).
+
+    """
+    frame = inspect.currentframe()
+    if frame is None or frame.f_back is None or frame.f_back.f_back is None:
+        return ("<unknown>", 0)
+    caller_frame = frame.f_back.f_back
+    filename = caller_frame.f_code.co_filename
+    line_number = caller_frame.f_lineno
+    return (filename, line_number)

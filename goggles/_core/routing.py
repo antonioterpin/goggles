@@ -1,4 +1,13 @@
-"""Events routing across files, processes, and machines."""
+"""Events routing across files, processes, and machines.
+
+This module encapsulates the multi-machine, multi-process routing of events
+via the EventBus class. It uses a client-server model where one process
+acts as the host (server) and others connect to it (clients).
+
+Example:
+>>> bus = get_bus()
+
+"""
 
 from __future__ import annotations
 
@@ -16,7 +25,12 @@ __singleton_core_event_bus: Optional[EventBus] = None
 
 
 def __i_am_host() -> bool:
-    """Return whether this process is the goggles event bus host."""
+    """Return whether this process is the goggles event bus host.
+
+    Returns:
+        bool: True if this process is the host, False otherwise.
+
+    """
     # If GOGGLES_HOST is localhost/127.0.0.1, we are always the host
     if GOGGLES_HOST in ("localhost", "127.0.0.1", "::1"):
         return True
@@ -47,9 +61,17 @@ def __i_am_host() -> bool:
 def get_bus() -> EventBus:
     """Return the process-wide EventBus singleton.
 
-    Args:
-        timeout (int): Timeout in seconds to connect to existing server.
-            After, a new server is started if none exists.
+    This function ensures that there is a single instance of the
+    EventBus for the entire application, even if distributed across machines.
+
+    It uses a client-server model where one process acts as the host
+    (server) and others connect to it (clients). The host is determined
+    based on the GOGGLES_HOST configuration. The methods of EventBus are
+    exposed via a portal server for remote invocation.
+
+    NOTE: It is not thread-safe. It works on multiple machines and multiple
+    processes, but it is not guaranteed to work consistently for multiple
+    threads within the same process.
 
     Returns:
         EventBus: Singleton instance.
