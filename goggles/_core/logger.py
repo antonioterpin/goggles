@@ -14,9 +14,10 @@ not by inheritance.
 """
 
 import logging
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Self
 
-from goggles import BoundLogger, current_run
+from goggles import BoundLogger, GogglesLogger, Event
+from goggles._core.eventbus import get_bus
 
 _COLOR_MAP = {
     logging.DEBUG: "[34m",  # blue
@@ -89,68 +90,7 @@ class RunContext:
         return uuid.uuid4().hex[:length]
 
 
-@dataclass(frozen=True)
-class RunContext:
-    """Immutable metadata describing a single logging run.
-
-    This object is yielded by the `run(...)` context manager and
-    injected into each log record emitted during the run.
-
-    Attributes:
-        run_id (str): Unique run identifier (UUID4 as canonical string).
-        run_name (Optional[str]): Human-friendly name shown in UIs; may be None.
-        log_dir (str): Absolute or relative path to the run directory containing
-            `events.log`, optional `events.jsonl`, and `metadata.json`.
-        created_at (str): Timestamp of when the run started.
-        pid (int): Process ID that opened the run.
-        host (str): Hostname of the machine where the run was created.
-        python (str): Python version as `major.minor.micro`.
-        metadata (Dict[str, Any]): Arbitrary user-provided metadata captured at
-            run creation (experiment args, seeds, git SHA, etc.).
-
-    """
-
-    run_id: str = field(default_factory=lambda: RunContext._run_id())
-    run_name: Optional[str]
-    log_dir: str
-    pid: int
-    host: str
-    created_at: str = field(default_factory=lambda: RunContext._now_utc_iso())
-    python: str = field(default_factory=lambda: RunContext._python_version())
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def _python_version(cls) -> str:
-        """Return the current Python version in `major.minor.micro` format.
-
-        Returns:
-            A string representing the Python version.
-
-        Example:
-            '3.9.1'
-
-        """
-        import sys
-
-        v = sys.version_info
-        return f"{v.major}.{v.minor}.{v.micro}"
-
-    @classmethod
-    def _now_utc_iso(cls) -> str:
-        """Return the current UTC time as an ISO 8601 string."""
-        from datetime import datetime, timezone
-
-        return datetime.now(timezone.utc).isoformat()
-
-    @classmethod
-    def _run_id(cls, length=8) -> str:
-        """Generate a new UUID4 string for run identification."""
-        import uuid
-
-        return uuid.uuid4().hex[:length]
-
-
-class CoreBoundLogger:
+class CoreBoundLogger(BoundLogger):
     """Internal concrete implementation of the BoundLogger protocol.
 
     This adapter wraps a `logging.Logger` and maintains a dictionary of
@@ -172,19 +112,26 @@ class CoreBoundLogger:
     """
 
     def __init__(
-        self, logger: logging.Logger, bound: Optional[Mapping[str, Any]] = None
+        self,
+        logger: logging.Logger,
+        scope: str,
+        to_bind: Optional[Mapping[str, Any]] = None,
     ):
         """Initialize the CoreBoundLogger.
 
         Args:
-            logger: Underlying Python logger.
-            bound: Optional initial persistent context to bind.
+            logger (logging.Logger): Underlying Python logger.
+            scope (str): Scope to bind the logger to (e.g., "global" or "run").
+            to_bind (Optional[Mapping[str, Any]]):
+                Optional initial persistent context to bind.
 
         """
         self._logger = logger
-        self._bound: Dict[str, Any] = dict(bound or {})
+        self._scope = scope
+        self._bound: Dict[str, Any] = dict(to_bind or {})
+        self._client = get_bus()
 
-    def bind(self, **fields: Any) -> "CoreBoundLogger":
+    def bind(self, *, scope: str, **fields: Any) -> Self:
         """Return a new logger with `fields` merged into persistent context.
 
         This method does not mutate the current instance. It returns a new
@@ -192,6 +139,7 @@ class CoreBoundLogger:
         dictionary and `fields`. Keys in `fields` overwrite existing keys.
 
         Args:
+            scope: Scope to bind the new logger under (e.g., "global" or "run").
             **fields: Key-value pairs to bind into the new logger's context.
 
         Returns:
@@ -207,21 +155,10 @@ class CoreBoundLogger:
             >>> run_log.info("Initialized")
 
         """
-        merged = {**self._bound, **fields}
+        self._bound = {**self._bound, **fields}
+        self._scope = scope
 
-        return self._with_bound(merged)
-
-    def _with_bound(self, bound: Mapping[str, Any]) -> "CoreBoundLogger":
-        """Clone the logger with new bound fields.
-
-        Args:
-            bound: New persistent context to bind.
-
-        Returns:
-            CoreBoundLogger: New instance with updated bound context.
-
-        """
-        return CoreBoundLogger(self._logger, bound)
+        return self
 
     def get_bound(self) -> Dict[str, Any]:
         """Get a copy of the current persistent bound context.
@@ -232,103 +169,155 @@ class CoreBoundLogger:
         """
         return dict(self._bound)
 
-    def debug(self, msg: str, /, **extra: Any) -> None:
+    def debug(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
         """Log a DEBUG message with optional per-call structured fields.
 
         Args:
             msg: Human-readable message.
+            step: Step number associated with the event.
+            time: Timestamp of the event in seconds since epoch.
             **extra: Per-call structured fields merged with the bound context.
 
         """
-        self._emit("debug", msg, **extra)
+        self._client.emit(
+            Event(
+                kind="log",
+                scope=self._scope,
+                payload=msg,
+                level=logging.DEBUG,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
 
-    def info(self, msg: str, /, **extra: Any) -> None:
-        """Log an INFO message with optional per-call structured fields.
+    def info(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
+        """Log an INFO message with optional structured extras.
+
+        Args:
+            msg (str): The log message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
+            **extra (Any):
+                Additional structured key-value pairs for this record.
+
+        """
+        self._client.emit(
+            Event(
+                kind="log",
+                scope=self._scope,
+                payload=msg,
+                level=logging.INFO,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
+
+    def warning(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
+        """Log a WARNING message with optional structured extras.
 
         Args:
             msg: Human-readable message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra: Per-call structured fields merged with the bound context.
 
         """
-        self._emit("info", msg, **extra)
+        self._client.emit(
+            Event(
+                kind="log",
+                scope=self._scope,
+                payload=msg,
+                level=logging.WARNING,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
 
-    def warning(self, msg: str, /, **extra: Any) -> None:
-        """Log a WARNING message with optional per-call structured fields.
-
-        Args:
-            msg: Human-readable message.
-            **extra: Per-call structured fields merged with the bound context.
-
-        """
-        self._emit("warning", msg, **extra)
-
-    def error(self, msg: str, /, **extra: Any) -> None:
+    def error(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
         """Log an ERROR message with optional per-call structured fields.
 
         Args:
             msg: Human-readable message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra: Per-call structured fields merged with the bound context.
 
         """
-        self._emit("error", msg, **extra)
+        self._client.emit(
+            Event(
+                kind="log",
+                scope=self._scope,
+                payload=msg,
+                level=logging.ERROR,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
 
-    def exception(self, msg: str, /, **extra: Any) -> None:
-        """Log an ERROR message with exception info and optional per-call fields.
-
-        This method is a convenience for logging exceptions within an except
-        block. It behaves like `error()`, but adds exception information from
-        `sys.exc_info()` to the log record.
+    def critical(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Log a CRITICAL message with optional per-call structured fields.
 
         Args:
             msg: Human-readable message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra: Per-call structured fields merged with the bound context.
 
         """
-        self._emit("exception", msg, **extra)
-
-    # -------------------------------------------------------------------------
-    # Internal helpers
-    # -------------------------------------------------------------------------
-
-    def _emit(self, level: str, msg: str, **extra: Any) -> None:
-        """Dispatch a log record to the underlying logger.
-
-        Internal helper that merges bound context and per-call extras, then calls
-        the corresponding method on the underlying `logging.Logger`.
-
-        Note: `_g_bound` is reserved for Goggles' internal use and should not
-        be set by users. "stacklevel" is also reserved to control the logging stack level.
-        "run" is reserved to attach the current run context. "_g_extra" contains
-        user-provided extra fields.
-
-        Args:
-            level: Logging level name (e.g., "info", "debug").
-            msg: Message to log.
-            **extra: Per-call structured fields.
-
-        """
-        # Reserve and pop user-provided control kwargs.
-        user_stacklevel = int((extra or {}).pop("stacklevel", 3))
-
-        # Strip reserved keys users shouldn't be bothered with.
-        extra = {
-            k: v
-            for k, v in (extra or {}).items()
-            if k not in {"_g_bound", "_g_extra", "run", "stacklevel"}
-        }
-
-        record_extra: Dict[str, Any] = {
-            "_g_bound": self._bound,
-            "_g_extra": dict(extra),
-        }
-
-        run_ctx = current_run()
-        if run_ctx is not None:
-            record_extra["run"] = run_ctx
-
-        # Dispatch to the underlying logger.
-        getattr(self._logger, level)(
-            msg, extra=record_extra, stacklevel=user_stacklevel
+        self._client.emit(
+            Event(
+                kind="log",
+                scope=self._scope,
+                payload=msg,
+                level=logging.CRITICAL,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
         )
 
     # -------------------------------------------------------------------------
@@ -348,21 +337,123 @@ class CoreBoundLogger:
         )
 
 
-def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger:
-    """Core implementation: create a CoreBoundLogger and apply initial binding.
+class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
+    """A GogglesLogger that is also a CoreBoundLogger."""
 
-    Safe to call before `run(...)`: we do not attach handlers or mutate
-    logging config here; we just wrap whatever logger exists.
+    def push(
+        self,
+        metrics: Mapping[str, float],
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a batch of scalar metrics.
 
-    Args:
-        name: Optional name of the logger. If None, the root logger is used.
-        **to_bind: Optional initial persistent context to bind.
+        Args:
+            metrics (Mapping[str, float]): Name→value pairs.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]):
+                Additional routing metadata (e.g., split="train").
 
-    Returns:
-        BoundLogger: A new CoreBoundLogger instance with the specified name
-            and bound context.
+        """
+        self._client.emit(
+            Event(
+                kind="metric",
+                scope=self._scope,
+                payload=metrics,
+                level=None,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
 
-    """
-    base = logging.getLogger(name) if name else logging.getLogger()
-    adapter: BoundLogger = CoreBoundLogger(base)
-    return adapter.bind(**to_bind) if to_bind else adapter
+    def scalar(
+        self,
+        name: str,
+        value: float,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a single scalar metric.
+
+        Args:
+            name (str): Metric name.
+            value (float): Metric value.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]):
+                Additional routing metadata (e.g., split="train").
+
+        """
+        self.push({name: value}, step=step, time=time, **extra)
+
+    def image(
+        self,
+        name: str,
+        image: bytes,
+        *,
+        format: str = "png",
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit an image artifact (encoded bytes).
+
+        Args:
+            name (str): Artifact name.
+            image (bytes): Encoded image bytes.
+            format (str): Image format, e.g., "png", "jpeg".
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra: Dict[str, Any]: Additional routing metadata.
+
+        """
+        self._client.emit(
+            Event(
+                kind="image",
+                scope=self._scope,
+                payload={"name": name, "data": image, "format": format},
+                level=None,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
+
+    def video(
+        self,
+        name: str,
+        data: bytes,
+        *,
+        fps: int = 30,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a video artifact (encoded bytes).
+
+        Args:
+            name (str): Artifact name.
+            data (bytes): Encoded video bytes.
+            fps (int): Frames per second.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+        self._client.emit(
+            Event(
+                kind="artifact",
+                scope=self._scope,
+                payload={"name": name, "data": data, "type": "video", "fps": fps},
+                level=None,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )

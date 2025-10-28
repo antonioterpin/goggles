@@ -21,6 +21,7 @@ dependencies = [
     "ruamel.yaml",
     "rich",
     "portal>=3.7.3",
+    "typing-extensions>=4.15.0",
 ]
 
 [project.optional-dependencies]

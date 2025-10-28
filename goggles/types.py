@@ -1,6 +1,6 @@
 """Types used in Goggles."""
 
-from typing import Literal, Any
+from typing import Literal, Any, Optional
 from dataclasses import dataclass
 
 Kind = Literal["log", "metric", "image", "artifact"]
@@ -17,12 +17,14 @@ class Event:
         level (int): Numeric log level for "log" events.
         step (int): Step number associated with the event.
         time (float): Timestamp of the event in seconds since epoch.
+        extra (Optional[dict[str, Any]]): Additional structured fields.
 
     """
 
     kind: Kind
     scope: str
     payload: Any
-    level: int
-    step: int
-    time: float
+    level: Optional[int]
+    step: Optional[int]
+    time: Optional[float]
+    extra: Optional[dict[str, Any]] = None

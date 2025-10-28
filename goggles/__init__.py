@@ -30,12 +30,12 @@ from typing import (
     Mapping,
     Optional,
     Protocol,
-    Self,
     Dict,
     Set,
     overload,
     runtime_checkable,
 )
+from typing_extensions import Self
 import logging
 import os
 
@@ -110,15 +110,19 @@ def get_logger(
 
     if with_metrics:
         if __impl_get_logger_metrics is None:
-            from ._core.logger import get_logger_with_metrics as _get_logger_metrics
+            from ._core.logger import CoreBoundLogger
 
-            __impl_get_logger_metrics = _get_logger_metrics
+            __impl_get_logger_metrics = lambda name, to_bind: CoreBoundLogger(
+                name, to_bind
+            )
         return __impl_get_logger_metrics(name, to_bind)
     else:
         if __impl_get_logger_text is None:
-            from ._core.logger import get_logger as _get_logger_text
+            from ._core.logger import CoreGogglesLogger
 
-            __impl_get_logger_text = _get_logger_text
+            __impl_get_logger_text = lambda name, to_bind: CoreGogglesLogger(
+                name, to_bind
+            )
         return __impl_get_logger_text(name, to_bind)
 
 
@@ -149,76 +153,145 @@ class BoundLogger(Protocol):
 
 
         Returns:
-            Self: A new `BoundLogger` instance with updated bound fields.
+            Self: A new `BoundLogger` instance
+                with updated bound fields and scope.
 
         """
 
-    def log(self, severity: int, msg: str, /, **extra: Any) -> None:
+    def log(
+        self,
+        severity: int,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
         """Log message at the given severity with optional structured extras.
 
         Args:
-            severity (int): Log level (e.g., logging.INFO).
+            severity (int): Numeric log level (e.g., logging.INFO).
             msg (str): The log message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
         """
         if severity >= logging.CRITICAL:
-            self.critical(msg, **extra)
+            self.critical(msg, step=step, time=time, **extra)
         elif severity >= logging.ERROR:
-            self.error(msg, **extra)
+            self.error(msg, step=step, time=time, **extra)
         elif severity >= logging.WARNING:
-            self.warning(msg, **extra)
+            self.warning(msg, step=step, time=time, **extra)
         elif severity >= logging.INFO:
-            self.info(msg, **extra)
+            self.info(msg, step=step, time=time, **extra)
         elif severity >= logging.DEBUG:
-            self.debug(msg, **extra)
+            self.debug(msg, step=step, time=time, **extra)
         else:
             # Below DEBUG level; no-op by default.
             pass
 
-    def debug(self, msg: str, /, **extra: Any) -> None:
+    def debug(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
         """Log a DEBUG message with optional structured extras.
 
         Args:
             msg (str): The log message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
         """
 
-    def info(self, msg: str, /, **extra: Any) -> None:
+    def info(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
         """Log an INFO message with optional structured extras.
 
         Args:
             msg (str): The log message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
         """
 
-    def warning(self, msg: str, /, **extra: Any) -> None:
+    def warning(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
         """Log a WARNING message with optional structured extras.
 
         Args:
             msg (str): The log message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
         """
 
-    def error(self, msg: str, /, **extra: Any) -> None:
+    def error(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
         """Log an ERROR message with optional structured extras.
 
         Args:
             msg (str): The log message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
         """
 
-    def critical(self, msg: str, /, **extra: Any) -> None:
-        """Log an ERROR with current exception info attached."""
+    def critical(
+        self,
+        msg: str,
+        /,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Any,
+    ) -> None:
+        """Log a CRITICAL message with current exception info attached.
+
+        Args:
+            msg (str): The log message.
+            step (Optional[int]): The step number.
+            time (Optional[float]): The timestamp.
+            **extra (Any):
+                Additional structured key-value pairs for this record.
+
+        """
 
 
 @runtime_checkable
@@ -226,19 +299,32 @@ class MetricsEmitter(Protocol):
     """Protocol for metrics and media emission."""
 
     def push(
-        self, metrics: Mapping[str, float], *, step: Optional[int] = None, **meta: Any
+        self,
+        metrics: Mapping[str, float],
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
     ) -> None:
         """Emit a batch of scalar metrics.
 
         Args:
             metrics (Mapping[str, float]): Name→value pairs.
             step (Optional[int]): Optional global step index.
-            **meta (Any): Additional routing metadata (e.g., split="train").
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]):
+                Additional routing metadata (e.g., split="train").
 
         """
 
     def scalar(
-        self, name: str, value: float, *, step: Optional[int] = None, **meta: Any
+        self,
+        name: str,
+        value: float,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
     ) -> None:
         """Emit a single scalar metric.
 
@@ -246,7 +332,9 @@ class MetricsEmitter(Protocol):
             name (str): Metric name.
             value (float): Metric value.
             step (Optional[int]): Optional global step index.
-            **meta (Any): Additional routing metadata (e.g., split="train").
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]):
+                Additional routing metadata (e.g., split="train").
 
         """
 
@@ -255,18 +343,20 @@ class MetricsEmitter(Protocol):
         name: str,
         image: bytes,
         *,
-        step: Optional[int] = None,
         format: str = "png",
-        **meta: Any,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
     ) -> None:
         """Emit an image artifact (encoded bytes).
 
         Args:
             name (str): Artifact name.
             image (bytes): Encoded image bytes.
-            step (Optional[int]): Optional global step index.
             format (str): Image format, e.g., "png", "jpeg".
-            **meta (Any): Additional routing metadata.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra: Dict[str, Any]: Additional routing metadata.
 
         """
 
@@ -275,18 +365,20 @@ class MetricsEmitter(Protocol):
         name: str,
         data: bytes,
         *,
-        step: Optional[int] = None,
         fps: int = 30,
-        **meta: Any,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
         Args:
             name (str): Artifact name.
             data (bytes): Encoded video bytes.
-            step (Optional[int]): Optional global step index.
             fps (int): Frames per second.
-            **meta (Any): Additional routing metadata.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
 
         """
 
