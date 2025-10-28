@@ -19,19 +19,15 @@ See Also:
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from dataclasses import dataclass, field
 from typing import (
     Any,
     Callable,
     Callable,
-    Dict,
+    List,
     Literal,
     Mapping,
     Optional,
     Protocol,
-    TypedDict,
-    Unpack,
     overload,
     runtime_checkable,
 )
@@ -44,10 +40,6 @@ __impl_get_logger_text: Optional[
 __impl_get_logger_metrics: Optional[
     Callable[[Optional[str], dict[str, Any]], GogglesLogger]
 ] = None
-__impl_current_run: Optional[Callable[[], Optional[RunContext]]] = None
-__impl_configure: Optional[Callable[..., None]] = None
-__impl_run_start: Optional[Callable[[], None]] = None
-__impl_run_stop: Optional[Callable[[], None]] = None
 __impl_get_bus: Optional[Callable[[], EventBus]] = None
 
 # ---------------------------------------------------------------------------
@@ -56,17 +48,29 @@ __impl_get_bus: Optional[Callable[[], EventBus]] = None
 
 
 @overload
-def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger: ...
+def get_logger(
+    name: Optional[str] = None, /, *, scope: str = "global", **to_bind: Any
+) -> BoundLogger: ...
 
 
 @overload
 def get_logger(
-    name: Optional[str] = None, *, with_metrics: Literal[True], **to_bind: Any
+    name: Optional[str] = None,
+    /,
+    *,
+    scope: str = "global",
+    with_metrics: Literal[True],
+    **to_bind: Any,
 ) -> GogglesLogger: ...
 
 
 def get_logger(
-    name: Optional[str] = None, *, with_metrics: bool = False, **to_bind: Any
+    name: Optional[str] = None,
+    /,
+    *,
+    scope: str = "global",
+    with_metrics: bool = False,
+    **to_bind: Any,
 ) -> BoundLogger | GogglesLogger:
     """Return a structured logger (text-only by default, metrics-enabled on opt-in).
 
@@ -77,6 +81,7 @@ def get_logger(
 
     Args:
         name (Optional[str]): Logger name. If None, the root logger is used.
+        scope (str): The logging scope, e.g., "global" or "run".
         with_metrics (bool): If True, return a logger exposing `.metrics`.
         **to_bind (Any): Fields persisted and injected into every record.
 
@@ -91,7 +96,7 @@ def get_logger(
         >>>
         >>> # Explicit metrics surface
         >>> tlog = get_logger("train", with_metrics=True, seed=0)
-        >>> tlog.metrics.scalar("loss", 0.42, step=1)
+        >>> tlog.scalar("loss", 0.42, step=1)
 
     """
     global __impl_get_logger_text, __impl_get_logger_metrics
@@ -101,52 +106,13 @@ def get_logger(
             from ._core.logger import get_logger_with_metrics as _get_logger_metrics
 
             __impl_get_logger_metrics = _get_logger_metrics
-        return __impl_get_logger_metrics(name, to_bind)
+        return __impl_get_logger_metrics(name, scope, to_bind)
     else:
         if __impl_get_logger_text is None:
             from ._core.logger import get_logger as _get_logger_text
 
             __impl_get_logger_text = _get_logger_text
-        return __impl_get_logger_text(name, to_bind)
-
-
-@dataclass(frozen=True)
-class RunContext:
-    """Immutable metadata describing a single logging run.
-
-    This object is yielded by the `run(...)` context manager and
-    injected into each log record emitted during the run.
-
-    Attributes:
-        run_id (str): Unique run identifier (UUID4 as canonical string).
-        run_name (Optional[str]): Human-friendly name shown in UIs; may be None.
-        log_dir (str): Absolute or relative path to the run directory containing
-            `events.log`, optional `events.jsonl`, and `metadata.json`.
-        created_at (str): Timestamp of when the run started.
-        pid (int): Process ID that opened the run.
-        host (str): Hostname of the machine where the run was created.
-        python (str): Python version as `major.minor.micro`.
-        metadata (Dict[str, Any]): Arbitrary user-provided metadata captured at
-            run creation (experiment args, seeds, git SHA, etc.).
-
-    """
-
-    run_id: str
-    run_name: Optional[str]
-    log_dir: str
-    created_at: str
-    pid: int
-    host: str
-    python: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-class RunKwargs(TypedDict, total=False):
-    name: Optional[str]
-    log_dir: Optional[str]
-    log_level: Optional[str]
-    handlers: list[Handler] | None
-    metadata: Mapping[str, Any] | None = None
+        return __impl_get_logger_text(name, scope, to_bind)
 
 
 @runtime_checkable
@@ -314,7 +280,7 @@ class MetricsEmitter(Protocol):
 
 
 @runtime_checkable
-class GogglesLogger(BoundLogger, Protocol):
+class GogglesLogger(BoundLogger, MetricsEmitter, Protocol):
     """Protocol for Goggles loggers with metrics support.
 
     Composite logger combining text logging with a metrics facet.
@@ -326,14 +292,12 @@ class GogglesLogger(BoundLogger, Protocol):
         >>>
         >>> # Explicit metrics surface
         >>> tlog = get_logger("train", with_metrics=True, seed=0)
-        >>> tlog.metrics.scalar("loss", 0.42, step=1)
+        >>> tlog.scalar("loss", 0.42, step=1)
         >>> tlog.info("Training step completed")
         ...   # Both log records include any persistent bound fields.
         ...   # The second record also includes run_id="exp42".
 
     """
-
-    metrics: MetricsEmitter
 
     def bind(self, **fields: Any) -> "GogglesLogger":
         """Return a new facade with `fields` merged into persistent state."""
@@ -347,29 +311,13 @@ class Handler(Protocol):
         name (str): Stable handler identifier for diagnostics.
         capabilities (set[str]):
             Supported kinds, e.g. {'logs','metrics','artifacts'}.
-        allowed_scopes (set[Literal['global','run']]): Valid scopes for attachment.
 
     """
 
     name: str
-    capabilities: set[str]
-    allowed_scopes: set[Literal["global", "run"]]
 
-    def open(self, run: Optional[RunContext] = None) -> None:
-        """Initialize the handler (called when entering a scope).
-
-        Args:
-            run (Optional[RunContext]): The active run context if any.
-
-        """
-
-    def handle(self, event: Any) -> None:
-        """Process a single event routed by the EventBus.
-
-        Args:
-            event (Any): The event to process.
-
-        """
+    def open(self) -> None:
+        """Initialize the handler (called when entering a scope)."""
 
     def close(self) -> None:
         """Flush and release resources (called when leaving a scope).
@@ -380,30 +328,74 @@ class Handler(Protocol):
         """
 
 
+@runtime_checkable
+class TextHandler(Handler, Protocol):
+    """Protocol for text log handlers."""
+
+    def log(self, message: str, level: str = "info", **meta: Any) -> None:
+        """Log a message with the given level and metadata.
+
+        Args:
+            message (str): The log message.
+            level (str): The log level (e.g., "info", "error").
+            **meta (Any): Additional metadata to include in the log.
+
+        """
+
+
+@runtime_checkable
+class MetricsHandler(Handler, Protocol):
+    """Protocol for metrics log handlers."""
+
+    def emit(self, metrics: Mapping[str, Any], **meta: Any) -> None:
+        """Emit a batch of scalar metrics.
+
+        Args:
+            metrics (Mapping[str, float]): Name→value pairs.
+            **meta (Any): Additional routing metadata (e.g., split="train").
+
+        """
+
+
+@runtime_checkable
+class ArtifactsHandler(Handler, Protocol):
+    """Protocol for artifacts log handlers."""
+
+    def upload(self, name: str, artifact: Any, **meta: Any) -> None:
+        """Upload an artifact with the given name and metadata.
+
+        Args:
+            name (str): Artifact name.
+            artifact (Any): Artifact data.
+            **meta (Any): Additional metadata for the artifact.
+
+        """
+
+
 # ---------------------------------------------------------------------------
 # EventBus and run management
 # ---------------------------------------------------------------------------
 class EventBus(Protocol):
     """Protocol for the process-wide event router."""
 
-    def attach(self, handler: Handler, scope: Literal["global", "run"]) -> None:
+    def attach(self, handlers: List[Handler], scopes: List[str]) -> None:
         """Attach a handler under the given scope.
 
         Args:
-            handler (Handler): The handler to attach.
-            scope (Literal["global", "run"]): The scope under which to attach.
+            handlers (List[Handler]): The handlers to attach to the scopes.
+            scopes (List[str]): The scopes under which to attach.
 
         Raises:
           ValueError: If the handler disallows the requested scope.
 
         """
 
-    def detach(self, handler_name: str, scope: Literal["global", "run"]) -> None:
+    def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
 
         Args:
             handler_name (str): The name of the handler to detach.
-            scope (Literal["global", "run"]): The scope from which to detach.
+            scope (str): The scope from which to detach.
 
         Raises:
           ValueError: If the handler was not attached under the requested scope.
@@ -432,161 +424,40 @@ def get_bus() -> EventBus:
     return __impl_get_bus()
 
 
-def current_run() -> Optional[RunContext]:
-    """Return the currently active RunContext for this context if any.
-
-    This function allows retrieving the active `RunContext`
-    outside of log records. If no run is active, it returns `None`.
-
-    Returns:
-        Optional[RunContext]:
-            The active run context, or None if no run is active.
-
-    Examples:
-        >>> with run("my_experiment") as ctx:
-        ...     current = current_run()
-        ...     assert current.run_id == ctx.run_id
-
-    """
-    global __impl_current_run
-    if __impl_current_run is None:
-        from ._core.run import get_active_run as _get_active_run
-
-        __impl_current_run = _get_active_run
-    return __impl_current_run()
-
-
-def configure(**kwargs: Unpack[RunKwargs]) -> None:
-    """Override global defaults used by `run(...)`.
-
-    This is an optional convenience to set process-wide defaults *before*
-    `run(...)` is called (e.g., enabling JSONL by default). If a subsequent
-    `run(...)` call specifies keyword arguments, those take precedence over
-    these defaults.
+def attach(handler: Handler, scopes: List[str]) -> None:
+    """Attach a handler to the global EventBus under the specified scopes.
 
     Args:
-        **kwargs: Recognized keys (all optional) are in RunKwargs.
+        handler (Handler): The handler to attach.
+        scopes (List[str]): The scopes under which to attach.
 
     Raises:
-        ValueError: If unknown keys are supplied or values have invalid types.
-
-    Examples:
-        >>> configure(enable_jsonl=True, log_level="DEBUG")
-        >>> with run("test_run") as ctx:
-        ...     assert ctx.enable_jsonl is True
-        ...     assert ctx.log_level == "DEBUG"
+        ValueError: If the handler disallows the requested scope.
 
     """
-    global __impl_configure
-    if __impl_configure is None:
-        from ._core.run import _configure as _configure_impl_func
-
-        __impl_configure = _configure_impl_func
-    __impl_configure(**kwargs)
+    bus = get_bus()
+    bus.attach([handler], scopes)
 
 
-def start_run(**kwargs: Unpack[RunKwargs]) -> RunContext:
-    """Start a logging run.
-
-    This function configures logging handlers for the current process
-    according to the specified configuration.
-    The run remains active until `stop_run()` is called.
+def detach(handler_name: str, scope: str) -> None:
+    """Detach a handler from the global EventBus under the specified scope.
 
     Args:
-        **kwargs: Recognized keys (all optional) are in RunKwargs.
-
-    Returns:
-        RunContext: The context manager for the active run.
+        handler_name (str): The name of the handler to detach.
+        scope (str): The scope from which to detach.
 
     Raises:
-        RuntimeError: If a run is already active in this process.
-        OSError: If directory creation or file opening fails.
-        ValueError: If `log_level` is invalid or incompatible options are set.
+        ValueError: If the handler was not attached under the requested scope.
 
     """
-    global __impl_run_start
-    if __impl_run_start is None:
-        from ._core.run import start_run as _start_run_impl
-
-        __impl_run_start = _start_run_impl
-
-    __impl_run_start(**kwargs)
-
-
-def stop_run() -> None:
-    """Stop the currently active logging run.
-
-    It flushes and closes all logging handlers associated with
-    the active run and releases resources.
-
-    Raises:
-        RuntimeError: If no run is currently active.
-
-    """
-    global __impl_run_stop
-    if __impl_run_stop is None:
-        from ._core.run import _stop_run as _stop_run_impl
-
-        __impl_run_stop = _stop_run_impl
-
-    __impl_run_stop()
-
-
-def run(**kwargs: Unpack[RunKwargs]) -> AbstractContextManager[RunContext]:
-    """Configure logging and yield a `RunContext`.
-
-    This is the primary entry point to start a logging run. It sets up
-    logging handlers according to the specified configuration, creates a
-    `RunContext`, and yields it within a context manager. All log records
-    emitted while inside the context will include structured metadata from
-    the `RunContext`.
-
-    Behavior:
-        - Exactly-once configuration: if a run is already active, raise
-            `RuntimeError` rather than silently stacking handlers.
-        - Creates the specified log directory if it does not exist.
-        - Persists `metadata.json` with user-provided metadata.
-        - Supports optional integrations (W&B, artifact logging).
-        - Defaults passed as keyword arguments override any global defaults
-            set via `configure(...)`.
-
-    Args:
-        **kwargs: Recognized keys (all optional) are in RunKwargs.
-
-    Returns:
-        AbstractContextManager[RunContext]: A context manager yielding `RunContext`.
-
-    Raises:
-        RuntimeError: If a run is already active in this process.
-        OSError: If directory creation or file opening fails.
-        ValueError: If `log_level` is invalid or incompatible options are set.
-
-    Examples:
-        >>> # Application entrypoint
-        >>> with run("exp42", enable_jsonl=True) as ctx:
-        ...     log = get_logger("train", seed=0)
-        ...     log.info("start", step=0)
-
-    """
-    global __impl_run
-    if __impl_run is None:
-        from ._core.run import _RunContextManager as _RunContextManagerImpl
-
-        __impl_run = _RunContextManagerImpl
-
-    return __impl_run(**kwargs)
+    bus = get_bus()
+    bus.detach(handler_name, scope)
 
 
 __all__ = [
-    "RunContext",
     "BoundLogger",
-    "configure",
-    "start_run",
-    "stop_run",
-    "run",
+    "GogglesLogger",
     "get_logger",
-    "current_run",
-    "get_bus",
     "attach",
     "detach",
 ]

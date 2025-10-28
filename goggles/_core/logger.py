@@ -19,6 +19,67 @@ from typing import Any, Dict, Mapping, Optional
 from goggles import BoundLogger, current_run
 
 
+@dataclass(frozen=True)
+class RunContext:
+    """Immutable metadata describing a single logging run.
+
+    This object is yielded by the `run(...)` context manager and
+    injected into each log record emitted during the run.
+
+    Attributes:
+        run_id (str): Unique run identifier (UUID4 as canonical string).
+        run_name (Optional[str]): Human-friendly name shown in UIs; may be None.
+        log_dir (str): Absolute or relative path to the run directory containing
+            `events.log`, optional `events.jsonl`, and `metadata.json`.
+        created_at (str): Timestamp of when the run started.
+        pid (int): Process ID that opened the run.
+        host (str): Hostname of the machine where the run was created.
+        python (str): Python version as `major.minor.micro`.
+        metadata (Dict[str, Any]): Arbitrary user-provided metadata captured at
+            run creation (experiment args, seeds, git SHA, etc.).
+
+    """
+
+    run_id: str = field(default_factory=lambda: RunContext._run_id())
+    run_name: Optional[str]
+    log_dir: str
+    pid: int
+    host: str
+    created_at: str = field(default_factory=lambda: RunContext._now_utc_iso())
+    python: str = field(default_factory=lambda: RunContext._python_version())
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def _python_version(cls) -> str:
+        """Return the current Python version in `major.minor.micro` format.
+
+        Returns:
+            A string representing the Python version.
+
+        Example:
+            '3.9.1'
+
+        """
+        import sys
+
+        v = sys.version_info
+        return f"{v.major}.{v.minor}.{v.micro}"
+
+    @classmethod
+    def _now_utc_iso(cls) -> str:
+        """Return the current UTC time as an ISO 8601 string."""
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).isoformat()
+
+    @classmethod
+    def _run_id(cls, length=8) -> str:
+        """Generate a new UUID4 string for run identification."""
+        import uuid
+
+        return uuid.uuid4().hex[:length]
+
+
 class CoreBoundLogger:
     """Internal concrete implementation of the BoundLogger protocol.
 
