@@ -24,11 +24,11 @@ class ConsoleHandler:
 
     """
 
+    name: str = "console"
+    capabilities: Set[str] = frozenset({"log"})
+
     def __init__(self) -> None:
         """Initialize the console log handler."""
-        self.name: str = "console"
-        self.capabilities: Set[str] = frozenset({"log"})
-
         self._logger = logging.getLogger(self.name)
         if not self._logger.handlers:
             handler = logging.StreamHandler()

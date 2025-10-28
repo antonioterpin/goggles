@@ -20,6 +20,9 @@ class JsonlHandler:
 
     """
 
+    name: str = "jsonl"
+    capabilities: Set[str] = frozenset({"log"})
+
     def __init__(self, path: Path, name: str = "jsonl") -> None:
         """Initialize the handler.
 
@@ -29,8 +32,6 @@ class JsonlHandler:
 
         """
         self._path = path
-        self.name = name
-        self.capabilities: Set[str] = {"log"}
         self._fp = None
         self._lock = threading.Lock()
 
