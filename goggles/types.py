@@ -31,16 +31,20 @@ class Event:
         kind (Kind): Kind of event ("log", "metric", "image", "artifact").
         scope (str): Scope of the event ("global" or "run").
         payload (Any): Event payload.
-        level (int): Numeric log level for "log" events.
-        step (int): Step number associated with the event.
-        time (float): Timestamp of the event in seconds since epoch.
-        extra (Optional[dict[str, Any]]): Additional structured fields.
+        filepath (str): File path of the caller emitting the event.
+        lineno (int): Line number of the caller emitting the event.
+        level (Optional[int]): Optional log level for "log" events.
+        step (Optional[int]): Optional global step index.
+        time (Optional[float]): Optional global timestamp.
+        extra (Optional[dict[str, Any]]): Optional extra metadata.
 
     """
 
     kind: Kind
     scope: str
     payload: Any
+    filepath: str
+    lineno: int
     level: Optional[int] = None
     step: Optional[int] = None
     time: Optional[float] = None

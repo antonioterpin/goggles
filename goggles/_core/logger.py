@@ -9,6 +9,7 @@ External code should not import from this module. Instead, depend on:
 """
 
 import logging
+import inspect
 from typing import Any, Dict, Mapping, Optional, Self
 
 from goggles import BoundLogger, GogglesLogger, Event
@@ -115,11 +116,14 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
+                filepath=filepath,
+                lineno=lineno,
                 level=logging.DEBUG,
                 step=step,
                 time=time,
@@ -146,11 +150,14 @@ class CoreBoundLogger(BoundLogger):
                 Additional structured key-value pairs for this record.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
+                filepath=filepath,
+                lineno=lineno,
                 level=logging.INFO,
                 step=step,
                 time=time,
@@ -176,11 +183,14 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
+                filepath=filepath,
+                lineno=lineno,
                 level=logging.WARNING,
                 step=step,
                 time=time,
@@ -206,12 +216,15 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
                 level=logging.ERROR,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -236,12 +249,15 @@ class CoreBoundLogger(BoundLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
                 payload=msg,
                 level=logging.CRITICAL,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -283,12 +299,15 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 Additional routing metadata (e.g., split="train").
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="metric",
                 scope=self._scope,
                 payload=metrics,
                 level=None,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -315,7 +334,20 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 Additional routing metadata (e.g., split="train").
 
         """
-        self.push({name: value}, step=step, time=time, **extra)
+        filepath, lineno = _caller_id()
+        self._client.emit(
+            Event(
+                kind="metric",
+                scope=self._scope,
+                payload={name: value},
+                level=None,
+                filepath=filepath,
+                lineno=lineno,
+                step=step,
+                time=time,
+                extra={**self._bound, **extra},
+            )
+        )
 
     def image(
         self,
@@ -338,12 +370,15 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
             **extra: Dict[str, Any]: Additional routing metadata.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="image",
                 scope=self._scope,
                 payload={"name": name, "data": image, "format": format},
                 level=None,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
@@ -371,14 +406,33 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
             **extra (Dict[str, Any]): Additional routing metadata.
 
         """
+        filepath, lineno = _caller_id()
         self._client.emit(
             Event(
                 kind="video",
                 scope=self._scope,
                 payload={"name": name, "video": video, "fps": fps},
                 level=None,
+                filepath=filepath,
+                lineno=lineno,
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
             )
         )
+
+
+def _caller_id() -> tuple[str, int]:
+    """Get the caller's filepath and line number for logging purposes.
+
+    Returns:
+        tuple[str, int]: A tuple of (file path, line number).
+
+    """
+    frame = inspect.currentframe()
+    if frame is None or frame.f_back is None or frame.f_back.f_back is None:
+        return ("<unknown>", 0)
+    caller_frame = frame.f_back.f_back
+    filename = caller_frame.f_code.co_filename
+    line_number = caller_frame.f_lineno
+    return (filename, line_number)
