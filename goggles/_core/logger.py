@@ -17,7 +17,6 @@ import logging
 from typing import Any, Dict, Mapping, Optional, Self
 
 from goggles import BoundLogger, GogglesLogger, Event
-from goggles._core.eventbus import get_bus
 
 
 class CoreBoundLogger(BoundLogger):
@@ -56,6 +55,8 @@ class CoreBoundLogger(BoundLogger):
                 Optional initial persistent context to bind.
 
         """
+        from goggles._core.routing import get_bus
+
         self._logger = logger
         self._scope = scope
         self._bound: Dict[str, Any] = dict(to_bind or {})
