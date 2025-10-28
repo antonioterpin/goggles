@@ -1,4 +1,4 @@
-"""Goggles: Structured Logging and Experiment Tracking.
+"""Goggles: Structured logging and experiment tracking.
 
 This package provides a stable public API for logging experiments, metrics,
 and media in a consistent and composable way.
@@ -19,6 +19,8 @@ See Also:
 
 from __future__ import annotations
 
+import atexit
+from collections import defaultdict
 from typing import (
     Any,
     Callable,
@@ -28,10 +30,20 @@ from typing import (
     Mapping,
     Optional,
     Protocol,
+    Self,
+    Dict,
+    Set,
     overload,
     runtime_checkable,
 )
 import logging
+import os
+
+from .types import Kind, Event
+
+# Goggles port for bus communication
+GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
+GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 
 # Cache the implementations after first use to avoid repeated imports
 __impl_get_logger_text: Optional[
@@ -48,9 +60,7 @@ __impl_get_bus: Optional[Callable[[], EventBus]] = None
 
 
 @overload
-def get_logger(
-    name: Optional[str] = None, /, *, scope: str = "global", **to_bind: Any
-) -> BoundLogger: ...
+def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger: ...
 
 
 @overload
@@ -58,7 +68,6 @@ def get_logger(
     name: Optional[str] = None,
     /,
     *,
-    scope: str = "global",
     with_metrics: Literal[True],
     **to_bind: Any,
 ) -> GogglesLogger: ...
@@ -68,7 +77,6 @@ def get_logger(
     name: Optional[str] = None,
     /,
     *,
-    scope: str = "global",
     with_metrics: bool = False,
     **to_bind: Any,
 ) -> BoundLogger | GogglesLogger:
@@ -81,7 +89,6 @@ def get_logger(
 
     Args:
         name (Optional[str]): Logger name. If None, the root logger is used.
-        scope (str): The logging scope, e.g., "global" or "run".
         with_metrics (bool): If True, return a logger exposing `.metrics`.
         **to_bind (Any): Fields persisted and injected into every record.
 
@@ -106,13 +113,13 @@ def get_logger(
             from ._core.logger import get_logger_with_metrics as _get_logger_metrics
 
             __impl_get_logger_metrics = _get_logger_metrics
-        return __impl_get_logger_metrics(name, scope, to_bind)
+        return __impl_get_logger_metrics(name, to_bind)
     else:
         if __impl_get_logger_text is None:
             from ._core.logger import get_logger as _get_logger_text
 
             __impl_get_logger_text = _get_logger_text
-        return __impl_get_logger_text(name, scope, to_bind)
+        return __impl_get_logger_text(name, to_bind)
 
 
 @runtime_checkable
@@ -133,11 +140,16 @@ class BoundLogger(Protocol):
 
     """
 
-    def bind(self, **fields: Any) -> "BoundLogger":
+    def bind(self, *, scope: str, **fields: Any) -> Self:
         """Return a new adapter with `fields` merged into persistent state.
 
         Args:
+            scope (str): The binding scope, e.g., "global" or "run".
             **fields (Any): Key-value pairs to bind persistently.
+
+
+        Returns:
+            Self: A new `BoundLogger` instance with updated bound fields.
 
         """
 
@@ -299,9 +311,6 @@ class GogglesLogger(BoundLogger, MetricsEmitter, Protocol):
 
     """
 
-    def bind(self, **fields: Any) -> "GogglesLogger":
-        """Return a new facade with `fields` merged into persistent state."""
-
 
 @runtime_checkable
 class Handler(Protocol):
@@ -316,6 +325,27 @@ class Handler(Protocol):
 
     name: str
 
+    def can_handle(self, kind: Kind) -> bool:
+        """Return whether this handler can process events of the given kind.
+
+        Args:
+            kind (Kind):
+                The kind of event ("log", "metric", "image", "artifact").
+
+        Returns:
+            bool: True if the handler can process the event kind,
+                False otherwise.
+
+        """
+
+    def handle(self, event: Event) -> None:
+        """Handle an emitted event.
+
+        Args:
+            event (Event): The event to handle.
+
+        """
+
     def open(self) -> None:
         """Initialize the handler (called when entering a scope)."""
 
@@ -328,55 +358,27 @@ class Handler(Protocol):
         """
 
 
-@runtime_checkable
-class TextHandler(Handler, Protocol):
-    """Protocol for text log handlers."""
-
-    def log(self, message: str, level: str = "info", **meta: Any) -> None:
-        """Log a message with the given level and metadata.
-
-        Args:
-            message (str): The log message.
-            level (str): The log level (e.g., "info", "error").
-            **meta (Any): Additional metadata to include in the log.
-
-        """
-
-
-@runtime_checkable
-class MetricsHandler(Handler, Protocol):
-    """Protocol for metrics log handlers."""
-
-    def emit(self, metrics: Mapping[str, Any], **meta: Any) -> None:
-        """Emit a batch of scalar metrics.
-
-        Args:
-            metrics (Mapping[str, float]): Name→value pairs.
-            **meta (Any): Additional routing metadata (e.g., split="train").
-
-        """
-
-
-@runtime_checkable
-class ArtifactsHandler(Handler, Protocol):
-    """Protocol for artifacts log handlers."""
-
-    def upload(self, name: str, artifact: Any, **meta: Any) -> None:
-        """Upload an artifact with the given name and metadata.
-
-        Args:
-            name (str): Artifact name.
-            artifact (Any): Artifact data.
-            **meta (Any): Additional metadata for the artifact.
-
-        """
-
-
 # ---------------------------------------------------------------------------
 # EventBus and run management
 # ---------------------------------------------------------------------------
-class EventBus(Protocol):
+class EventBus:
     """Protocol for the process-wide event router."""
+
+    handlers: Dict[str, Handler]
+    scopes: Dict[str, Set[str]]
+
+    def __init__(self):
+        super().__init__()
+        self.handlers: Dict[str, Handler] = {}
+        self.scopes: Dict[str, Set[str]] = defaultdict(set)
+
+        atexit.register(self._shutdown)
+
+    def _shutdown(self) -> None:
+        """Shutdown the EventBus and close all handlers."""
+        for scope in self.scopes:
+            for handler_name in self.scopes[scope]:
+                self.detach(handler_name, scope)
 
     def attach(self, handlers: List[Handler], scopes: List[str]) -> None:
         """Attach a handler under the given scope.
@@ -385,10 +387,16 @@ class EventBus(Protocol):
             handlers (List[Handler]): The handlers to attach to the scopes.
             scopes (List[str]): The scopes under which to attach.
 
-        Raises:
-          ValueError: If the handler disallows the requested scope.
-
         """
+        for handler in handlers:
+            if handler.name not in self.handlers:
+                # Initialize handler and store it
+                handler.open()
+                self.handlers[handler.name] = handler
+
+            # Add to requested scopes
+            for scope in scopes:
+                self.scopes[scope].add(handler.name)
 
     def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
@@ -401,14 +409,28 @@ class EventBus(Protocol):
           ValueError: If the handler was not attached under the requested scope.
 
         """
+        if scope not in self.scopes or handler_name not in self.scopes[scope]:
+            raise ValueError(
+                f"Handler '{handler_name}' not attached under scope '{scope}'"
+            )
+        self.handlers[handler_name].close()
+        self.scopes[scope].remove(handler_name)
+        del self.handlers[handler_name]
 
-    def emit(self, event: Any) -> None:
+    def emit(self, event: Event) -> None:
         """Emit an event to eligible handlers (errors isolated per handler).
 
         Args:
-            event (Any): The event to emit.
+            event (Event): The event to emit.
 
         """
+        if event.scope not in self.scopes:
+            return
+
+        for handler_name in self.scopes[event.scope]:
+            handler = self.handlers.get(handler_name)
+            if handler.can_handle(event.kind):
+                handler.handle(event)
 
 
 def get_bus() -> EventBus:
@@ -418,7 +440,7 @@ def get_bus() -> EventBus:
     """
     global __impl_get_bus
     if __impl_get_bus is None:
-        from ._core.eventbus import get_bus as _impl_get_bus
+        from ._core.routing import get_bus as _impl_get_bus
 
         __impl_get_bus = _impl_get_bus
     return __impl_get_bus()
