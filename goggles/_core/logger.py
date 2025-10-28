@@ -251,10 +251,6 @@ class CoreBoundLogger(BoundLogger):
             )
         )
 
-    # -------------------------------------------------------------------------
-    # Introspection / representation
-    # -------------------------------------------------------------------------
-
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
 

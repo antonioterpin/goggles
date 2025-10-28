@@ -3,7 +3,7 @@
 from typing import Literal, Any, Optional
 from dataclasses import dataclass
 
-Kind = Literal["log", "metric", "image", "artifact"]
+Kind = Literal["log", "metric", "image", "video", "artifact"]
 
 
 @dataclass(frozen=True)
