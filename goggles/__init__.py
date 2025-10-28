@@ -56,17 +56,17 @@ __impl_get_bus: Optional[Callable[[], EventBus]] = None
 
 
 @overload
-def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger: ...
+def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger: ...
 
 
 @overload
 def get_logger(
-    name: Optional[str] = None, /, *, with_metrics: Literal[True], **bound: Any
+    name: Optional[str] = None, *, with_metrics: Literal[True], **to_bind: Any
 ) -> GogglesLogger: ...
 
 
 def get_logger(
-    name: Optional[str] = None, /, *, with_metrics: bool = False, **bound: Any
+    name: Optional[str] = None, *, with_metrics: bool = False, **to_bind: Any
 ) -> BoundLogger | GogglesLogger:
     """Return a structured logger (text-only by default, metrics-enabled on opt-in).
 
@@ -78,7 +78,7 @@ def get_logger(
     Args:
         name (Optional[str]): Logger name. If None, the root logger is used.
         with_metrics (bool): If True, return a logger exposing `.metrics`.
-        **bound (Any): Fields persisted and injected into every record.
+        **to_bind (Any): Fields persisted and injected into every record.
 
     Returns:
         Union[BoundLogger, GogglesLogger]: A text-only `BoundLogger` by default,
@@ -101,13 +101,13 @@ def get_logger(
             from ._core.logger import get_logger_with_metrics as _get_logger_metrics
 
             __impl_get_logger_metrics = _get_logger_metrics
-        return __impl_get_logger_metrics(name, bound)
+        return __impl_get_logger_metrics(name, to_bind)
     else:
         if __impl_get_logger_text is None:
             from ._core.logger import get_logger as _get_logger_text
 
             __impl_get_logger_text = _get_logger_text
-        return __impl_get_logger_text(name, bound)
+        return __impl_get_logger_text(name, to_bind)
 
 
 @dataclass(frozen=True)
@@ -506,7 +506,7 @@ def start_run(**kwargs: Unpack[RunKwargs]) -> RunContext:
     """
     global __impl_run_start
     if __impl_run_start is None:
-        from ._core.run import _start_run as _start_run_impl
+        from ._core.run import start_run as _start_run_impl
 
         __impl_run_start = _start_run_impl
 

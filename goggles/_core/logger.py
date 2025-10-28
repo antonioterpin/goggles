@@ -18,15 +18,6 @@ from typing import Any, Dict, Mapping, Optional
 
 from goggles import BoundLogger, current_run
 
-_COLOR_MAP = {
-    logging.DEBUG: "[34m",  # blue
-    logging.INFO: "",  # white "[32m",  # green
-    logging.WARNING: "[33m",  # yellow
-    logging.ERROR: "[31m",  # red
-    logging.CRITICAL: "[35m",  # magenta
-}
-_RESET_COLOR = "[0m"
-
 
 class CoreBoundLogger:
     """Internal concrete implementation of the BoundLogger protocol.
@@ -62,7 +53,7 @@ class CoreBoundLogger:
         self._logger = logger
         self._bound: Dict[str, Any] = dict(bound or {})
 
-    def bind(self, **fields: Any) -> CoreBoundLogger:
+    def bind(self, **fields: Any) -> "CoreBoundLogger":
         """Return a new logger with `fields` merged into persistent context.
 
         This method does not mutate the current instance. It returns a new
@@ -188,7 +179,7 @@ class CoreBoundLogger:
         # Reserve and pop user-provided control kwargs.
         user_stacklevel = int((extra or {}).pop("stacklevel", 3))
 
-        # Strip reserved keys users shouldn't clobber.
+        # Strip reserved keys users shouldn't be bothered with.
         extra = {
             k: v
             for k, v in (extra or {}).items()
@@ -221,11 +212,12 @@ class CoreBoundLogger:
 
         """
         return (
-            f"{self.__class__.__name__}(logger={self._logger!r}, bound={self._bound!r})"
+            f"{self.__class__.__name__}(logger={self._logger!r}, "
+            f"bound={self._bound!r})"
         )
 
 
-def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger:
+def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger:
     """Core implementation: create a CoreBoundLogger and apply initial binding.
 
     Safe to call before `run(...)`: we do not attach handlers or mutate
@@ -233,7 +225,7 @@ def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger:
 
     Args:
         name: Optional name of the logger. If None, the root logger is used.
-        **bound: Optional initial persistent context to bind.
+        **to_bind: Optional initial persistent context to bind.
 
     Returns:
         BoundLogger: A new CoreBoundLogger instance with the specified name
@@ -242,4 +234,4 @@ def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger:
     """
     base = logging.getLogger(name) if name else logging.getLogger()
     adapter: BoundLogger = CoreBoundLogger(base)
-    return adapter.bind(**bound) if bound else adapter
+    return adapter.bind(**to_bind) if to_bind else adapter
