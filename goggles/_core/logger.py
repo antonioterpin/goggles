@@ -1,16 +1,11 @@
-"""Internal Core BoundLogger implementation.
+"""Internal logger implementation.
 
 WARNING: This module is an internal implementation detail of Goggles'
 logging system. It is not part of the public API.
 
 External code should not import from this module. Instead, depend on:
-  - `goggles.BoundLogger` (protocol / interface), and
-  - `goggles.get_logger()` (factory returning a BoundLogger)
-
-This module adapts the standard `logging.Logger` to support persistent,
-structured context ("bound" fields) that are merged into each log call.
-Behavioral compatibility is provided via the `BoundLogger` protocol,
-not by inheritance.
+  - `goggles.BoundLogger`, `goggles.GogglesLogger` (protocol / interface), and
+  - `goggles.get_logger()` (factory returning a BoundLogger/GogglesLogger).
 """
 
 import logging
@@ -37,6 +32,7 @@ class CoreBoundLogger(BoundLogger):
         _logger: Underlying `logging.Logger` instance. Internal use only.
         _bound: Persistent structured fields merged into each record.
             Internal use only.
+        _client: EventBus client for emitting structured events.
 
     """
 
@@ -74,7 +70,7 @@ class CoreBoundLogger(BoundLogger):
             **fields: Key-value pairs to bind into the new logger's context.
 
         Returns:
-            CoreBoundLogger: A new adapter with the merged persistent context.
+            Self: A new adapter with the merged persistent context.
 
         Raises:
             TypeError: If provided keys are not strings (may occur in stricter
@@ -82,7 +78,7 @@ class CoreBoundLogger(BoundLogger):
 
         Examples:
             >>> log = get_logger("goggles")  # via public API
-            >>> run_log = log.bind(run_id="exp42", module="train")
+            >>> run_log = log.bind(scope="exp42", module="train")
             >>> run_log.info("Initialized")
 
         """
@@ -251,15 +247,12 @@ class CoreBoundLogger(BoundLogger):
             )
         )
 
-    # -------------------------------------------------------------------------
-    # Introspection / representation
-    # -------------------------------------------------------------------------
-
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
 
         Returns:
-            str: String representation showing the underlying logger and bound context.
+            str: String representation showing the underlying
+                logger and bound context.
 
         """
         return (
