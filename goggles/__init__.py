@@ -141,6 +141,14 @@ class RunContext:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+class RunKwargs(TypedDict, total=False):
+    name: Optional[str]
+    log_dir: Optional[str]
+    log_level: Optional[str]
+    handlers: list[Handler] | None
+    metadata: Mapping[str, Any] | None = None
+
+
 @runtime_checkable
 class BoundLogger(Protocol):
     """Protocol for Goggles' structured logger adapters.
@@ -446,14 +454,6 @@ def current_run() -> Optional[RunContext]:
 
         __impl_current_run = _get_active_run
     return __impl_current_run()
-
-
-class RunKwargs(TypedDict, total=False):
-    name: Optional[str]
-    log_dir: Optional[str]
-    log_level: Optional[str]
-    handlers: list[Handler] | None
-    metadata: Mapping[str, Any] | None = None
 
 
 def configure(**kwargs: Unpack[RunKwargs]) -> None:
