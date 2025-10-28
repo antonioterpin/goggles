@@ -8,7 +8,7 @@ pip install "goggles @ git+ssh://git@github.com/antonioterpin/goggles.git"
 
 ## Features
 
-- 🤖 **Multi-process compatible**
+- 🤖 **Multi-process, single-thread compatible**
   Synchronize logs from all spawned processes via shared memory.
 
 - 🎯 **Multi-output logging**
