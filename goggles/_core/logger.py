@@ -28,6 +28,67 @@ _COLOR_MAP = {
 _RESET_COLOR = "[0m"
 
 
+@dataclass(frozen=True)
+class RunContext:
+    """Immutable metadata describing a single logging run.
+
+    This object is yielded by the `run(...)` context manager and
+    injected into each log record emitted during the run.
+
+    Attributes:
+        run_id (str): Unique run identifier (UUID4 as canonical string).
+        run_name (Optional[str]): Human-friendly name shown in UIs; may be None.
+        log_dir (str): Absolute or relative path to the run directory containing
+            `events.log`, optional `events.jsonl`, and `metadata.json`.
+        created_at (str): Timestamp of when the run started.
+        pid (int): Process ID that opened the run.
+        host (str): Hostname of the machine where the run was created.
+        python (str): Python version as `major.minor.micro`.
+        metadata (Dict[str, Any]): Arbitrary user-provided metadata captured at
+            run creation (experiment args, seeds, git SHA, etc.).
+
+    """
+
+    run_id: str = field(default_factory=lambda: RunContext._run_id())
+    run_name: Optional[str]
+    log_dir: str
+    pid: int
+    host: str
+    created_at: str = field(default_factory=lambda: RunContext._now_utc_iso())
+    python: str = field(default_factory=lambda: RunContext._python_version())
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def _python_version(cls) -> str:
+        """Return the current Python version in `major.minor.micro` format.
+
+        Returns:
+            A string representing the Python version.
+
+        Example:
+            '3.9.1'
+
+        """
+        import sys
+
+        v = sys.version_info
+        return f"{v.major}.{v.minor}.{v.micro}"
+
+    @classmethod
+    def _now_utc_iso(cls) -> str:
+        """Return the current UTC time as an ISO 8601 string."""
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).isoformat()
+
+    @classmethod
+    def _run_id(cls, length=8) -> str:
+        """Generate a new UUID4 string for run identification."""
+        import uuid
+
+        return uuid.uuid4().hex[:length]
+
+
 class CoreBoundLogger:
     """Internal concrete implementation of the BoundLogger protocol.
 
@@ -62,7 +123,7 @@ class CoreBoundLogger:
         self._logger = logger
         self._bound: Dict[str, Any] = dict(bound or {})
 
-    def bind(self, **fields: Any) -> CoreBoundLogger:
+    def bind(self, **fields: Any) -> "CoreBoundLogger":
         """Return a new logger with `fields` merged into persistent context.
 
         This method does not mutate the current instance. It returns a new
@@ -188,7 +249,7 @@ class CoreBoundLogger:
         # Reserve and pop user-provided control kwargs.
         user_stacklevel = int((extra or {}).pop("stacklevel", 3))
 
-        # Strip reserved keys users shouldn't clobber.
+        # Strip reserved keys users shouldn't be bothered with.
         extra = {
             k: v
             for k, v in (extra or {}).items()
@@ -221,11 +282,12 @@ class CoreBoundLogger:
 
         """
         return (
-            f"{self.__class__.__name__}(logger={self._logger!r}, bound={self._bound!r})"
+            f"{self.__class__.__name__}(logger={self._logger!r}, "
+            f"bound={self._bound!r})"
         )
 
 
-def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger:
+def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger:
     """Core implementation: create a CoreBoundLogger and apply initial binding.
 
     Safe to call before `run(...)`: we do not attach handlers or mutate
@@ -233,7 +295,7 @@ def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger:
 
     Args:
         name: Optional name of the logger. If None, the root logger is used.
-        **bound: Optional initial persistent context to bind.
+        **to_bind: Optional initial persistent context to bind.
 
     Returns:
         BoundLogger: A new CoreBoundLogger instance with the specified name
@@ -242,4 +304,4 @@ def get_logger(name: Optional[str] = None, /, **bound: Any) -> BoundLogger:
     """
     base = logging.getLogger(name) if name else logging.getLogger()
     adapter: BoundLogger = CoreBoundLogger(base)
-    return adapter.bind(**bound) if bound else adapter
+    return adapter.bind(**to_bind) if to_bind else adapter
