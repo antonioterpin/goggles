@@ -28,8 +28,6 @@ from typing import (
     Mapping,
     Optional,
     Protocol,
-    TypedDict,
-    Unpack,
     overload,
     runtime_checkable,
 )
@@ -318,13 +316,8 @@ class Handler(Protocol):
 
     name: str
 
-    def open(self, run: Optional[RunContext] = None) -> None:
-        """Initialize the handler (called when entering a scope).
-
-        Args:
-            run (Optional[RunContext]): The active run context if any.
-
-        """
+    def open(self) -> None:
+        """Initialize the handler (called when entering a scope)."""
 
     def close(self) -> None:
         """Flush and release resources (called when leaving a scope).
