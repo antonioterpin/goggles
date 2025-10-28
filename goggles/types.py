@@ -24,7 +24,7 @@ class Event:
     kind: Kind
     scope: str
     payload: Any
-    level: Optional[int]
-    step: Optional[int]
-    time: Optional[float]
+    level: Optional[int] = None
+    step: Optional[int] = None
+    time: Optional[float] = None
     extra: Optional[dict[str, Any]] = None
