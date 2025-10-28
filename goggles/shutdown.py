@@ -9,7 +9,17 @@ logger = get_logger("goggles.shutdown")
 
 
 class GracefulShutdown:
-    """A context manager for graceful shutdowns."""
+    """A context manager for graceful shutdowns.
+
+    Example:
+    >>> with GracefulShutdown(exit_message="Shutting down gracefully...") as gs:
+    ...     while not gs.stop:
+    ...         # Main application logic here, runs until interrupted
+    ...         # by SIGINT or SIGTERM.
+    ...         pass
+    ...     print("Cleanup and exit.")
+
+    """
 
     stop = False
 

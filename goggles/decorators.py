@@ -15,6 +15,14 @@ def timeit(severity=Severity.INFO, name=None):
         name (str): Optional name for the timing entry.
             If None, uses filename:function_name.
 
+    Example:
+    >>> @timeit(severity=Severity.DEBUG, name="my_function_timing")
+    ... def my_function():
+    ...     # function logic here
+    ...     pass
+    >>> my_function()
+    DEBUG: my_function_timing took 0.123456s
+
     """
 
     def decorator(func):
@@ -37,7 +45,17 @@ def timeit(severity=Severity.INFO, name=None):
 
 
 def trace_on_error():
-    """Trace errors and log function parameters via decorators."""
+    """Trace errors and log function parameters via decorators.
+
+    Example:
+    >>> @trace_on_error()
+    ... def my_function(x, y):
+    ...     return x / y  # may raise ZeroDivisionError
+    >>> my_function(10, 0)
+    ERROR: Exception in my_function: division by zero, state:
+    {'args': (10, 0), 'kwargs': {}}
+
+    """
 
     def decorator(func):
         def wrapper(*args, **kwargs):
