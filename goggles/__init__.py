@@ -27,7 +27,6 @@ from typing import (
     Callable,
     List,
     Literal,
-    Mapping,
     Optional,
     Protocol,
     Dict,
@@ -39,7 +38,7 @@ from typing_extensions import Self
 import logging
 import os
 
-from .types import Kind, Event
+from .types import Kind, Event, Video, Image, Metrics
 
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
@@ -300,7 +299,7 @@ class MetricsEmitter(Protocol):
 
     def push(
         self,
-        metrics: Mapping[str, float],
+        metrics: Metrics,
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -309,7 +308,7 @@ class MetricsEmitter(Protocol):
         """Emit a batch of scalar metrics.
 
         Args:
-            metrics (Mapping[str, float]): Name→value pairs.
+            metrics (Metrics): (Name,value) pairs.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]):
@@ -320,7 +319,7 @@ class MetricsEmitter(Protocol):
     def scalar(
         self,
         name: str,
-        value: float,
+        value: float | int,
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -330,7 +329,7 @@ class MetricsEmitter(Protocol):
 
         Args:
             name (str): Metric name.
-            value (float): Metric value.
+            value (float|int): Metric value.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]):
@@ -341,7 +340,7 @@ class MetricsEmitter(Protocol):
     def image(
         self,
         name: str,
-        image: bytes,
+        image: Image,
         *,
         format: str = "png",
         step: Optional[int] = None,
@@ -352,7 +351,7 @@ class MetricsEmitter(Protocol):
 
         Args:
             name (str): Artifact name.
-            image (bytes): Encoded image bytes.
+            image (Image): Image.
             format (str): Image format, e.g., "png", "jpeg".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
@@ -363,7 +362,7 @@ class MetricsEmitter(Protocol):
     def video(
         self,
         name: str,
-        data: bytes,
+        video: Video,
         *,
         fps: int = 30,
         step: Optional[int] = None,
@@ -374,7 +373,7 @@ class MetricsEmitter(Protocol):
 
         Args:
             name (str): Artifact name.
-            data (bytes): Encoded video bytes.
+            video (Video): Video.
             fps (int): Frames per second.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.

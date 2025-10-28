@@ -1,9 +1,26 @@
 """Types used in Goggles."""
 
-from typing import Literal, Any, Optional
+from typing import Dict, Literal, Any, Optional
 from dataclasses import dataclass
 
-Kind = Literal["log", "metric", "image", "artifact"]
+Kind = Literal["log", "metric", "image", "video", "artifact"]
+
+try:
+    import jax.numpy as jnp
+
+    jnparray = jnp.ndarray
+except ImportError:
+    jnparray = bytes
+try:
+    import numpy as np
+
+    nparray = np.ndarray
+except ImportError:
+    nparray = bytes
+
+Metrics = Dict[str, float | int]
+Image = nparray | jnparray | bytes
+Video = nparray | jnparray | bytes
 
 
 @dataclass(frozen=True)

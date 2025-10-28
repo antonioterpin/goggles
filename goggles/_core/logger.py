@@ -12,6 +12,7 @@ import logging
 from typing import Any, Dict, Mapping, Optional, Self
 
 from goggles import BoundLogger, GogglesLogger, Event
+from goggles.types import Metrics, Image, Video
 
 
 class CoreBoundLogger(BoundLogger):
@@ -266,7 +267,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
     def push(
         self,
-        metrics: Mapping[str, float],
+        metrics: Metrics,
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -275,7 +276,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
         """Emit a batch of scalar metrics.
 
         Args:
-            metrics (Mapping[str, float]): Name→value pairs.
+            metrics (Metrics): (Name,value) pairs.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]):
@@ -297,7 +298,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
     def scalar(
         self,
         name: str,
-        value: float,
+        value: float | int,
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -307,7 +308,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
         Args:
             name (str): Metric name.
-            value (float): Metric value.
+            value (float|int): Metric value.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]):
@@ -319,7 +320,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
     def image(
         self,
         name: str,
-        image: bytes,
+        image: Image,
         *,
         format: str = "png",
         step: Optional[int] = None,
@@ -330,7 +331,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
         Args:
             name (str): Artifact name.
-            image (bytes): Encoded image bytes.
+            image (Image): Image.
             format (str): Image format, e.g., "png", "jpeg".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
@@ -352,7 +353,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
     def video(
         self,
         name: str,
-        data: bytes,
+        video: Video,
         *,
         fps: int = 30,
         step: Optional[int] = None,
@@ -363,7 +364,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
         Args:
             name (str): Artifact name.
-            data (bytes): Encoded video bytes.
+            video (Video): Video.
             fps (int): Frames per second.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
@@ -372,9 +373,9 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
         """
         self._client.emit(
             Event(
-                kind="artifact",
+                kind="video",
                 scope=self._scope,
-                payload={"name": name, "data": data, "type": "video", "fps": fps},
+                payload={"name": name, "video": video, "fps": fps},
                 level=None,
                 step=step,
                 time=time,
