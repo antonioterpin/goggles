@@ -18,6 +18,15 @@ from typing import Any, Dict, Mapping, Optional
 
 from goggles import BoundLogger, current_run
 
+_COLOR_MAP = {
+    logging.DEBUG: "[34m",  # blue
+    logging.INFO: "",  # white "[32m",  # green
+    logging.WARNING: "[33m",  # yellow
+    logging.ERROR: "[31m",  # red
+    logging.CRITICAL: "[35m",  # magenta
+}
+_RESET_COLOR = "[0m"
+
 
 class CoreBoundLogger:
     """Internal concrete implementation of the BoundLogger protocol.
