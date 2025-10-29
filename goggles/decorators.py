@@ -20,13 +20,16 @@ def timeit(severity=logging.INFO, name=None):
     DEBUG: my_function_timing took 0.123456s
 
     """
+    from goggles import GogglesLogger
 
     def decorator(func):
         import time
         import os
         from . import get_logger
 
-        logger = get_logger("goggles.decorators.timeit", with_metrics=True)
+        logger: GogglesLogger = get_logger(
+            "goggles.decorators.timeit", with_metrics=True
+        )
 
         def wrapper(*args, **kwargs):
             start = time.perf_counter()
@@ -35,7 +38,7 @@ def timeit(severity=logging.INFO, name=None):
             filename = os.path.basename(func.__code__.co_filename)
             fname = name or f"{filename}:{func.__name__}"
             logger.log(severity, f"{fname} took {duration:.6f}s")
-            logger.metrics.scalar(f"timings/{fname}", duration)
+            logger.scalar(f"timings/{fname}", duration)
             return result
 
         return wrapper

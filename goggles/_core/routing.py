@@ -83,7 +83,7 @@ def get_bus() -> EventBus:
         if __singleton_core_event_bus is None:
             __singleton_core_event_bus = EventBus()
             __singleton_server = portal.Server(
-                GOGGLES_PORT, name=f"EventBus-Server@{GOGGLES_HOST}"
+                GOGGLES_PORT, name=f"EventBus-Server@{socket.gethostname()}"
             )
             __singleton_server.bind("attach", __singleton_core_event_bus.attach)
             __singleton_server.bind("detach", __singleton_core_event_bus.detach)
