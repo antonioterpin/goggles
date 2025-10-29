@@ -607,6 +607,7 @@ source = { editable = "." }
 dependencies = [
     { name = "netifaces" },
     { name = "portal" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "ruamel-yaml" },
     { name = "typing-extensions" },
@@ -641,6 +642,7 @@ requires-dist = [
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.0.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich" },
     { name = "ruamel-yaml" },
     { name = "snowballstemmer", marker = "extra == 'dev'", specifier = "==2.2.0" },

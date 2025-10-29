@@ -55,7 +55,7 @@ def represent_prettyconfig(dumper, data):
 SafeRepresenter.add_representer(PrettyConfig, represent_prettyconfig)
 
 
-def dump_configuration(config: PrettyConfig, file_path: str):
+def save_configuration(config: PrettyConfig, file_path: str):
     """Dump PrettyConfig to a YAML file.
 
     Args:

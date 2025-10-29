@@ -97,11 +97,6 @@ def get_bus() -> EventBus:
             name=f"EventBus-Client@{socket.gethostname()}",
         )
 
-    if __singleton_core_event_bus is None:
-        print("Connecting to remote EventBus server...")
-    else:
-        print(__singleton_core_event_bus.scopes)
-
     return __singleton_client
 
 

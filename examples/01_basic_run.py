@@ -1,16 +1,17 @@
 import argparse
 import goggles as gg
+import logging
+
+logger = gg.get_logger("examples.basic", seed=42)
+gg.attach(
+    gg.ConsoleHandler(name="examples.basic.console", level=logging.INFO),
+    scopes=["global"],
+)
 
 
 def main(args):
-    # Optional process-wide defaults; can be overridden by run(...)
-    gg.configure(log_level="INFO", enable_console=True, enable_file=True)
-
-    with gg.run("basic", log_dir=args.log_dir) as ctx:
-        log = gg.get_logger("examples.basic", seed=0)
-        log.info("hello-from-basic")
-        log.debug("you won't see this at INFO")
-        print(f"run dir: {ctx.log_dir}")
+    logger.info("Hello, world!")
+    logger.debug("you won't see this at INFO")
 
 
 if __name__ == "__main__":

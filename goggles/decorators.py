@@ -1,13 +1,9 @@
 """Decorators for logging and timing function execution."""
 
-from .severity import Severity
-
-from . import get_logger
-
-logger = get_logger("goggles.decorators", with_metrics=True)
+import logging
 
 
-def timeit(severity=Severity.INFO, name=None):
+def timeit(severity=logging.INFO, name=None):
     """Measure the execution time of a function via decorators.
 
     Args:
@@ -28,6 +24,9 @@ def timeit(severity=Severity.INFO, name=None):
     def decorator(func):
         import time
         import os
+        from . import get_logger
+
+        logger = get_logger("goggles.decorators.timeit", with_metrics=True)
 
         def wrapper(*args, **kwargs):
             start = time.perf_counter()

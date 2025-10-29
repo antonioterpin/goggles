@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import atexit
 from collections import defaultdict
+import enum
 from typing import (
     Any,
     Callable,
@@ -39,7 +40,10 @@ import logging
 import os
 
 from .types import Kind, Event, Video, Image, Metrics
-from ._core.integrations import __all__ as _integrations_all, integrations_map
+from ._core.integrations import *
+from .decorators import timeit, trace_on_error
+from .shutdown import GracefulShutdown
+from .config import load_configuration, save_configuration
 
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
@@ -509,9 +513,7 @@ class EventBus:
 
         """
         for handler_dict in handlers:
-            handler = integrations_map[handler_dict["cls"]].from_dict(
-                handler_dict["data"]
-            )
+            handler = globals()[handler_dict["cls"]].from_dict(handler_dict["data"])
             if handler.name not in self.handlers:
                 # Initialize handler and store it
                 handler.open()
@@ -607,7 +609,13 @@ __all__ = [
     "get_logger",
     "attach",
     "detach",
-] + _integrations_all
+    "load_configuration",
+    "save_configuration",
+    "timeit",
+    "trace_on_error",
+    "GracefulShutdown",
+    "ConsoleHandler",
+]
 
 # ---------------------------------------------------------------------------
 # Import-time safety

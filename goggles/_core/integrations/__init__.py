@@ -16,9 +16,9 @@ from .console import ConsoleHandler
 
 # from .jsonl import JsonlHandler
 
-integrations = [
-    ConsoleHandler,
-    # JsonlHandler,
+__all__ = [
+    "ConsoleHandler",
+    # "JsonlHandler",
 ]
 
 # try:
@@ -27,6 +27,3 @@ integrations = [
 #     integrations.append(WandBHandler)
 # except ImportError:
 #     pass
-
-integrations_map = {cls.__name__: cls for cls in integrations}
-__all__ = ["integrations", "integrations_map"] + [cls.__name__ for cls in integrations]

@@ -72,7 +72,7 @@ Measure execution time of methods or functions:
 import goggles
 
 class Worker:
-    @goggles.timeit(severity=goggles.Severity.DEBUG)
+    @goggles.timeit(severity=logging.DEBUG)
     def compute_heavy(self, n):
         return sum(range(n))
 
