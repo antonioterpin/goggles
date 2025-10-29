@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import atexit
 from collections import defaultdict
-import enum
 from typing import (
     Any,
     Callable,
@@ -68,7 +67,18 @@ def get_logger(
     name: Optional[str] = None,
     /,
     *,
+    scope: str = "global",
+    **to_bind: Any,
+) -> BoundLogger: ...
+
+
+@overload
+def get_logger(
+    name: Optional[str] = None,
+    /,
+    *,
     with_metrics: Literal[True],
+    scope: str = "global",
     **to_bind: Any,
 ) -> GogglesLogger: ...
 
@@ -82,6 +92,7 @@ def get_logger(
     /,
     *,
     with_metrics: bool = False,
+    scope: str = "global",
     **to_bind: Any,
 ) -> BoundLogger | GogglesLogger:
     """Return a structured logger (text-only by default, metrics-enabled on opt-in).
@@ -94,6 +105,7 @@ def get_logger(
     Args:
         name (Optional[str]): Logger name. If None, the root logger is used.
         with_metrics (bool): If True, return a logger exposing `.metrics`.
+        scope (str): The logging scope, e.g., "global" or "run".
         **to_bind (Any): Fields persisted and injected into every record.
 
     Returns:
@@ -114,20 +126,20 @@ def get_logger(
 
     if with_metrics:
         if __impl_get_logger_metrics is None:
-            from ._core.logger import CoreGogglesLogger
-
-            __impl_get_logger_metrics = lambda name, to_bind: CoreGogglesLogger(
-                scope="global", name=name, to_bind=to_bind
-            )
-        return __impl_get_logger_metrics(name, to_bind)
-    else:
-        if __impl_get_logger_text is None:
             from ._core.logger import CoreBoundLogger
 
-            __impl_get_logger_text = lambda name, to_bind: CoreBoundLogger(
-                scope="global", name=name, to_bind=to_bind
+            __impl_get_logger_metrics = lambda n, s, tb: CoreBoundLogger(
+                name=n, scope=s, to_bind=tb
             )
-        return __impl_get_logger_text(name, to_bind)
+        return __impl_get_logger_metrics(name, scope, to_bind)
+    else:
+        if __impl_get_logger_text is None:
+            from ._core.logger import CoreGogglesLogger
+
+            __impl_get_logger_text = lambda n, s, tb: CoreGogglesLogger(
+                name=n, scope=s, to_bind=tb
+            )
+        return __impl_get_logger_text(name, scope, to_bind)
 
 
 @runtime_checkable
@@ -501,10 +513,12 @@ class EventBus:
 
     def _shutdown(self) -> None:
         """Shutdown the EventBus and close all handlers."""
-        all_scopes = list(self.scopes.keys())
-        all_handlers = list(self.handlers.keys())
-        for scope in all_scopes:
-            for handler_name in all_handlers:
+        copy_map = {
+            scope: handlers_names.copy()
+            for scope, handlers_names in self.scopes.items()
+        }
+        for scope, handlers_names in copy_map.items():
+            for handler_name in handlers_names:
                 self.detach(handler_name, scope)
 
     def attach(self, handlers: List[dict], scopes: List[str]) -> None:
@@ -525,6 +539,8 @@ class EventBus:
 
             # Add to requested scopes
             for scope in scopes:
+                if scope not in self.scopes:
+                    self.scopes[scope] = set()
                 self.scopes[scope].add(handler.name)
 
     def detach(self, handler_name: str, scope: str) -> None:
@@ -543,6 +559,8 @@ class EventBus:
                 f"Handler '{handler_name}' not attached under scope '{scope}'"
             )
         self.scopes[scope].remove(handler_name)
+        if not self.scopes[scope]:
+            del self.scopes[scope]
         if not any(handler_name in self.scopes[s] for s in self.scopes):
             self.handlers[handler_name].close()
             del self.handlers[handler_name]

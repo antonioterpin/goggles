@@ -130,7 +130,7 @@ class CoreBoundLogger(BoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def info(
         self,
@@ -164,7 +164,7 @@ class CoreBoundLogger(BoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def warning(
         self,
@@ -197,7 +197,7 @@ class CoreBoundLogger(BoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def error(
         self,
@@ -230,7 +230,7 @@ class CoreBoundLogger(BoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def critical(
         self,
@@ -263,7 +263,7 @@ class CoreBoundLogger(BoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
@@ -312,7 +312,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def scalar(
         self,
@@ -347,7 +347,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def image(
         self,
@@ -383,7 +383,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
     def video(
         self,
@@ -419,7 +419,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        )
+        ).result()
 
 
 def _caller_id() -> tuple[str, int]:
