@@ -13,16 +13,20 @@ Example:
 # TODO: actually write the docs here
 
 from .console import ConsoleHandler
-from .jsonl import JsonlHandler
 
-__all__ = [
-    "ConsoleHandler",
-    "JsonlHandler",
+# from .jsonl import JsonlHandler
+
+integrations = [
+    ConsoleHandler,
+    # JsonlHandler,
 ]
 
-try:
-    from .wandb import WandBHandler
+# try:
+#     from .wandb import WandBHandler
 
-    __all__.append("WandBHandler")
-except ImportError:
-    pass
+#     integrations.append(WandBHandler)
+# except ImportError:
+#     pass
+
+integrations_map = {cls.__name__: cls for cls in integrations}
+__all__ = ["integrations", "integrations_map"] + [cls.__name__ for cls in integrations]

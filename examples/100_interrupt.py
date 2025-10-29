@@ -10,7 +10,7 @@ from goggles._core.integrations import ConsoleHandler
 logger = goggles.get_logger(
     name="examples.interrupt",
 )
-goggles.attach(ConsoleHandler, "global")
+goggles.attach(ConsoleHandler(), "global")
 
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 

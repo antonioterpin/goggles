@@ -39,7 +39,7 @@ import logging
 import os
 
 from .types import Kind, Event, Video, Image, Metrics
-from ._core.integrations import __all__ as _integrations_all
+from ._core.integrations import __all__ as _integrations_all, integrations_map
 
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
@@ -449,6 +449,31 @@ class Handler(Protocol):
 
         """
 
+    def to_dict(self) -> dict:
+        """Serialize the handler.
+
+        This method is needed during attachment. Will be called before binding.
+
+        Returns:
+            (dict) A dictionary that allows to instantiate the Handler.
+                Must contain:
+                    - "cls": The handler class name.
+                    - "data": The handler data to be used in from_dict.
+
+        """
+
+    @classmethod
+    def from_dict(cls, serialized: dict) -> Self:
+        """De-serialize the handler.
+
+        Args:
+            serialized (dict): Serialized handler with handler.to_dict
+
+        Returns:
+            Self: The Handler instance.
+
+        """
+
 
 # ---------------------------------------------------------------------------
 # EventBus and run management
@@ -468,19 +493,25 @@ class EventBus:
 
     def _shutdown(self) -> None:
         """Shutdown the EventBus and close all handlers."""
-        for scope in self.scopes:
-            for handler_name in self.scopes[scope]:
+        all_scopes = list(self.scopes.keys())
+        all_handlers = list(self.handlers.keys())
+        for scope in all_scopes:
+            for handler_name in all_handlers:
                 self.detach(handler_name, scope)
 
-    def attach(self, handlers: List[Handler], scopes: List[str]) -> None:
+    def attach(self, handlers: List[dict], scopes: List[str]) -> None:
         """Attach a handler under the given scope.
 
         Args:
-            handlers (List[Handler]): The handlers to attach to the scopes.
+            handlers (List[dict]):
+                The serialized handlers to attach to the scopes.
             scopes (List[str]): The scopes under which to attach.
 
         """
-        for handler in handlers:
+        for handler_dict in handlers:
+            handler = integrations_map[handler_dict["cls"]].from_dict(
+                handler_dict["data"]
+            )
             if handler.name not in self.handlers:
                 # Initialize handler and store it
                 handler.open()
@@ -505,9 +536,10 @@ class EventBus:
             raise ValueError(
                 f"Handler '{handler_name}' not attached under scope '{scope}'"
             )
-        self.handlers[handler_name].close()
         self.scopes[scope].remove(handler_name)
-        del self.handlers[handler_name]
+        if not any(handler_name in self.scopes[s] for s in self.scopes):
+            self.handlers[handler_name].close()
+            del self.handlers[handler_name]
 
     def emit(self, event: dict) -> None:
         """Emit an event to eligible handlers (errors isolated per handler).
@@ -551,7 +583,7 @@ def attach(handler: Handler, scopes: List[str]) -> None:
 
     """
     bus = get_bus()
-    bus.attach([handler], scopes)
+    bus.attach([handler.to_dict()], scopes)
 
 
 def detach(handler_name: str, scope: str) -> None:
