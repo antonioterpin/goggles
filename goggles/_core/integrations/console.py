@@ -1,12 +1,8 @@
-"""Console integration for Goggles.
-
-This module defines the ConsoleHandler to output log records to the console.
-"""
-
 """Console-based log handler for EventBus integration."""
 
 import logging
-from typing import Set
+from pathlib import Path
+from typing import Literal, Set
 from typing_extensions import Self
 
 from goggles.types import Event, Kind
@@ -15,13 +11,9 @@ from goggles.types import Event, Kind
 class ConsoleHandler:
     """Handle 'log' events and output them to console using Python's logging API.
 
-    This handler is the final sink for textual log events emitted by the
-    EventBus. It simply forwards messages to Python's logging system so that
-    the reported file and line number correspond to the original caller.
-
     Attributes:
         name (str): Stable handler identifier.
-        capabilities (set[str]): Supported event kinds (only `{"log"}`).
+        capabilities (set[str]): Supported event kinds (only {"log"}).
 
     """
 
@@ -29,60 +21,66 @@ class ConsoleHandler:
     capabilities: Set[str] = frozenset({"log"})
 
     def __init__(
-        self, *, name: str = "goggles.console", level: int = logging.NOTSET
+        self,
+        *,
+        name: str = "goggles.console",
+        level: int = logging.NOTSET,
+        path_style: Literal["absolute", "relative"] = "relative",
+        project_root: Path | None = None,
     ) -> None:
         """Initialize the ConsoleHandler.
 
         Args:
-            name (str):
-                Stable handler identifier. Defaults to "goggles.console".
-            level (int):
-                Minimum log level to handle. Defaults to logging.NOTSET.
+            name (str): Stable handler identifier.
+            level (int): Minimum log level to handle.
+            path_style (Literal["absolute", "relative"]): Whether to print absolute
+                or relative file paths. Defaults to "relative".
+            project_root (Path | None): Root path used for relative paths.
 
         """
         self.name = name
         self.level = int(level)
+        self.path_style = path_style
+        self.project_root = Path(project_root or Path.cwd())
         self._logger: logging.Logger
 
     def can_handle(self, kind: Kind) -> bool:
-        """Return whether this handler can process the given kind.
-
-        Args:
-            kind (Kind): Kind of event ("log", "metric", "image", "artifact").
-
-        Returns:
-            bool: True if kind == "log", False otherwise.
-
-        """
+        """Return whether this handler can process the given kind."""
         return kind in self.capabilities
 
     def handle(self, event: Event) -> None:
-        """Forward a log event to Python's logging system.
-
-        Args:
-            event (Event): Event containing textual payload and metadata.
-
-        Raises:
-            ValueError: If the event kind is not "log".
-
-        """
+        """Forward a log event to Python's logging system."""
         if event.kind != "log":
             raise ValueError(f"Unsupported event kind '{event.kind}'")
 
         level = int(event.level) if event.level else logging.NOTSET
         message = str(event.payload)
-        self._logger.log(level, message, stacklevel=3)
+
+        # Derive display path
+        path = Path(event.filepath)
+        if self.path_style == "relative":
+            try:
+                path = path.relative_to(self.project_root)
+            except ValueError:
+                pass  # fallback to absolute if outside root
+        path_str = f"{path}:{event.lineno}"
+
+        # We manually construct prefix since stacklevel=3 may mislead
+        self._logger.log(level, f"{path_str} - {message}", stacklevel=2)
 
     def open(self) -> None:
-        """Initialize the handler (no-op for console)."""
+        """Initialize the handler (create logger and formatter)."""
         self._logger = logging.getLogger(self.name)
         if not self._logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(
-                logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+                logging.Formatter(
+                    "%(asctime)s - %(levelname)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
             )
             self._logger.addHandler(handler)
-        self._logger.setLevel(logging.INFO)
+        self._logger.setLevel(self.level or logging.INFO)
 
     def close(self) -> None:
         """Flush and release console handler resources."""
@@ -90,31 +88,24 @@ class ConsoleHandler:
             handler.flush()
 
     def to_dict(self) -> dict:
-        """Serialize the handler.
-
-        This method is needed during attachment. Will be called before binding.
-
-        Returns:
-            (dict) A dictionary that allows to instantiate the Handler.
-                Must contain:
-                    - "cls": The handler class name.
-                    - "data": The handler data to be used in from_dict.
-
-        """
+        """Serialize the handler for later reconstruction."""
         return {
             "cls": self.__class__.__name__,
-            "data": {"name": self.name, "level": self.level},
+            "data": {
+                "name": self.name,
+                "level": self.level,
+                "path_style": self.path_style,
+                "project_root": str(self.project_root),
+            },
         }
 
     @classmethod
     def from_dict(cls, serialized: dict) -> Self:
-        """De-serialize the handler.
-
-        Args:
-            serialized (dict): Serialized handler with handler.to_dict
-
-        Returns:
-            Self: The Handler instance.
-
-        """
-        return cls(name=serialized["name"], level=serialized["level"])
+        """Reconstruct a handler from its serialized representation."""
+        data = serialized.get("data", serialized)
+        return cls(
+            name=data["name"],
+            level=data["level"],
+            path_style=data.get("path_style", "relative"),
+            project_root=Path(data.get("project_root", Path.cwd())),
+        )
