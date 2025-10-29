@@ -41,22 +41,22 @@ class CoreBoundLogger(BoundLogger):
 
     def __init__(
         self,
-        logger: logging.Logger,
         scope: str,
+        name: Optional[str] = None,
         to_bind: Optional[Mapping[str, Any]] = None,
     ):
         """Initialize the CoreBoundLogger.
 
         Args:
-            logger (logging.Logger): Underlying Python logger.
-            scope (str): Scope to bind the logger to (e.g., "global" or "run").
+            scope (str): Scope to bind the logger to (e.g., "global", "run", ecc.).
+            name (str): Name of the logger.
             to_bind (Optional[Mapping[str, Any]]):
                 Optional initial persistent context to bind.
 
         """
         from goggles._core.routing import get_bus
 
-        self._logger = logger
+        self.name = name
         self._scope = scope
         self._bound: Dict[str, Any] = dict(to_bind or {})
         self._client = get_bus()
@@ -274,8 +274,7 @@ class CoreBoundLogger(BoundLogger):
 
         """
         return (
-            f"{self.__class__.__name__}(logger={self._logger!r}, "
-            f"bound={self._bound!r})"
+            f"{self.__class__.__name__}(name={self.name!r}, " f"bound={self._bound!r})"
         )
 
 

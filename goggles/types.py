@@ -48,9 +48,9 @@ class Event:
     level: Optional[int] = None
     step: Optional[int] = None
     time: Optional[float] = None
-    extra: Optional[dict[str, Any]] = None
+    extra: Optional[Dict[str, Any]] = None
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> Dict[str, Any]:
         """Convert Event to dictionary."""
         return {
             "kind": self.kind,
@@ -65,7 +65,7 @@ class Event:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Event":
+    def from_dict(cls, data: Dict[str, Any]) -> "Event":
         """Create Event from dictionary."""
         return cls(
             kind=data["kind"],

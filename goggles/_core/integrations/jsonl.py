@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 from pathlib import Path
-from typing import Set
+from typing import FrozenSet
 
 from goggles.types import Event, Kind
 
@@ -21,7 +21,7 @@ class JsonlHandler:
     """
 
     name: str = "jsonl"
-    capabilities: Set[str] = frozenset({"log"})
+    capabilities: FrozenSet[str] = frozenset({"log"})
 
     def __init__(self, path: Path, name: str = "jsonl") -> None:
         """Initialize the handler.

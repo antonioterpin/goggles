@@ -64,10 +64,6 @@ __impl_get_bus: Optional[Callable[[], EventBus]] = None
 
 
 @overload
-def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger: ...
-
-
-@overload
 def get_logger(
     name: Optional[str] = None,
     /,
@@ -75,6 +71,10 @@ def get_logger(
     with_metrics: Literal[True],
     **to_bind: Any,
 ) -> GogglesLogger: ...
+
+
+@overload
+def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger: ...
 
 
 def get_logger(
@@ -114,18 +114,18 @@ def get_logger(
 
     if with_metrics:
         if __impl_get_logger_metrics is None:
-            from ._core.logger import CoreBoundLogger
+            from ._core.logger import CoreGogglesLogger
 
-            __impl_get_logger_metrics = lambda name, to_bind: CoreBoundLogger(
-                name, scope="global", to_bind=to_bind
+            __impl_get_logger_metrics = lambda name, to_bind: CoreGogglesLogger(
+                scope="global", name=name, to_bind=to_bind
             )
         return __impl_get_logger_metrics(name, to_bind)
     else:
         if __impl_get_logger_text is None:
-            from ._core.logger import CoreGogglesLogger
+            from ._core.logger import CoreBoundLogger
 
-            __impl_get_logger_text = lambda name, to_bind: CoreGogglesLogger(
-                name, scope="global", to_bind=to_bind
+            __impl_get_logger_text = lambda name, to_bind: CoreBoundLogger(
+                scope="global", name=name, to_bind=to_bind
             )
         return __impl_get_logger_text(name, to_bind)
 
@@ -161,6 +161,7 @@ class BoundLogger(Protocol):
                 with updated bound fields and scope.
 
         """
+        ...
 
     def log(
         self,
@@ -433,6 +434,7 @@ class Handler(Protocol):
                 False otherwise.
 
         """
+        ...
 
     def handle(self, event: Event) -> None:
         """Handle an emitted event.
@@ -453,7 +455,7 @@ class Handler(Protocol):
 
         """
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict:
         """Serialize the handler.
 
         This method is needed during attachment. Will be called before binding.
@@ -465,18 +467,20 @@ class Handler(Protocol):
                     - "data": The handler data to be used in from_dict.
 
         """
+        ...
 
     @classmethod
-    def from_dict(cls, serialized: dict) -> Self:
+    def from_dict(cls, serialized: Dict) -> Self:
         """De-serialize the handler.
 
         Args:
-            serialized (dict): Serialized handler with handler.to_dict
+            serialized (Dict): Serialized handler with handler.to_dict
 
         Returns:
             Self: The Handler instance.
 
         """
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -543,20 +547,24 @@ class EventBus:
             self.handlers[handler_name].close()
             del self.handlers[handler_name]
 
-    def emit(self, event: dict) -> None:
+    def emit(self, event: Dict | Event) -> None:
         """Emit an event to eligible handlers (errors isolated per handler).
 
         Args:
-            event (dict): The event (serialized) to emit.
+            event (dict | Event): The event (serialized) to emit, or an Event instance.
 
         """
-        event = Event.from_dict(event)
+        if isinstance(event, dict):
+            event = Event.from_dict(event)
+        elif not isinstance(event, Event):
+            raise TypeError(f"emit expects a dict or Event, got {type(event)!r}")
+
         if event.scope not in self.scopes:
             return
 
         for handler_name in self.scopes[event.scope]:
             handler = self.handlers.get(handler_name)
-            if handler.can_handle(event.kind):
+            if handler and handler.can_handle(event.kind):
                 handler.handle(event)
 
 
