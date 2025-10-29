@@ -77,8 +77,8 @@ def get_bus() -> EventBus:
         EventBus: Singleton instance.
 
     """
+    global __singleton_core_event_bus
     if __i_am_host():
-        global __singleton_core_event_bus
         global __singleton_server
         if __singleton_core_event_bus is None:
             __singleton_core_event_bus = EventBus()
@@ -96,6 +96,11 @@ def get_bus() -> EventBus:
             f"{GOGGLES_HOST}:{GOGGLES_PORT}",
             name=f"EventBus-Client@{socket.gethostname()}",
         )
+
+    if __singleton_core_event_bus is None:
+        print("Connecting to remote EventBus server...")
+    else:
+        print(__singleton_core_event_bus.scopes)
 
     return __singleton_client
 

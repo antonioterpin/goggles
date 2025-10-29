@@ -28,14 +28,20 @@ class ConsoleHandler:
     name: str = "goggles.console"
     capabilities: Set[str] = frozenset({"log"})
 
-    def __init__(self, *, name: str = "goggles.console") -> None:
+    def __init__(
+        self, *, name: str = "goggles.console", level: int = logging.NOTSET
+    ) -> None:
         """Initialize the ConsoleHandler.
 
         Args:
-            name (str): Stable handler identifier. Defaults to "goggles.console".
+            name (str):
+                Stable handler identifier. Defaults to "goggles.console".
+            level (int):
+                Minimum log level to handle. Defaults to logging.NOTSET.
 
         """
         self.name = name
+        self.level = int(level)
         self._logger: logging.Logger
 
     def can_handle(self, kind: Kind) -> bool:
@@ -48,7 +54,7 @@ class ConsoleHandler:
             bool: True if kind == "log", False otherwise.
 
         """
-        return kind == "log"
+        return kind in self.capabilities
 
     def handle(self, event: Event) -> None:
         """Forward a log event to Python's logging system.
@@ -63,7 +69,7 @@ class ConsoleHandler:
         if event.kind != "log":
             raise ValueError(f"Unsupported event kind '{event.kind}'")
 
-        level = event.level or logging.INFO
+        level = int(event.level) if event.level else logging.NOTSET
         message = str(event.payload)
         self._logger.log(level, message, stacklevel=3)
 
@@ -76,7 +82,7 @@ class ConsoleHandler:
                 logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
             )
             self._logger.addHandler(handler)
-        self._logger.setLevel(logging.NOTSET)
+        self._logger.setLevel(logging.INFO)
 
     def close(self) -> None:
         """Flush and release console handler resources."""
@@ -95,7 +101,10 @@ class ConsoleHandler:
                     - "data": The handler data to be used in from_dict.
 
         """
-        return {"cls": self.__class__.__name__, "data": {"name": self.name}}
+        return {
+            "cls": self.__class__.__name__,
+            "data": {"name": self.name, "level": self.level},
+        }
 
     @classmethod
     def from_dict(cls, serialized: dict) -> Self:
@@ -108,4 +117,4 @@ class ConsoleHandler:
             Self: The Handler instance.
 
         """
-        return cls(name=serialized["name"])
+        return cls(name=serialized["name"], level=serialized["level"])

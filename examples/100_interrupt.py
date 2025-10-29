@@ -5,12 +5,14 @@ import time
 import goggles
 
 from goggles._core.integrations import ConsoleHandler
+import logging
 
 # Instantiate a BoundLogger (No metrics)
-logger = goggles.get_logger(
-    name="examples.interrupt",
+logger = goggles.get_logger(name="examples.interrupt")
+
+goggles.attach(
+    ConsoleHandler(name="examples.interrupt.info", level=logging.INFO), ["global"]
 )
-goggles.attach(ConsoleHandler(), "global")
 
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 
