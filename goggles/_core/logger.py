@@ -10,7 +10,8 @@ External code should not import from this module. Instead, depend on:
 
 import logging
 import inspect
-from typing import Any, Dict, Mapping, Optional, Self
+from typing import Any, Dict, Mapping, Optional
+from typing_extensions import Self
 
 from goggles import BoundLogger, GogglesLogger, Event
 from goggles.types import Metrics, Image, Video
@@ -60,7 +61,7 @@ class CoreBoundLogger(BoundLogger):
         self._bound: Dict[str, Any] = dict(to_bind or {})
         self._client = get_bus()
 
-    def bind(self, *, scope: str, **fields: Any) -> Self:
+    def bind(self, /, *, scope: str = "global", **fields: Any) -> Self:
         """Return a new logger with `fields` merged into persistent context.
 
         This method does not mutate the current instance. It returns a new
@@ -128,7 +129,7 @@ class CoreBoundLogger(BoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def info(
@@ -162,7 +163,7 @@ class CoreBoundLogger(BoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def warning(
@@ -195,7 +196,7 @@ class CoreBoundLogger(BoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def error(
@@ -228,7 +229,7 @@ class CoreBoundLogger(BoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def critical(
@@ -261,7 +262,7 @@ class CoreBoundLogger(BoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def __repr__(self) -> str:
@@ -311,7 +312,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def scalar(
@@ -346,7 +347,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def image(
@@ -382,7 +383,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
     def video(
@@ -418,7 +419,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ).to_dict()
         )
 
 

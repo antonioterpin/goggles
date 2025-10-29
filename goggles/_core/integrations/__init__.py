@@ -11,3 +11,18 @@ Example:
 """
 
 # TODO: actually write the docs here
+
+from .console import ConsoleHandler
+from .jsonl import JsonlHandler
+
+__all__ = [
+    "ConsoleHandler",
+    "JsonlHandler",
+]
+
+try:
+    from .wandb import WandBHandler
+
+    __all__.append("WandBHandler")
+except ImportError:
+    pass

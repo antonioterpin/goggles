@@ -39,6 +39,7 @@ import logging
 import os
 
 from .types import Kind, Event, Video, Image, Metrics
+from ._core.integrations import __all__ as _integrations_all
 
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
@@ -112,7 +113,7 @@ def get_logger(
             from ._core.logger import CoreBoundLogger
 
             __impl_get_logger_metrics = lambda name, to_bind: CoreBoundLogger(
-                name, to_bind
+                name, scope="global", to_bind=to_bind
             )
         return __impl_get_logger_metrics(name, to_bind)
     else:
@@ -120,7 +121,7 @@ def get_logger(
             from ._core.logger import CoreGogglesLogger
 
             __impl_get_logger_text = lambda name, to_bind: CoreGogglesLogger(
-                name, to_bind
+                name, scope="global", to_bind=to_bind
             )
         return __impl_get_logger_text(name, to_bind)
 
@@ -143,7 +144,7 @@ class BoundLogger(Protocol):
 
     """
 
-    def bind(self, *, scope: str, **fields: Any) -> Self:
+    def bind(self, /, *, scope: str = "global", **fields: Any) -> Self:
         """Return a new adapter with `fields` merged into persistent state.
 
         Args:
@@ -508,13 +509,14 @@ class EventBus:
         self.scopes[scope].remove(handler_name)
         del self.handlers[handler_name]
 
-    def emit(self, event: Event) -> None:
+    def emit(self, event: dict) -> None:
         """Emit an event to eligible handlers (errors isolated per handler).
 
         Args:
-            event (Event): The event to emit.
+            event (dict): The event (serialized) to emit.
 
         """
+        event = Event.from_dict(event)
         if event.scope not in self.scopes:
             return
 
@@ -573,7 +575,7 @@ __all__ = [
     "get_logger",
     "attach",
     "detach",
-]
+] + _integrations_all
 
 # ---------------------------------------------------------------------------
 # Import-time safety

@@ -605,6 +605,7 @@ name = "goggles"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "netifaces" },
     { name = "portal" },
     { name = "rich" },
     { name = "ruamel-yaml" },
@@ -635,6 +636,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.0" },
     { name = "jaxlib", marker = "extra == 'jax'", specifier = ">=0.4.0" },
+    { name = "netifaces", specifier = ">=0.11.0" },
     { name = "portal", specifier = ">=3.7.3" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.0.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -1085,6 +1087,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/56/e5/ef07d31c2e07d99ee
 wheels = [
     { url = "https://files.pythonhosted.org/packages/29/13/024ae0586d901f8a6f99e2d29b4ae217e8ef11d3fd944cdfc3bbde5f2a08/narwhals-2.10.0-py3-none-any.whl", hash = "sha256:baed44e8fc38e800e3a585e3fa9843a7079a6fad5fbffbecee4348d6ac52298c", size = 418077, upload-time = "2025-10-27T17:55:53.709Z" },
 ]
+
+[[package]]
+name = "netifaces"
+version = "0.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/91/86a6eac449ddfae239e93ffc1918cf33fd9bab35c04d1e963b311e347a73/netifaces-0.11.0.tar.gz", hash = "sha256:043a79146eb2907edf439899f262b3dfe41717d34124298ed281139a8b93ca32", size = 30106, upload-time = "2021-05-31T08:33:02.506Z" }
 
 [[package]]
 name = "nodeenv"

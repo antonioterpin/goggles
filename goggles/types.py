@@ -49,3 +49,32 @@ class Event:
     step: Optional[int] = None
     time: Optional[float] = None
     extra: Optional[dict[str, Any]] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert Event to dictionary."""
+        return {
+            "kind": self.kind,
+            "scope": self.scope,
+            "payload": self.payload,
+            "filepath": self.filepath,
+            "lineno": self.lineno,
+            "level": self.level,
+            "step": self.step,
+            "time": self.time,
+            "extra": self.extra,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Event":
+        """Create Event from dictionary."""
+        return cls(
+            kind=data["kind"],
+            scope=data["scope"],
+            payload=data["payload"],
+            filepath=data["filepath"],
+            lineno=data["lineno"],
+            level=data.get("level"),
+            step=data.get("step"),
+            time=data.get("time"),
+            extra=data.get("extra"),
+        )
