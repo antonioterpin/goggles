@@ -9,21 +9,22 @@ import wandb
 
 
 class WandBHandler:
-    """Forward metric, image, and video events to Weights & Biases.
+    """Forward metric, image, video, and artifact events to Weights & Biases.
 
     Event compatibility with CoreGogglesLogger:
       - Metrics: event.kind == "metric" (or missing), payload = {name: value, ...}
       - Images/Videos: event.kind in {"image", "video"}, payload can be an array-like
         or a mapping {"name": array_like}.
+      - Artifacts: event.kind == "artifact", payload = {"path": str, "name": str, "type": str}
 
     Attributes:
         name (str): Stable handler identifier.
-        capabilities (set[str]): Supported kinds: {"metric", "image", "video"}.
+        capabilities (set[str]): Supported kinds: {"metric", "image", "video", "artifact"}.
 
     """
 
     name: str = "wandb"
-    capabilities: Set[str] = frozenset({"metric", "image", "video"})
+    capabilities: Set[str] = frozenset({"metric", "image", "video", "artifact"})
 
     def __init__(
         self,
@@ -88,7 +89,7 @@ class WandBHandler:
         """Return whether this handler can process the given kind.
 
         Args:
-            kind (str): Kind of event ("metric", "image", "video", etc).
+            kind (str): Kind of event ("metric", "image", "video", "artifact", etc).
 
         Returns:
             bool: True if kind is supported, False otherwise.
@@ -97,7 +98,7 @@ class WandBHandler:
         return kind in self.capabilities
 
     def handle(self, event: Any) -> None:
-        """Handle an event (metric/image/video) and log it to W&B.
+        """Handle an event (metric/image/video/artifact) and log it to W&B.
 
         Args:
             event (Event): Event emitted by CoreGogglesLogger.
@@ -110,14 +111,10 @@ class WandBHandler:
             self._logger.warning("W&B handler not opened; ignoring event.")
             return
 
-        # Robustly infer kind: MagicMock attributes are truthy by default.
         raw_kind = getattr(event, "kind", None)
         kind = raw_kind if isinstance(raw_kind, str) and raw_kind else "metric"
-
-        # Step may be absent or a MagicMock; only pass along int or None.
         raw_step = getattr(event, "step", None)
         step = raw_step if (isinstance(raw_step, int) or raw_step is None) else None
-
         payload = getattr(event, "payload", None)
 
         if kind == "metric":
@@ -125,15 +122,11 @@ class WandBHandler:
                 raise ValueError(
                     "Metric event payload must be a mapping of name→value."
                 )
-            if step is None:
-                wandb.log(dict(payload))
-            else:
-                wandb.log(dict(payload), step=step)
+            wandb.log(dict(payload), step=step)
             self._logger.debug("Logged metrics to W&B: %s", list(payload.keys()))
             return
 
         if kind in {"image", "video"}:
-            # Normalize to {name: data}
             if isinstance(payload, Mapping):
                 items = payload.items()
             else:
@@ -141,16 +134,33 @@ class WandBHandler:
 
             logs: dict[str, Any] = {}
             for name, value in items:
-                if kind == "image":
-                    logs[name] = wandb.Image(value)
-                else:
-                    logs[name] = wandb.Video(value, fps=20, format="mp4")
+                logs[name] = (
+                    wandb.Image(value)
+                    if kind == "image"
+                    else wandb.Video(value, fps=20, format="mp4")
+                )
 
-            if step is None:
-                wandb.log(logs)
-            else:
-                wandb.log(logs, step=step)
+            wandb.log(logs, step=step)
             self._logger.debug("Logged %s(s) to W&B: %s", kind, list(logs.keys()))
+            return
+
+        if kind == "artifact":
+            if not isinstance(payload, Mapping):
+                self._logger.warning(
+                    "Artifact payload must be a mapping; got %r", type(payload)
+                )
+                return
+            path = payload.get("path")
+            name = payload.get("name", "artifact")
+            art_type = payload.get("type", "misc")
+            if not isinstance(path, str):
+                self._logger.warning("Artifact missing valid 'path' field; skipping.")
+                return
+
+            artifact = wandb.Artifact(name=name, type=art_type)
+            artifact.add_file(path)
+            self._wandb_run.log_artifact(artifact)
+            self._logger.debug("Uploaded artifact to W&B: %s (%s)", name, path)
             return
 
         self._logger.warning("Unsupported event kind: %s", kind)

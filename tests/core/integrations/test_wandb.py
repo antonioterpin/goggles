@@ -113,6 +113,80 @@ def test_invalid_reinit_raises_valueerror(invalid):
         WandBHandler(reinit=invalid)
 
 
+def test_handle_artifact_uploads_file(mock_wandb, tmp_path):
+    """Ensure artifact events create and upload a wandb.Artifact."""
+    handler = WandBHandler()
+    handler._wandb_run = MagicMock()
+    mock_run = handler._wandb_run
+
+    # Create dummy file
+    dummy_file = tmp_path / "artifact.txt"
+    dummy_file.write_text("content")
+
+    event = MagicMock(
+        kind="artifact",
+        payload={"path": str(dummy_file), "name": "artifact_test", "type": "data"},
+    )
+
+    handler.handle(event)
+
+    # Verify artifact creation and upload
+    mock_wandb.Artifact.assert_called_once_with(name="artifact_test", type="data")
+    artifact_obj = mock_wandb.Artifact.return_value
+    artifact_obj.add_file.assert_called_once_with(str(dummy_file))
+    mock_run.log_artifact.assert_called_once_with(artifact_obj)
+
+
+def test_handle_artifact_missing_path_warns(mock_wandb):
+    """Warn if artifact event payload lacks a valid path."""
+    handler = WandBHandler()
+    handler._wandb_run = MagicMock()
+
+    bad_payloads = [
+        {"name": "test_art", "type": "misc"},  # missing path
+        {"path": 123},  # invalid path type
+        "not_a_mapping",  # not a dict
+    ]
+
+    for payload in bad_payloads:
+        event = MagicMock(kind="artifact", payload=payload)
+        with patch.object(handler._logger, "warning") as mock_warn:
+            handler.handle(event)
+        mock_warn.assert_called()
+        handler._wandb_run.log_artifact.assert_not_called()
+
+
+def test_handle_artifact_default_fields(mock_wandb, tmp_path):
+    """Use default name and type when not provided."""
+    handler = WandBHandler()
+    handler._wandb_run = MagicMock()
+    mock_run = handler._wandb_run
+
+    dummy_file = tmp_path / "artifact_default.txt"
+    dummy_file.write_text("abc")
+
+    event = MagicMock(kind="artifact", payload={"path": str(dummy_file)})
+
+    handler.handle(event)
+
+    mock_wandb.Artifact.assert_called_once_with(name="artifact", type="misc")
+    artifact_obj = mock_wandb.Artifact.return_value
+    artifact_obj.add_file.assert_called_once_with(str(dummy_file))
+    mock_run.log_artifact.assert_called_once_with(artifact_obj)
+
+
+def test_handle_unsupported_kind_warns(mock_wandb):
+    """Emit a warning for unsupported event kinds."""
+    handler = WandBHandler()
+    handler._wandb_run = MagicMock()
+    event = MagicMock(kind="unknown", payload={"something": 1})
+    with patch.object(handler._logger, "warning") as mock_warn:
+        handler.handle(event)
+    mock_warn.assert_called_once()
+    args, _ = mock_warn.call_args
+    assert "Unsupported" in args[0]
+
+
 def test_offline_integration_real_wandb(tmp_path):
     # reload real module (unchanged)
     if "goggles._core.integrations.wandb" in sys.modules:

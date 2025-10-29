@@ -57,6 +57,10 @@ def trace_on_error():
     """
 
     def decorator(func):
+        from . import get_logger
+
+        logger = get_logger("goggles.decorators.trace_on_error")
+
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
