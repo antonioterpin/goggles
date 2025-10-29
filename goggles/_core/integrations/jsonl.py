@@ -74,7 +74,6 @@ class JsonlHandler:
         if self._fp is None or self._fp.closed:
             raise RuntimeError("Handler not opened. Call open() first.")
 
-        # TODO: add lineno and pathname for log events
         payload = {
             "kind": event.kind,
             "scope": event.scope,
@@ -82,7 +81,12 @@ class JsonlHandler:
             "level": event.level,
             "step": event.step,
             "time": event.time,
+            "filepath": event.filepath,
+            "lineno": event.lineno,
         }
+
+        if hasattr(event, "extra") and event.extra is not None:
+            payload["extra"] = event.extra
         try:
             with self._lock:
                 json.dump(payload, self._fp, ensure_ascii=False)
