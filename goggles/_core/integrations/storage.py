@@ -14,6 +14,7 @@ from goggles.media import (
     save_numpy_gif,
     save_numpy_image,
     save_numpy_mp4,
+    save_numpy_vector_field_visualization,
 )
 
 
@@ -40,7 +41,7 @@ class LocalStorageHandler:
 
     name: str = "jsonl"
     capabilities: FrozenSet[str] = frozenset(
-        {"log", "metric", "image", "video", "artifact"}
+        {"log", "metric", "image", "video", "artifact", "vector_field", "histogram"}
     )
 
     def __init__(self, path: Path, name: str = "jsonl") -> None:
@@ -53,20 +54,24 @@ class LocalStorageHandler:
         """
         self.name = name
         self._base_path = Path(path)
-        self._log_file = self._base_path / "log.jsonl"
-        self._images_dir = self._base_path / "images"
-        self._videos_dir = self._base_path / "videos"
-        self._artifacts_dir = self._base_path / "artifacts"
 
     def open(self) -> None:
         """Create directory structure and open the JSONL file for appending."""
         self._lock = threading.Lock()
 
         # Create directory structure
+        self._log_file = self._base_path / "log.jsonl"
+        self._images_dir = self._base_path / "images"
+        self._videos_dir = self._base_path / "videos"
+        self._artifacts_dir = self._base_path / "artifacts"
+        self._vector_fields_dir = self._base_path / "vector_fields"
+        self._histograms_dir = self._base_path / "histograms"
         self._base_path.mkdir(parents=True, exist_ok=True)
         self._images_dir.mkdir(exist_ok=True)
         self._videos_dir.mkdir(exist_ok=True)
         self._artifacts_dir.mkdir(exist_ok=True)
+        self._vector_fields_dir.mkdir(exist_ok=True)
+        self._histograms_dir.mkdir(exist_ok=True)
 
         # Open log file
         self._fp = open(self._log_file, "a", encoding="utf-8", buffering=1)
@@ -110,6 +115,10 @@ class LocalStorageHandler:
             event = self._save_video_to_file(event)
         elif kind == "artifact":
             event = self._save_artifact_to_file(event)
+        elif kind == "vector_field":
+            event = self._save_vector_field_to_file(event)
+        elif kind == "histogram":
+            event = self._save_histogram_to_file(event)
 
         if event is None:
             self._logger.warning(
@@ -306,4 +315,68 @@ class LocalStorageHandler:
             f.write(event["payload"])
 
         event["payload"] = str(artifact_path.relative_to(self._base_path))
+        return event
+
+    def _save_vector_field_to_file(self, event: dict) -> Optional[dict]:
+        """Save vector field data to file and update event with file path.
+
+        Args:
+            event (dict): Event dictionary.
+
+        Returns:
+            dict: Updated event with file path instead of raw data.
+
+        """
+        vector_field_name = str(uuid4())
+        if event["extra"] and "name" in event["extra"]:
+            vector_field_name = event["extra"]["name"]
+
+        if event["extra"] and "store_visualization" in event["extra"]:
+            add_colorbar = False
+            if event["extra"] and "add_colorbar" in event["extra"]:
+                add_colorbar = event["extra"]["add_colorbar"]
+
+            mode = "magnitude"
+            if event["extra"] and "mode" in event["extra"]:
+                mode = event["extra"]["mode"]
+
+            if mode not in {"vorticity", "magnitude"}:
+                self._logger.warning(
+                    f"Unknown vector field visualization mode '{mode}'."
+                    " Supported modes are: 'vorticity', 'magnitude'."
+                    " The vector field visualization will not be saved."
+                )
+            else:
+                save_numpy_vector_field_visualization(
+                    event["payload"],
+                    dir=self._vector_fields_dir,
+                    name=f"{vector_field_name}_visualization",
+                    mode=mode,
+                    add_colorbar=add_colorbar,
+                )
+
+        vector_field_path = self._vector_fields_dir / Path(f"{vector_field_name}.npy")
+        np.save(vector_field_path, event["payload"])
+
+        event["payload"] = str(vector_field_path.relative_to(self._base_path))
+        return event
+
+    def _save_histogram_to_file(self, event: dict) -> Optional[dict]:
+        """Save histogram data to file and update event with file path.
+
+        Args:
+            event (dict): Event dictionary.
+
+        Returns:
+            dict: Updated event with file path instead of raw data.
+
+        """
+        histogram_name = str(uuid4())
+        if event["extra"] and "name" in event["extra"]:
+            histogram_name = event["extra"]["name"]
+
+        histogram_path = self._histograms_dir / Path(f"{histogram_name}.npy")
+        np.save(histogram_path, event["payload"])
+
+        event["payload"] = str(histogram_path.relative_to(self._base_path))
         return event

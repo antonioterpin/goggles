@@ -1,7 +1,12 @@
 """Media utilities for saving images and videos from numpy arrays."""
 
+from typing import Literal
 import numpy as np
 import imageio
+from pathlib import Path
+import matplotlib
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:
@@ -84,7 +89,7 @@ def save_numpy_gif(
 
 def save_numpy_mp4(
     frames: np.ndarray,
-    out_path: str,
+    out_path: Path,
     fps: int = 30,
     codec: str = "libx264",
     pix_fmt: str = "yuv420p",
@@ -158,3 +163,122 @@ def save_numpy_image(image: np.ndarray, out_path: str, format: str) -> None:
     """
     arr_u8, _ = _normalize_frames(image[np.newaxis, ...])
     imageio.imwrite(out_path, arr_u8[0], format=format)
+
+
+def save_numpy_vector_field_visualization(
+    vector_field: np.ndarray,
+    dir: Path,
+    name: str,
+    mode: Literal["vorticity", "magnitude"] = "magnitude",
+    arrow_stride: int = 8,
+    dpi: int = 300,
+    add_colorbar: bool = True,
+) -> None:
+    """Save a 2D vector field visualization as a PNG image.
+
+    Args:
+        vector_field (np.ndarray): Input vector field of shape (H, W, 2).
+        dir (Path): Output directory path.
+        name (str): Base name for the output PNG file (without extension).
+        mode (Literal["vorticity", "magnitude"]): Visualization mode.
+        arrow_stride (int): Stride for downsampling arrows (every Nth point).
+        dpi (int): Resolution of the output image.
+        add_colorbar (bool): Whether to include a colorbar.
+
+    """
+    # Store original backend to restore later
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+
+    try:
+        H, W, _ = vector_field.shape
+
+        # Create figure that matches pixel aspect; keep margins zero by default
+        fig, ax = plt.subplots(figsize=(W / 50, H / 50), dpi=dpi)
+        ax.set_aspect("equal")
+
+        # Compute scalar field and arrow color based on the selected mode
+        if mode == "magnitude":
+            scalar_field = np.linalg.norm(vector_field, axis=-1)
+            cmap = plt.cm.viridis
+            arrow_color = "white"
+        elif mode == "vorticity":
+            # Compute vorticity (curl) of the vector field: dVx/dy - dVy/dx
+            dy = np.gradient(vector_field[..., 0], axis=0)
+            dx = np.gradient(vector_field[..., 1], axis=1)
+            scalar_field = dx - dy
+            cmap = plt.cm.RdBu_r
+            arrow_color = "black"
+        else:
+            raise ValueError("mode must be 'magnitude' or 'vorticity'")
+
+        # Display scalar field as background
+        im = ax.imshow(
+            scalar_field,
+            cmap=cmap,
+            origin="lower",
+            extent=[0, W, 0, H],
+            interpolation="bilinear",
+        )
+
+        # Arrow grid
+        y_coords, x_coords = np.mgrid[0:H:arrow_stride, 0:W:arrow_stride]
+        u_sampled = vector_field[::arrow_stride, ::arrow_stride, 0]
+        v_sampled = vector_field[::arrow_stride, ::arrow_stride, 1]
+
+        # Plot arrows
+        ax.quiver(
+            x_coords,
+            y_coords,
+            u_sampled,
+            v_sampled,
+            color=arrow_color,
+            alpha=0.9,
+            scale_units="xy",
+            scale=1,
+            width=0.002,
+            headwidth=4,
+            headlength=5,
+            headaxislength=4.5,
+            linewidth=0.5,
+            edgecolor="none",
+        )
+
+        # Remove axes and ticks
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_frame_on(False)
+
+        # (1) Colorbar exactly same height as the axes
+        if add_colorbar:
+            divider = make_axes_locatable(ax)
+            # size can be tweaked; "3%" is a nice thin bar, pad is the gap
+            cax = divider.append_axes("right", size="3%", pad=0.02)
+            cb = fig.colorbar(im, cax=cax)
+            cb.ax.tick_params(length=2)
+
+            # Leave a tiny margin so ticks/labels aren't clipped
+            fig.subplots_adjust(left=0.0, right=0.98, bottom=0.0, top=1.0)
+            bbox_setting = "tight"
+            pad_setting = 0.02
+        else:
+            # (2) No colorbar: strip all outer boundaries/margins
+            fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+            bbox_setting = "tight"
+            pad_setting = 0.0
+
+        # Save
+        dir.mkdir(parents=True, exist_ok=True)
+        plt.savefig(
+            str(dir / f"{name}.png"),
+            dpi=dpi,
+            bbox_inches=bbox_setting,
+            pad_inches=pad_setting,
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+
+    finally:
+        # Restore original matplotlib backend
+        matplotlib.use(original_backend)
