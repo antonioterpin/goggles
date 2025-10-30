@@ -7,7 +7,7 @@ import goggles
 from goggles._core.integrations import ConsoleHandler
 import logging
 
-# Instantiate a BoundLogger (No metrics)
+# Instantiate a TextLogger (No metrics)
 logger = goggles.get_logger(name="examples.interrupt")
 
 goggles.attach(

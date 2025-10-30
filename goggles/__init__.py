@@ -31,6 +31,7 @@ from typing import (
     Protocol,
     Dict,
     Set,
+    Union,
     overload,
     runtime_checkable,
 )
@@ -38,7 +39,7 @@ from typing_extensions import Self
 import logging
 import os
 
-from .types import Kind, Event, Video, Image, Metrics
+from .types import Kind, Event, Video, Image, Vector, Metrics
 from ._core.integrations import *
 from .decorators import timeit, trace_on_error
 from .shutdown import GracefulShutdown
@@ -50,7 +51,7 @@ GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 
 # Cache the implementations after first use to avoid repeated imports
 __impl_get_logger_text: Optional[
-    Callable[[Optional[str], dict[str, Any]], BoundLogger]
+    Callable[[Optional[str], dict[str, Any]], TextLogger]
 ] = None
 __impl_get_logger_metrics: Optional[
     Callable[[Optional[str], dict[str, Any]], GogglesLogger]
@@ -69,7 +70,7 @@ def get_logger(
     *,
     scope: str = "global",
     **to_bind: Any,
-) -> BoundLogger: ...
+) -> TextLogger: ...
 
 
 @overload
@@ -84,7 +85,7 @@ def get_logger(
 
 
 @overload
-def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> BoundLogger: ...
+def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> TextLogger: ...
 
 
 def get_logger(
@@ -94,7 +95,7 @@ def get_logger(
     with_metrics: bool = False,
     scope: str = "global",
     **to_bind: Any,
-) -> BoundLogger | GogglesLogger:
+) -> TextLogger | GogglesLogger:
     """Return a structured logger (text-only by default, metrics-enabled on opt-in).
 
     This is the primary entry point for obtaining Goggles' structured loggers.
@@ -109,7 +110,7 @@ def get_logger(
         **to_bind (Any): Fields persisted and injected into every record.
 
     Returns:
-        Union[BoundLogger, GogglesLogger]: A text-only `BoundLogger` by default,
+        Union[TextLogger, GogglesLogger]: A text-only `TextLogger` by default,
         or a `GogglesLogger` when `with_metrics=True`.
 
     Examples:
@@ -126,24 +127,24 @@ def get_logger(
 
     if with_metrics:
         if __impl_get_logger_metrics is None:
-            from ._core.logger import CoreBoundLogger
+            from ._core.logger import CoreGogglesLogger
 
-            __impl_get_logger_metrics = lambda n, s, tb: CoreBoundLogger(
+            __impl_get_logger_metrics = lambda n, s, tb: CoreGogglesLogger(
                 name=n, scope=s, to_bind=tb
             )
         return __impl_get_logger_metrics(name, scope, to_bind)
     else:
         if __impl_get_logger_text is None:
-            from ._core.logger import CoreGogglesLogger
+            from ._core.logger import CoreTextLogger
 
-            __impl_get_logger_text = lambda n, s, tb: CoreGogglesLogger(
+            __impl_get_logger_text = lambda n, s, tb: CoreTextLogger(
                 name=n, scope=s, to_bind=tb
             )
         return __impl_get_logger_text(name, scope, to_bind)
 
 
 @runtime_checkable
-class BoundLogger(Protocol):
+class TextLogger(Protocol):
     """Protocol for Goggles' structured logger adapters.
 
     This protocol defines the expected interface for logger adapters returned
@@ -169,7 +170,7 @@ class BoundLogger(Protocol):
 
 
         Returns:
-            Self: A new `BoundLogger` instance
+            Self: A new `TextLogger` instance
                 with updated bound fields and scope.
 
         """
@@ -312,8 +313,8 @@ class BoundLogger(Protocol):
 
 
 @runtime_checkable
-class MetricsEmitter(Protocol):
-    """Protocol for metrics and media emission."""
+class DataLogger(Protocol):
+    """Protocol for logging metrics, media, artifacts, and analytics data."""
 
     def push(
         self,
@@ -357,9 +358,9 @@ class MetricsEmitter(Protocol):
 
     def image(
         self,
-        name: str,
         image: Image,
         *,
+        name: Optional[str] = None,
         format: str = "png",
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -379,10 +380,11 @@ class MetricsEmitter(Protocol):
 
     def video(
         self,
-        name: str,
         video: Video,
         *,
+        name: Optional[str] = None,
         fps: int = 30,
+        format: str = "gif",
         step: Optional[int] = None,
         time: Optional[float] = None,
         **extra: Dict[str, Any],
@@ -390,9 +392,92 @@ class MetricsEmitter(Protocol):
         """Emit a video artifact (encoded bytes).
 
         Args:
-            name (str): Artifact name.
             video (Video): Video.
+            name (Optional[str]): Artifact name.
             fps (int): Frames per second.
+            format (str): Video format, e.g., "gif", "mp4".
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+
+    def artifact(
+        self,
+        name: str,
+        data: bytes,
+        *,
+        format: str = "bin",
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a generic artifact (encoded bytes).
+
+        Args:
+            name (str): Artifact name.
+            data (bytes): Artifact data.
+            format (str): Artifact format, e.g., "txt", "bin".
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+
+    def vector_field(
+        self,
+        name: str,
+        vector_field: VectorField,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a vector field artifact.
+
+        Args:
+            name (str): Artifact name.
+            vector_field (VectorField): Vector field data.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+
+    def histogram(
+        self,
+        name: str,
+        histogram: Vector,
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a histogram artifact.
+
+        Args:
+            name (str): Artifact name.
+            histogram (Vector): Histogram data.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+
+    def trajectory(
+        self,
+        name: str,
+        trajectory: List[Union[Vector, Image, VectorField]],
+        *,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a trajectory artifact.
+
+        Args:
+            name (str): Artifact name.
+            trajectory (Vector): Trajectory data.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.
@@ -401,7 +486,7 @@ class MetricsEmitter(Protocol):
 
 
 @runtime_checkable
-class GogglesLogger(BoundLogger, MetricsEmitter, Protocol):
+class GogglesLogger(TextLogger, DataLogger, Protocol):
     """Protocol for Goggles loggers with metrics support.
 
     Composite logger combining text logging with a metrics facet.
@@ -599,7 +684,7 @@ def get_bus() -> EventBus:
     return __impl_get_bus()
 
 
-def attach(handler: Handler, scopes: List[str]) -> None:
+def attach(handler: Handler, scopes: List[str] = ["global"]) -> None:
     """Attach a handler to the global EventBus under the specified scopes.
 
     Args:
@@ -630,7 +715,7 @@ def detach(handler_name: str, scope: str) -> None:
 
 
 __all__ = [
-    "BoundLogger",
+    "TextLogger",
     "GogglesLogger",
     "get_logger",
     "attach",
@@ -641,6 +726,7 @@ __all__ = [
     "trace_on_error",
     "GracefulShutdown",
     "ConsoleHandler",
+    "LocalStorageHandler",
 ]
 
 # ---------------------------------------------------------------------------

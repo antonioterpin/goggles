@@ -1,26 +1,16 @@
 """Types used in Goggles."""
 
+import numpy as np
 from typing import Dict, Literal, Any, Optional
 from dataclasses import dataclass
 
 Kind = Literal["log", "metric", "image", "video", "artifact"]
 
-try:
-    import jax.numpy as jnp
-
-    jnparray = jnp.ndarray
-except ImportError:
-    jnparray = bytes
-try:
-    import numpy as np
-
-    nparray = np.ndarray
-except ImportError:
-    nparray = bytes
-
 Metrics = Dict[str, float | int]
-Image = nparray | jnparray | bytes
-Video = nparray | jnparray | bytes
+Image = np.ndarray
+Video = np.ndarray
+Vector = np.ndarray
+VectorField = np.ndarray
 
 
 @dataclass(frozen=True)
@@ -52,17 +42,25 @@ class Event:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert Event to dictionary."""
-        return {
+        result = {
             "kind": self.kind,
             "scope": self.scope,
             "payload": self.payload,
             "filepath": self.filepath,
             "lineno": self.lineno,
-            "level": self.level,
-            "step": self.step,
-            "time": self.time,
-            "extra": self.extra,
         }
+
+        # Only include optional fields if they are not None
+        if self.level is not None:
+            result["level"] = self.level
+        if self.step is not None:
+            result["step"] = self.step
+        if self.time is not None:
+            result["time"] = self.time
+        if self.extra is not None:
+            result["extra"] = self.extra
+
+        return result
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Event":

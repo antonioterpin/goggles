@@ -13,17 +13,9 @@ Example:
 # TODO: actually write the docs here
 
 from .console import ConsoleHandler
-
-# from .jsonl import JsonlHandler
+from .storage import LocalStorageHandler
 
 __all__ = [
     "ConsoleHandler",
-    # "JsonlHandler",
+    "LocalStorageHandler",
 ]
-
-# try:
-#     from .wandb import WandBHandler
-
-#     integrations.append(WandBHandler)
-# except ImportError:
-#     pass
