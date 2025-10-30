@@ -196,6 +196,12 @@ This section includes some cool functionalities of `goggles`. Enjoy!
 
 ### Multi-scope logging
 
+#### Why?
+
+#### Features
+
+#### Usage
+
 ```python
 # In this example, we set up a handlers associated
 # to different scopes.
@@ -217,6 +223,8 @@ logger_scope1.info(f"This will be logged only by {handler1.name}")
 logger_scope2.info(f"This will be logged only by {handler2.name}")
 logger_global.info("This will be logged by both handlers.")
 ```
+
+See also [examples/02_multi_scope.py](./examples/02_multi_scope.py) for a running example.
 
 ### Adding a custom handler
 > [!NOTE]
@@ -245,7 +253,7 @@ During development of fluid control experiments and reinforcement learning pipel
 - Maintain temporal state across episodes
 - Support JIT compilation for maximum performance
 
-#### Key Features
+#### Features
 
 - **Pure functional** and **JIT-safe** buffer updates
 - **Per-field history lengths** with episodic reset support
