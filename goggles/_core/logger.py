@@ -13,7 +13,7 @@ import inspect
 from typing import Any, Dict, Mapping, Optional, Any
 from typing_extensions import Self
 
-from goggles import TextLogger, GogglesLogger, Event
+from goggles import TextLogger, GogglesLogger, Event, GOGGLES_ASYNC
 from goggles.types import Metrics, Image, Video, VectorField, Vector
 
 
@@ -118,7 +118,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -130,7 +130,9 @@ class CoreTextLogger(TextLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        ).result()
+        )
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def info(
         self,
@@ -152,7 +154,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -164,7 +166,10 @@ class CoreTextLogger(TextLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def warning(
         self,
@@ -185,7 +190,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -197,7 +202,10 @@ class CoreTextLogger(TextLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def error(
         self,
@@ -218,7 +226,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -230,7 +238,10 @@ class CoreTextLogger(TextLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def critical(
         self,
@@ -251,7 +262,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -263,7 +274,10 @@ class CoreTextLogger(TextLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
@@ -300,7 +314,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -312,7 +326,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def scalar(
         self,
@@ -335,7 +352,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -347,7 +364,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 time=time,
                 extra={**self._bound, **extra},
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def image(
         self,
@@ -375,7 +395,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
         extra["format"] = format
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="image",
                 scope=self._scope,
@@ -387,7 +407,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 time=time,
                 extra=extra,
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def video(
         self,
@@ -419,7 +442,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         extra["fps"] = fps
         extra["format"] = format
 
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="video",
                 scope=self._scope,
@@ -431,7 +454,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 time=time,
                 extra=extra,
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def artifact(
         self,
@@ -460,7 +486,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             extra["name"] = name
         extra["format"] = format
 
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="artifact",
                 scope=self._scope,
@@ -472,7 +498,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 time=time,
                 extra=extra,
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def vector_field(
         self,
@@ -498,7 +527,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="vector_field",
                 scope=self._scope,
@@ -510,7 +539,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 time=time,
                 extra=extra,
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
     def histogram(
         self,
@@ -536,7 +568,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        self._client.emit(
+        future = self._client.emit(
             Event(
                 kind="histogram",
                 scope=self._scope,
@@ -548,7 +580,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 time=time,
                 extra=extra,
             ).to_dict()
-        ).result()
+        )
+
+        if not GOGGLES_ASYNC:
+            future.result()
 
 
 def _caller_id() -> tuple[str, int]:

@@ -19,7 +19,7 @@ See Also:
 
 from __future__ import annotations
 
-import atexit
+import portal
 from collections import defaultdict
 from typing import (
     Any,
@@ -33,7 +33,6 @@ from typing import (
     Protocol,
     Dict,
     Set,
-    Union,
     overload,
     runtime_checkable,
 )
@@ -50,6 +49,7 @@ from .config import load_configuration, save_configuration
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2401")
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
+GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "0").lower() in ("1", "true", "yes")
 
 # Cache the implementation after first use to avoid repeated imports
 __impl_get_bus: Optional[Callable[[], EventBus]] = None
@@ -578,9 +578,7 @@ class EventBus:
         self.handlers: Dict[str, Handler] = {}
         self.scopes: Dict[str, Set[str]] = defaultdict(set)
 
-        atexit.register(self._shutdown)
-
-    def _shutdown(self) -> None:
+    def shutdown(self) -> None:
         """Shutdown the EventBus and close all handlers."""
         copy_map = {
             scope: handlers_names.copy()
@@ -655,10 +653,14 @@ class EventBus:
                 handler.handle(event)
 
 
-def get_bus() -> EventBus:
-    """Return the process-wide EventBus singleton.
+def get_bus() -> portal.Client:
+    """Return the process-wide EventBus singleton client.
 
     The EventBus owns handlers and routes events based on scope and kind.
+
+    Returns:
+        portal.Client: The singleton EventBus client.
+
     """
     global __impl_get_bus
     if __impl_get_bus is None:
@@ -696,6 +698,12 @@ def detach(handler_name: str, scope: str) -> None:
     """
     bus = get_bus()
     bus.detach(handler_name, scope)
+
+
+def finish() -> None:
+    """Shutdown the global EventBus and close all handlers."""
+    bus = get_bus()
+    bus.shutdown().result()
 
 
 __all__ = [

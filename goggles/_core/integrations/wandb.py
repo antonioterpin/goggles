@@ -195,6 +195,7 @@ class WandBHandler:
 
     def close(self) -> None:
         """Finish all active W&B runs."""
+        print("Closing W&B runs...")
         if self._wandb_run is not None:
             wandb.finish()
             self._wandb_run = None

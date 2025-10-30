@@ -58,7 +58,7 @@ def __i_am_host() -> bool:
     return GOGGLES_HOST in local_ips
 
 
-def get_bus() -> EventBus:
+def get_bus() -> portal.Client:
     """Return the process-wide EventBus singleton.
 
     This function ensures that there is a single instance of the
@@ -74,7 +74,7 @@ def get_bus() -> EventBus:
     threads within the same process.
 
     Returns:
-        EventBus: Singleton instance.
+        portal.Client: The singleton EventBus client.
 
     """
     global __singleton_core_event_bus
@@ -88,6 +88,7 @@ def get_bus() -> EventBus:
             __singleton_server.bind("attach", __singleton_core_event_bus.attach)
             __singleton_server.bind("detach", __singleton_core_event_bus.detach)
             __singleton_server.bind("emit", __singleton_core_event_bus.emit)
+            __singleton_server.bind("shutdown", __singleton_core_event_bus.shutdown)
             __singleton_server.start(block=False)
 
     global __singleton_client

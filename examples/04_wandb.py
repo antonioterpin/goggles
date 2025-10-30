@@ -27,3 +27,5 @@ logger.video(video, name="Random Video", fps=10)
 # Load and log artifact
 artifact = np.random.rand(100, 100, 3)
 logger.artifact(artifact, name="Random Artifact")
+
+gg.finish()
