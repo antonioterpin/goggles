@@ -1,9 +1,6 @@
 import goggles as gg
 import logging
 
-# In this basic example, we set up a logger that outputs to the console.
-logger = gg.get_logger("examples.custom_handler")
-
 
 class CustomConsoleHandler(gg.ConsoleHandler):
     """A custom console handler that adds a prefix to each log message."""
@@ -15,6 +12,13 @@ class CustomConsoleHandler(gg.ConsoleHandler):
 
         event = gg.Event.from_dict(dict)
         super().handle(event)
+
+
+# Register the custom handler so it can be serialized/deserialized
+gg.register_handler(CustomConsoleHandler)
+
+# In this basic example, we set up a logger that outputs to the console.
+logger = gg.get_logger("examples.custom_handler")
 
 
 gg.attach(

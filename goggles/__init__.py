@@ -48,6 +48,9 @@ from .config import load_configuration, save_configuration
 
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
+
+# Handler registry for custom handlers
+_HANDLER_REGISTRY: Dict[str, type] = {}
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "0").lower() in ("1", "true", "yes")
 
@@ -598,7 +601,8 @@ class EventBus:
 
         """
         for handler_dict in handlers:
-            handler = globals()[handler_dict["cls"]].from_dict(handler_dict["data"])
+            handler_class = _get_handler_class(handler_dict["cls"])
+            handler = handler_class.from_dict(handler_dict["data"])
             if handler.name not in self.handlers:
                 # Initialize handler and store it
                 handler.open()
@@ -706,6 +710,49 @@ def finish() -> None:
     bus.shutdown().result()
 
 
+def register_handler(handler_class: type) -> None:
+    """Register a custom handler class for serialization/deserialization.
+
+    Args:
+        handler_class: The handler class to register. Must have a __name__ attribute.
+
+    Example:
+        class CustomHandler(gg.ConsoleHandler):
+            pass
+
+        gg.register_handler(CustomHandler)
+
+    """
+    _HANDLER_REGISTRY[handler_class.__name__] = handler_class
+
+
+def _get_handler_class(class_name: str) -> type:
+    """Get a handler class by name from registry or globals.
+
+    Args:
+        class_name: Name of the handler class.
+
+    Returns:
+        The handler class.
+
+    Raises:
+        KeyError: If the handler class is not found.
+
+    """
+    # First check the registry for custom handlers
+    if class_name in _HANDLER_REGISTRY:
+        return _HANDLER_REGISTRY[class_name]
+
+    # Fall back to globals for built-in handlers
+    if class_name in globals():
+        return globals()[class_name]
+
+    raise KeyError(
+        f"Handler class '{class_name}' not found. "
+        f"Available handlers: {list(_HANDLER_REGISTRY.keys()) + [k for k in globals().keys() if k.endswith('Handler')]}"
+    )
+
+
 try:
     from ._core.integrations.wandb import WandBHandler
 except ImportError:
@@ -717,6 +764,7 @@ __all__ = [
     "get_logger",
     "attach",
     "detach",
+    "register_handler",
     "load_configuration",
     "save_configuration",
     "timeit",
