@@ -15,15 +15,13 @@ Example:
 from .console import ConsoleHandler
 from .storage import LocalStorageHandler
 
-from .jsonl import JsonlHandler
-
 try:
     from .wandb import WandBHandler
 except ImportError:
     WandBHandler = None  # type: ignore
+
 __all__ = [
     "ConsoleHandler",
-    "JsonlHandler",
     "WandBHandler",
     "LocalStorageHandler",
 ]

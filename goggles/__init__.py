@@ -41,7 +41,7 @@ from typing_extensions import Self
 import logging
 import os
 
-from .types import Kind, Event, Video, Image, Vector, Metrics
+from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
 from ._core.integrations import *
 from .decorators import timeit, trace_on_error
 from .shutdown import GracefulShutdown
@@ -51,14 +51,29 @@ from .config import load_configuration, save_configuration
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2401")
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 
-# Cache the implementations after first use to avoid repeated imports
-__impl_get_logger_text: Optional[
-    Callable[[Optional[str], dict[str, Any]], TextLogger]
-] = None
-__impl_get_logger_metrics: Optional[
-    Callable[[Optional[str], dict[str, Any]], GogglesLogger]
-] = None
+# Cache the implementation after first use to avoid repeated imports
 __impl_get_bus: Optional[Callable[[], EventBus]] = None
+
+
+def _make_text_logger(
+    name: Optional[str],
+    scope: str,
+    to_bind: dict[str, Any],
+) -> TextLogger:
+    from ._core.logger import CoreTextLogger
+
+    return CoreTextLogger(name=name, scope=scope, to_bind=to_bind)
+
+
+def _make_goggles_logger(
+    name: Optional[str],
+    scope: str,
+    to_bind: dict[str, Any],
+) -> GogglesLogger:
+    from ._core.logger import CoreGogglesLogger
+
+    return CoreGogglesLogger(name=name, scope=scope, to_bind=to_bind)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -125,24 +140,10 @@ def get_logger(
         >>> tlog.scalar("loss", 0.42, step=1)
 
     """
-    global __impl_get_logger_text, __impl_get_logger_metrics
-
     if with_metrics:
-        if __impl_get_logger_metrics is None:
-            from ._core.logger import CoreGogglesLogger
-
-            __impl_get_logger_metrics = lambda n, s, tb: CoreGogglesLogger(
-                name=n, scope=s, to_bind=tb
-            )
-        return __impl_get_logger_metrics(name, scope, to_bind)
+        return _make_goggles_logger(name, scope, to_bind)
     else:
-        if __impl_get_logger_text is None:
-            from ._core.logger import CoreTextLogger
-
-            __impl_get_logger_text = lambda n, s, tb: CoreTextLogger(
-                name=n, scope=s, to_bind=tb
-            )
-        return __impl_get_logger_text(name, scope, to_bind)
+        return _make_text_logger(name, scope, to_bind)
 
 
 @runtime_checkable
@@ -406,9 +407,9 @@ class DataLogger(Protocol):
 
     def artifact(
         self,
-        name: str,
         data: bytes,
         *,
+        name: str,
         format: str = "bin",
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -729,8 +730,8 @@ __all__ = [
     "trace_on_error",
     "GracefulShutdown",
     "ConsoleHandler",
-    "WandbHandler",
-    "JSONLHandler",
+    "WandbHandler",  # pyright: ignore[reportUnsupportedDunderAll]
+    "JSONLHandler",  # pyright: ignore[reportUnsupportedDunderAll]
     "LocalStorageHandler",
 ]
 

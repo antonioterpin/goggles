@@ -19,6 +19,12 @@ class WandBHandler:
     Each scope corresponds to a distinct W&B run that remains active until
     explicitly closed. Compatible with the `Handler` protocol used by the
     EventBus.
+
+    Attributes:
+        name (str): Stable handler identifier.
+        capabilities (set[str]): Supported event kinds
+            ({"metric", "image", "video", "artifact"}).
+
     """
 
     name: str = "wandb"
@@ -35,7 +41,18 @@ class WandBHandler:
         config: Optional[Mapping[str, Any]] = None,
         reinit: Reinit = "finish_previous",
     ) -> None:
-        """Initialize the W&B handler."""
+        """Initialize the W&B handler.
+
+        Args:
+            project (Optional[str]): W&B project name.
+            entity (Optional[str]): W&B entity (user or team) name.
+            run_name (Optional[str]): Base name for W&B runs.
+            config (Optional[Mapping[str, Any]]): Configuration dictionary
+                to log with the run(s).
+            reinit (Reinit): W&B reinitialization strategy when opening runs.
+                One of {"finish_previous", "return_previous", "create_new", "default"}.
+
+        """
         valid_reinit = {"finish_previous", "return_previous", "create_new", "default"}
         if reinit not in valid_reinit:
             raise ValueError(
@@ -54,12 +71,16 @@ class WandBHandler:
         self._wandb_run: Optional[Run] = None
         self._current_scope: Optional[str] = None
 
-    # -------------------------------------------------------------------------
-    # Protocol methods
-    # -------------------------------------------------------------------------
-
     def can_handle(self, kind: str) -> bool:
-        """Return True if the handler supports this event kind."""
+        """Return True if the handler supports this event kind.
+
+        Args:
+            kind (str): Kind of event ("log", "metric", "image", "artifact").
+
+        Returns:
+            bool: True if the kind is supported, False otherwise.
+
+        """
         return kind in self.capabilities
 
     def open(self) -> None:
@@ -79,11 +100,17 @@ class WandBHandler:
         self._logger.debug("Opened W&B run '%s'.", self._base_run_name)
 
     def handle(self, event: Any) -> None:
-        """Handle a Goggles event and forward it to W&B."""
+        """Process a Goggles event and forward it to W&B.
+
+        Args:
+            event (Any): The Goggles event to process.
+
+        """
         scope = getattr(event, "scope", None) or self.GLOBAL_SCOPE
         kind = getattr(event, "kind", None) or "metric"
         step = getattr(event, "step", None)
         payload = getattr(event, "payload", None)
+        extra = getattr(event, "extra", {}) or {}
 
         run = self._wandb_run or self._runs.get(scope)
         if run is None:
@@ -102,14 +129,17 @@ class WandBHandler:
             return
 
         if kind in {"image", "video"}:
-            print("Is payload a mapping?", isinstance(payload, Mapping))
-            print(
-                "Payload:", payload.items() if isinstance(payload, Mapping) else payload
-            )
+            # Preferred key name comes from event.extra["name"], else "image"/"video"
+            default_key = "image" if kind == "image" else "video"
+            key_name = extra.get("name", default_key)
+
+            # Allow payload to be either a mapping {name: data} or a single datum
             items = (
-                payload.items() if isinstance(payload, Mapping) else [("data", payload)]
+                payload.items()
+                if isinstance(payload, Mapping)
+                else [(key_name, payload)]
             )
-            print("Logging images/videos:", items)
+
             logs = {}
             for name, value in items:
                 if value is None:
@@ -123,11 +153,23 @@ class WandBHandler:
                 if kind == "image":
                     logs[name] = wandb.Image(value)
                 else:
-                    logs[name] = wandb.Video(value, fps=20, format="mp4")
-            run.log(logs, step=step)
-            self._logger.debug(
-                "Logged %s(s) to W&B (scope=%s): %s", kind, scope, list(logs.keys())
-            )
+                    fps = int(extra.get("fps", 20))
+                    fmt = str(extra.get("format", "mp4"))
+                    if fmt not in {"mp4", "gif"}:
+                        self._logger.warning(
+                            "Unsupported video format '%s' for '%s'; defaulting to 'mp4'.",
+                            fmt,
+                            name,
+                        )
+                        fmt = "mp4"
+                    logs[name] = wandb.Video(value, fps=fps, format=fmt)  # type: ignore
+
+            if logs:
+                # Use a single API across kinds for consistency
+                wandb.log(logs, step=step)
+                self._logger.debug(
+                    "Logged %s(s) to W&B (scope=%s): %s", kind, scope, list(logs.keys())
+                )
             return
 
         if kind == "artifact":
@@ -186,10 +228,6 @@ class WandBHandler:
             config=data.get("config"),
             reinit=data.get("reinit", "finish_previous"),
         )
-
-    # -------------------------------------------------------------------------
-    # Internal helpers
-    # -------------------------------------------------------------------------
 
     def _get_or_create_run(self, scope: str) -> Run:
         if scope in self._runs and self._runs[scope] is not None:
