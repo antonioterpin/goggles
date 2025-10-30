@@ -40,7 +40,7 @@ class WandBHandler:
         entity: Optional[str] = None,
         run_name: Optional[str] = None,
         config: Optional[Mapping[str, Any]] = None,
-        reinit: Reinit = "finish_previous",
+        reinit: Reinit = "create_new",
     ) -> None:
         """Initialize the W&B handler.
 
@@ -54,6 +54,7 @@ class WandBHandler:
                 One of {"finish_previous", "return_previous", "create_new", "default"}.
 
         """
+        print("Initializing W&B handler... with reinit =", reinit)
         valid_reinit = {"finish_previous", "return_previous", "create_new", "default"}
         if reinit not in valid_reinit:
             raise ValueError(
@@ -66,9 +67,9 @@ class WandBHandler:
         self._project = project
         self._entity = entity
         self._base_run_name = run_name
-        self._config = dict(config) if config is not None else {}
+        self._config: Dict[str, Any] = dict(config) if config is not None else {}
         self._reinit = reinit or "finish_previous"
-        self._runs: dict[str, Run] = {}
+        self._runs: Dict[str, Run] = {}
         self._wandb_run: Optional[Run] = None
         self._current_scope: Optional[str] = None
 
@@ -89,6 +90,7 @@ class WandBHandler:
         if self._wandb_run is not None:
             self._logger.debug("W&B run already open; skipping reinit.")
             return
+        print("Opening W&B run... with reinit =", self._reinit)
         self._wandb_run = wandb.init(
             project=self._project,
             entity=self._entity,
@@ -107,25 +109,23 @@ class WandBHandler:
             event (Any): The Goggles event to process.
 
         """
+        print("Handling event in W&B handler...")
+        print("Event:", event)
+        print("Event scope:", getattr(event, "scope", None))
         scope = getattr(event, "scope", None) or self.GLOBAL_SCOPE
         kind = getattr(event, "kind", None) or "metric"
         step = getattr(event, "step", None)
         payload = getattr(event, "payload", None)
         extra = getattr(event, "extra", {}) or {}
 
-        run = self._wandb_run or self._runs.get(scope)
-        if run is None:
-            if scope == self.GLOBAL_SCOPE:
-                self._logger.warning("W&B run not opened; ignoring event.")
-                return
-            run = self._get_or_create_run(scope)
+        run = self._get_or_create_run(scope)
 
         if kind == "metric":
             if not isinstance(payload, Mapping):
                 raise ValueError(
                     "Metric event payload must be a mapping of name→value."
                 )
-            wandb.log(dict(payload), step=step)
+            run.log(dict(payload), step=step)
             self._logger.debug("Logged metrics: %s", list(payload.keys()))
             return
 
@@ -167,7 +167,7 @@ class WandBHandler:
 
             if logs:
                 # Use a single API across kinds for consistency
-                wandb.log(logs, step=step)
+                run.log(logs, step=step)
                 self._logger.debug(
                     "Logged %s(s) to W&B (scope=%s): %s", kind, scope, list(logs.keys())
                 )
@@ -195,15 +195,15 @@ class WandBHandler:
 
     def close(self) -> None:
         """Finish all active W&B runs."""
-        print("Closing W&B runs...")
-        if self._wandb_run is not None:
-            wandb.finish()
-            self._wandb_run = None
         for scope, run in list(self._runs.items()):
             if run is not None:
-                wandb.finish()
-                self._runs[scope] = None
+                try:
+                    run.finish()
+                finally:
+                    self._logger.debug("Finished W&B run for scope '%s'", scope)
         self._runs.clear()
+        self._wandb_run = None
+        self._current_scope = None
         self._logger.debug("All W&B runs closed.")
 
     def to_dict(self) -> Dict:
@@ -228,24 +228,34 @@ class WandBHandler:
             entity=data.get("entity"),
             run_name=data.get("run_name"),
             config=data.get("config"),
-            reinit=data.get("reinit", "finish_previous"),
+            reinit=data.get("reinit", "create_new"),
         )
 
     def _get_or_create_run(self, scope: str) -> Run:
-        if scope in self._runs and self._runs[scope] is not None:
-            return self._runs[scope]
-        run_name = (
+        """Get or create a W&B run for the given scope.
+
+        Args:
+            scope (str): The scope for which to get or create the W&B run.
+
+        Returns:
+            Run: The W&B run associated with the given scope.
+
+        """
+        run = self._runs.get(scope)
+        if run is not None:
+            return run
+        name = (
             self._base_run_name
-            if scope == self.GLOBAL_SCOPE
-            else f"{self._base_run_name}-{scope}" if self._base_run_name else scope
+            if scope == self.GLOBAL_SCOPE and self._base_run_name
+            else f"{self._base_run_name or 'run'}-{scope}"
         )
-        self._logger.debug("Opening new W&B run for scope '%s' (%s)", scope, run_name)
         run = wandb.init(
             project=self._project,
             entity=self._entity,
-            name=run_name,
-            config=self._config,
+            name=name,
+            config={**self._config, "scope": scope},
             reinit=self._reinit,  # type: ignore
         )
         self._runs[scope] = run
+        self._logger.debug("Created W&B run for scope '%s' (name='%s')", scope, name)
         return run

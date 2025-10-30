@@ -666,8 +666,8 @@ def get_bus() -> portal.Client:
     if __impl_get_bus is None:
         from ._core.routing import get_bus as _impl_get_bus
 
-        __impl_get_bus = _impl_get_bus
-    return __impl_get_bus()
+        __impl_get_bus = _impl_get_bus  # type: ignore
+    return __impl_get_bus()  # type: ignore
 
 
 def attach(handler: Handler, scopes: List[str] = ["global"]) -> None:
@@ -706,6 +706,11 @@ def finish() -> None:
     bus.shutdown().result()
 
 
+try:
+    from ._core.integrations.wandb import WandBHandler
+except ImportError:
+    WandBHandler = None
+
 __all__ = [
     "TextLogger",
     "GogglesLogger",
@@ -718,15 +723,9 @@ __all__ = [
     "trace_on_error",
     "GracefulShutdown",
     "ConsoleHandler",
-    "JSONLHandler",
     "LocalStorageHandler",
+    "WandBHandler",
 ]
-try:
-    from ._core.integrations.wandb import WandBHandler
-
-    __all__.append("WandBHandler")
-except ImportError:
-    pass
 
 # ---------------------------------------------------------------------------
 # Import-time safety
