@@ -25,6 +25,8 @@ from typing import (
     Any,
     Callable,
     Callable,
+    ClassVar,
+    FrozenSet,
     List,
     Literal,
     Optional,
@@ -45,7 +47,7 @@ from .shutdown import GracefulShutdown
 from .config import load_configuration, save_configuration
 
 # Goggles port for bus communication
-GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
+GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2401")
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 
 # Cache the implementations after first use to avoid repeated imports
@@ -427,12 +429,13 @@ class Handler(Protocol):
 
     Attributes:
         name (str): Stable handler identifier for diagnostics.
-        capabilities (set[str]):
-            Supported kinds, e.g. {'logs','metrics','artifacts'}.
+        capabilities (FrozenSet[Kind]):
+            Supported kinds, e.g. {'logs','metrics','artifacts', ...}.
 
     """
 
     name: str
+    capabilities: ClassVar[FrozenSet[Kind]]
 
     def can_handle(self, kind: Kind) -> bool:
         """Return whether this handler can process events of the given kind.
@@ -641,6 +644,8 @@ __all__ = [
     "trace_on_error",
     "GracefulShutdown",
     "ConsoleHandler",
+    "WandbHandler",
+    "JSONLHandler",
 ]
 
 # ---------------------------------------------------------------------------

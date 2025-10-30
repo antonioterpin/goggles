@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import FrozenSet, Literal
+from typing import ClassVar, FrozenSet, Literal
 from typing_extensions import Self
 
 from goggles.types import Event, Kind
@@ -18,7 +18,7 @@ class ConsoleHandler:
     """
 
     name: str = "goggles.console"
-    capabilities: FrozenSet[str] = frozenset({"log"})
+    capabilities: ClassVar[FrozenSet[Kind]] = frozenset({"log"})
 
     def __init__(
         self,

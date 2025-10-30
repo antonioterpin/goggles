@@ -14,16 +14,15 @@ Example:
 
 from .console import ConsoleHandler
 
-# from .jsonl import JsonlHandler
+from .jsonl import JsonlHandler
+
+try:
+    from .wandb import WandBHandler
+except ImportError:
+    WandBHandler = None  # type: ignore
 
 __all__ = [
     "ConsoleHandler",
-    # "JsonlHandler",
+    "JsonlHandler",
+    "WandBHandler",
 ]
-
-# try:
-#     from .wandb import WandBHandler
-
-#     integrations.append(WandBHandler)
-# except ImportError:
-#     pass

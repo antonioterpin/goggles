@@ -381,7 +381,7 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
                 lineno=lineno,
                 step=step,
                 time=time,
-                extra={**self._bound, **extra},
+                extra=extra,
             ).to_dict()
         ).result()
 

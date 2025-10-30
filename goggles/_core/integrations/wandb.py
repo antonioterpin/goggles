@@ -7,7 +7,10 @@ from typing import Any, ClassVar, Dict, FrozenSet, Literal, Mapping, Optional, S
 
 import wandb
 
+from goggles.types import Kind
+
 Run = Any  # wandb.sdk.wandb_run.Run
+Reinit = Literal["default", "return_previous", "finish_previous", "create_new"]
 
 
 class WandBHandler:
@@ -18,8 +21,8 @@ class WandBHandler:
     EventBus.
     """
 
-    name: ClassVar[str] = "wandb"
-    capabilities: ClassVar[FrozenSet[str]] = frozenset(
+    name: str = "wandb"
+    capabilities: ClassVar[FrozenSet[Kind]] = frozenset(
         {"metric", "image", "video", "artifact"}
     )
     GLOBAL_SCOPE: ClassVar[str] = "global"
@@ -30,9 +33,7 @@ class WandBHandler:
         entity: Optional[str] = None,
         run_name: Optional[str] = None,
         config: Optional[Mapping[str, Any]] = None,
-        reinit: Optional[
-            Literal["default", "return_previous", "finish_previous", "create_new"]
-        ] = "finish_previous",
+        reinit: Reinit = "finish_previous",
     ) -> None:
         """Initialize the W&B handler."""
         valid_reinit = {"finish_previous", "return_previous", "create_new", "default"}
@@ -101,9 +102,14 @@ class WandBHandler:
             return
 
         if kind in {"image", "video"}:
+            print("Is payload a mapping?", isinstance(payload, Mapping))
+            print(
+                "Payload:", payload.items() if isinstance(payload, Mapping) else payload
+            )
             items = (
                 payload.items() if isinstance(payload, Mapping) else [("data", payload)]
             )
+            print("Logging images/videos:", items)
             logs = {}
             for name, value in items:
                 if value is None:
@@ -178,7 +184,7 @@ class WandBHandler:
             entity=data.get("entity"),
             run_name=data.get("run_name"),
             config=data.get("config"),
-            reinit=data.get("reinit"),
+            reinit=data.get("reinit", "finish_previous"),
         )
 
     # -------------------------------------------------------------------------
