@@ -133,7 +133,7 @@ def test_configure_overrides_defaults(tmp_path):
         assert any(rec.get("msg") == "hello-jsonl" for rec in rows)
 
 
-# --------------------------- BoundLogger semantics ---------------------
+# --------------------------- TextLogger semantics ---------------------
 
 
 def test_get_logger_before_and_inside_run(tmp_path):

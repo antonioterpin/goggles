@@ -7,8 +7,8 @@ import tempfile
 from pathlib import Path
 
 
-from goggles._core.logger import CoreBoundLogger, get_logger as core_get_logger
-from goggles import get_logger as api_get_logger, BoundLogger
+from goggles._core.logger import CoreTextLogger, get_logger as core_get_logger
+from goggles import get_logger as api_get_logger, TextLogger
 
 
 # ---------------------------------------------------------------------------
@@ -27,18 +27,18 @@ def mock_logger():
 
 @pytest.fixture
 def core_log(mock_logger):
-    """Return a CoreBoundLogger bound to a mock logger."""
-    return CoreBoundLogger(mock_logger)
+    """Return a CoreTextLogger bound to a mock logger."""
+    return CoreTextLogger(mock_logger)
 
 
 # ---------------------------------------------------------------------------
-# CoreBoundLogger: binding behavior
+# CoreTextLogger: binding behavior
 # ---------------------------------------------------------------------------
 
 
 def test_bind_returns_new_instance(core_log):
     log2 = core_log.bind(a=1)
-    assert isinstance(log2, CoreBoundLogger)
+    assert isinstance(log2, CoreTextLogger)
     assert log2 is not core_log
     assert core_log.get_bound() == {}
     assert log2.get_bound() == {"a": 1}
@@ -57,7 +57,7 @@ def test_get_bound_returns_copy(core_log):
 
 
 # ---------------------------------------------------------------------------
-# CoreBoundLogger: logging emission
+# CoreTextLogger: logging emission
 # ---------------------------------------------------------------------------
 
 
@@ -100,7 +100,7 @@ def test_core_get_logger_creates_coreboundlogger(monkeypatch):
     mock_get_logger = MagicMock(return_value=logging.getLogger("x"))
     with patch("logging.getLogger", mock_get_logger):
         log = core_get_logger("x", run_id="123")
-    assert isinstance(log, CoreBoundLogger)
+    assert isinstance(log, CoreTextLogger)
     assert log.get_bound() == {"run_id": "123"}
 
 
@@ -110,9 +110,9 @@ def test_core_get_logger_creates_coreboundlogger(monkeypatch):
 
 
 def test_api_get_logger_returns_boundlogger_protocol():
-    """Ensure api.get_logger returns a BoundLogger-conforming adapter."""
+    """Ensure api.get_logger returns a TextLogger-conforming adapter."""
     log = api_get_logger("test", exp="unit")
-    assert isinstance(log, BoundLogger)
+    assert isinstance(log, TextLogger)
     assert hasattr(log, "bind")
     assert hasattr(log, "info")
     # verify binding works
@@ -151,7 +151,7 @@ def test_emit_with_empty_message(core_log, mock_logger):
 
 @pytest.mark.parametrize("to_file", [False, True])
 def test_visual_jsonl_boundlogger_demo(to_file):
-    """Visual demonstration of CoreBoundLogger structured logging.
+    """Visual demonstration of CoreTextLogger structured logging.
 
     This test is *opt-in only*: it is skipped unless the environment variable
     `GOGGLES_SHOW_LOGS=1` is set. It is meant to help developers *see* how bound
@@ -236,9 +236,9 @@ def test_visual_jsonl_boundlogger_demo(to_file):
     base_logger.addHandler(handler)
 
     # ----------------------------------------------------------------------
-    # 3. Wrap logger with CoreBoundLogger and demonstrate binding
+    # 3. Wrap logger with CoreTextLogger and demonstrate binding
     # ----------------------------------------------------------------------
-    log = CoreBoundLogger(base_logger).bind(app="synthpix", mode="train")
+    log = CoreTextLogger(base_logger).bind(app="synthpix", mode="train")
     log.info("start", step=0)
 
     run_log = log.bind(run_id="exp001")

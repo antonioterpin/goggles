@@ -22,7 +22,7 @@ def test_public_exports_match_contract():
 
     expected = {
         "RunContext",
-        "BoundLogger",
+        "TextLogger",
         "configure",
         "run",
         "current_run",
@@ -80,7 +80,7 @@ def test_public_exports_match_api_contract():
 
     expected = {
         "RunContext",
-        "BoundLogger",
+        "TextLogger",
         "configure",
         "run",
         "get_logger",
@@ -101,7 +101,7 @@ def test_public_exports_match_api_contract():
     "name",
     [
         "RunContext",
-        "BoundLogger",
+        "TextLogger",
         "configure",
         "run",
         "get_logger",
@@ -157,7 +157,7 @@ def test_symbols_are_callable_or_types(name):
                         metadata={},
                         wandb=None,
                     )
-                elif name == "BoundLogger":
+                elif name == "TextLogger":
 
                     class Dummy:
                         def __init__(self, name):

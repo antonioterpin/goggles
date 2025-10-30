@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from goggles.types import Event
-from goggles._core.integrations.jsonl import JsonlHandler
+from goggles._core.integrations.storage import JsonlHandler
 
 
 @pytest.fixture

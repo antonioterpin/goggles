@@ -4,8 +4,8 @@ WARNING: This module is an internal implementation detail of Goggles'
 logging system. It is not part of the public API.
 
 External code should not import from this module. Instead, depend on:
-  - `goggles.BoundLogger`, `goggles.GogglesLogger` (protocol / interface), and
-  - `goggles.get_logger()` (factory returning a BoundLogger/GogglesLogger).
+  - `goggles.TextLogger`, `goggles.GogglesLogger` (protocol / interface), and
+  - `goggles.get_logger()` (factory returning a TextLogger/GogglesLogger).
 """
 
 import logging
@@ -13,12 +13,12 @@ import inspect
 from typing import Any, Dict, Mapping, Optional
 from typing_extensions import Self
 
-from goggles import BoundLogger, GogglesLogger, Event
+from goggles import TextLogger, GogglesLogger, Event
 from goggles.types import Metrics, Image, Video
 
 
-class CoreBoundLogger(BoundLogger):
-    """Internal concrete implementation of the BoundLogger protocol.
+class CoreTextLogger(TextLogger):
+    """Internal concrete implementation of the TextLogger protocol.
 
     This adapter wraps a `logging.Logger` and maintains a dictionary of
     persistent, structured fields ("bound" context). Each log call merges
@@ -28,7 +28,7 @@ class CoreBoundLogger(BoundLogger):
     Notes:
         * This class is **internal** to Goggles. Do not rely on its presence,
           constructor, or attributes from external code.
-        * External users should obtain a `BoundLogger` via
+        * External users should obtain a `TextLogger` via
           `goggles.get_logger()` and program against the protocol.
 
     Attributes:
@@ -45,7 +45,7 @@ class CoreBoundLogger(BoundLogger):
         name: Optional[str] = None,
         to_bind: Optional[Mapping[str, Any]] = None,
     ):
-        """Initialize the CoreBoundLogger.
+        """Initialize the CoreTextLogger.
 
         Args:
             scope (str): Scope to bind the logger to (e.g., "global", "run", ecc.).
@@ -278,8 +278,8 @@ class CoreBoundLogger(BoundLogger):
         )
 
 
-class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
-    """A GogglesLogger that is also a CoreBoundLogger."""
+class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
+    """A GogglesLogger that is also a CoreTextLogger."""
 
     def push(
         self,
@@ -351,9 +351,9 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
     def image(
         self,
-        name: str,
         image: Image,
         *,
+        name: Optional[str] = None,
         format: str = "png",
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -371,11 +371,15 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
         """
         filepath, lineno = _caller_id()
+        extra = {**self._bound, **extra}
+        if name is not None:
+            extra["name"] = name
+        extra["format"] = format
         self._client.emit(
             Event(
                 kind="image",
                 scope=self._scope,
-                payload={"name": name, "data": image, "format": format},
+                payload=image,
                 level=None,
                 filepath=filepath,
                 lineno=lineno,
@@ -387,10 +391,11 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
 
     def video(
         self,
-        name: str,
         video: Video,
         *,
+        name: Optional[str] = None,
         fps: int = 30,
+        format: str = "gif",
         step: Optional[int] = None,
         time: Optional[float] = None,
         **extra: Dict[str, Any],
@@ -398,26 +403,33 @@ class CoreGogglesLogger(GogglesLogger, CoreBoundLogger):
         """Emit a video artifact (encoded bytes).
 
         Args:
-            name (str): Artifact name.
             video (Video): Video.
+            name (Optional[str]): Artifact name.
             fps (int): Frames per second.
+            format (str): Video format, e.g., "gif", "mp4".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
+        extra = {**self._bound, **extra}
+        if name is not None:
+            extra["name"] = name
+        extra["fps"] = fps
+        extra["format"] = format
+
         self._client.emit(
             Event(
                 kind="video",
                 scope=self._scope,
-                payload={"name": name, "video": video, "fps": fps},
+                payload=video,
                 level=None,
                 filepath=filepath,
                 lineno=lineno,
                 step=step,
                 time=time,
-                extra={**self._bound, **extra},
+                extra=extra,
             ).to_dict()
         ).result()
 
