@@ -47,7 +47,7 @@ from .shutdown import GracefulShutdown
 from .config import load_configuration, save_configuration
 
 # Goggles port for bus communication
-GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2401")
+GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "0").lower() in ("1", "true", "yes")
 
