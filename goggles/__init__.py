@@ -755,7 +755,7 @@ def _get_handler_class(class_name: str) -> type:
 
 try:
     from ._core.integrations.wandb import WandBHandler
-except ImportError:
+except Exception:
     WandBHandler = None
 
 __all__ = [

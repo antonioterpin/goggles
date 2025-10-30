@@ -22,5 +22,5 @@ __all__ = [
 
 try:
     from .wandb import WandBHandler
-except ImportError:
+except Exception:
     __all__.append("WandBHandler")
