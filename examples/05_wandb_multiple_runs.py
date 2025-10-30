@@ -1,4 +1,3 @@
-import portal
 import goggles as gg
 from goggles import WandBHandler
 
@@ -30,13 +29,6 @@ def my_episode(index: int):
 for i in range(num_episodes):
     my_episode(i)
     logger.scalar("total_reward", i, step=i)
-
-# # We can also log from different processes... same handler!
-# distributed_episode_process = portal.Process(
-#     my_episode, (num_episodes + 1,)
-# )
-# distributed_episode_process.start()
-# distributed_episode_process.join()
 
 # When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
