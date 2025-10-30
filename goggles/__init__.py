@@ -51,7 +51,7 @@ import logging
 import os
 
 from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
-from ._core.integrations import *
+from ._core.integrations import ConsoleHandler, LocalStorageHandler
 from .decorators import timeit, trace_on_error
 from .shutdown import GracefulShutdown
 from .config import load_configuration, save_configuration
