@@ -195,8 +195,10 @@ uv run examples/103_history.py
 This section includes some cool functionalities of `goggles`. Enjoy!
 
 ### Multi-scope logging
+Goggles supports multiple logging scopes, allowing you to direct log messages to different handlers based on their scope.
 
 #### Why?
+In complex experiments, you might want to separate logs for different components or modules. For example, you may have a global logger for overall experiment status, and separate loggers for specific subsystems (e.g., data loading, model training). Multi-scope logging allows you to achieve this separation cleanly. Here we show it with console handlers, we delegate the W&B example to `examples/06_custom_handler.py`.
 
 #### Features
 

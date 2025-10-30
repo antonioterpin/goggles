@@ -17,7 +17,7 @@ class CustomConsoleHandler(gg.ConsoleHandler):
 # Register the custom handler so it can be serialized/deserialized
 gg.register_handler(CustomConsoleHandler)
 
-# In this basic example, we set up a logger that outputs to the console.
+# In this basic example, we set up a customized logger that outputs to console.
 logger = gg.get_logger("examples.custom_handler")
 
 
