@@ -407,9 +407,9 @@ class DataLogger(Protocol):
 
     def artifact(
         self,
-        data: bytes,
+        data: Any,
         *,
-        name: str,
+        name: Optional[str] = None,
         format: str = "bin",
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -418,8 +418,8 @@ class DataLogger(Protocol):
         """Emit a generic artifact (encoded bytes).
 
         Args:
-            name (str): Artifact name.
             data (bytes): Artifact data.
+            name (Optional[str]): Artifact name.
             format (str): Artifact format, e.g., "txt", "bin".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
@@ -429,9 +429,9 @@ class DataLogger(Protocol):
 
     def vector_field(
         self,
-        name: str,
         vector_field: VectorField,
         *,
+        name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
         **extra: Dict[str, Any],
@@ -439,8 +439,8 @@ class DataLogger(Protocol):
         """Emit a vector field artifact.
 
         Args:
-            name (str): Artifact name.
             vector_field (VectorField): Vector field data.
+            name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.
@@ -449,9 +449,9 @@ class DataLogger(Protocol):
 
     def histogram(
         self,
-        name: str,
         histogram: Vector,
         *,
+        name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
         **extra: Dict[str, Any],
@@ -459,28 +459,8 @@ class DataLogger(Protocol):
         """Emit a histogram artifact.
 
         Args:
-            name (str): Artifact name.
             histogram (Vector): Histogram data.
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
-
-        """
-
-    def trajectory(
-        self,
-        name: str,
-        trajectory: List[Union[Vector, Image, VectorField]],
-        *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
-        **extra: Dict[str, Any],
-    ) -> None:
-        """Emit a trajectory artifact.
-
-        Args:
-            name (str): Artifact name.
-            trajectory (Vector): Trajectory data.
+            name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.

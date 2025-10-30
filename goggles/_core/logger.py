@@ -10,11 +10,11 @@ External code should not import from this module. Instead, depend on:
 
 import logging
 import inspect
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Any
 from typing_extensions import Self
 
 from goggles import TextLogger, GogglesLogger, Event
-from goggles.types import Metrics, Image, Video
+from goggles.types import Metrics, Image, Video, VectorField, Vector
 
 
 class CoreTextLogger(TextLogger):
@@ -424,6 +424,123 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 kind="video",
                 scope=self._scope,
                 payload=video,
+                level=None,
+                filepath=filepath,
+                lineno=lineno,
+                step=step,
+                time=time,
+                extra=extra,
+            ).to_dict()
+        ).result()
+
+    def artifact(
+        self,
+        data: Any,
+        *,
+        name: Optional[str] = None,
+        format: str = "bin",
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a generic artifact (encoded bytes).
+
+        Args:
+            name (str): Artifact name.
+            data (bytes): Artifact data.
+            format (str): Artifact format, e.g., "txt", "bin".
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+        filepath, lineno = _caller_id()
+        extra = {**self._bound, **extra}
+        if name is not None:
+            extra["name"] = name
+        extra["format"] = format
+
+        self._client.emit(
+            Event(
+                kind="artifact",
+                scope=self._scope,
+                payload=data,
+                level=None,
+                filepath=filepath,
+                lineno=lineno,
+                step=step,
+                time=time,
+                extra=extra,
+            ).to_dict()
+        ).result()
+
+    def vector_field(
+        self,
+        vector_field: VectorField,
+        *,
+        name: Optional[str] = None,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a vector field artifact.
+
+        Args:
+            vector_field (VectorField): Vector field data.
+            name (Optional[str]): Artifact name.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+        filepath, lineno = _caller_id()
+        extra = {**self._bound, **extra}
+        if name is not None:
+            extra["name"] = name
+
+        self._client.emit(
+            Event(
+                kind="vector_field",
+                scope=self._scope,
+                payload=vector_field,
+                level=None,
+                filepath=filepath,
+                lineno=lineno,
+                step=step,
+                time=time,
+                extra=extra,
+            ).to_dict()
+        ).result()
+
+    def histogram(
+        self,
+        histogram: Vector,
+        *,
+        name: Optional[str] = None,
+        step: Optional[int] = None,
+        time: Optional[float] = None,
+        **extra: Dict[str, Any],
+    ) -> None:
+        """Emit a histogram artifact.
+
+        Args:
+            name (str): Artifact name.
+            histogram (Vector): Histogram data.
+            step (Optional[int]): Optional global step index.
+            time (Optional[float]): Optional global timestamp.
+            **extra (Dict[str, Any]): Additional routing metadata.
+
+        """
+        filepath, lineno = _caller_id()
+        extra = {**self._bound, **extra}
+        if name is not None:
+            extra["name"] = name
+
+        self._client.emit(
+            Event(
+                kind="histogram",
+                scope=self._scope,
+                payload=histogram,
                 level=None,
                 filepath=filepath,
                 lineno=lineno,
