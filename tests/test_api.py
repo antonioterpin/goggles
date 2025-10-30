@@ -1,246 +1,212 @@
-"""Smoke tests for Goggles API reachability and backward-compatibility.
-
-These tests ensure:
-- The public API symbols are importable from `goggles`.
-- The new structured API (`run`, `get_logger`, etc.) can be called without error.
-- Legacy aliases (`info`, `debug`, `scalar`, etc.) are still callable.
-- No import-time side effects (other than the expected single deprecation warning).
-
-We do NOT test real logging behavior, file creation, or W&B integration here.
-"""
-
-import importlib
-import sys
-import warnings
-import inspect
 import logging
+import sys
+import types
+
 import pytest
+import goggles.__init__ as gg
 
 
-def test_public_exports_match_contract():
-    import goggles
-
-    expected = {
-        "RunContext",
-        "TextLogger",
-        "configure",
-        "run",
-        "current_run",
-        "get_logger",
-        "scalar",
-        "image",
-        "video",
-    }
-    assert set(goggles.__all__) == expected
-    for name in expected:
-        assert hasattr(goggles, name)
+# ---------------------------------------------------------------------------
+# Fixtures and helpers
+# ---------------------------------------------------------------------------
 
 
-from dataclasses import is_dataclass, fields
-from goggles import RunContext
+class DummyHandler:
+    """Minimal handler implementation for testing EventBus attach/detach/emit."""
+
+    capabilities = frozenset({"metric", "log"})
+
+    def __init__(self, name="dummy"):
+        self.name = name
+        self.opened = False
+        self.closed = False
+        self.handled_events = []
+
+    def can_handle(self, kind):
+        return kind in self.capabilities
+
+    def handle(self, event):
+        self.handled_events.append(event)
+
+    def open(self):
+        self.opened = True
+
+    def close(self):
+        self.closed = True
+
+    def to_dict(self):
+        return {"cls": "DummyHandler", "data": {"name": self.name}}
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**data)
 
 
-def test_runcontext_structure():
-    assert is_dataclass(RunContext)
-    assert getattr(RunContext, "__dataclass_params__").frozen
-    field_names = [f.name for f in fields(RunContext)]
-    expected = [
-        "run_id",
-        "run_name",
-        "log_dir",
-        "created_at",
-        "pid",
-        "host",
-        "python",
-        "metadata",
-        "wandb",
-    ]
-    assert field_names == expected
+@pytest.fixture(autouse=True)
+def clean_registry(monkeypatch):
+    gg._HANDLER_REGISTRY.clear()
+    yield
+    gg._HANDLER_REGISTRY.clear()
 
 
-def test_import_root_no_side_effects(monkeypatch):
-    """Importing goggles should not attach handlers to root."""
-    root_before = list(logging.getLogger().handlers)
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        import goggles  # noqa: F401
-    root_after = list(logging.getLogger().handlers)
-
-    # Should have exactly one DeprecationWarning
-    dep_warnings = [rec for rec in w if issubclass(rec.category, DeprecationWarning)]
-    assert len(dep_warnings) == 0, "Expected 0 deprecation warning at import."
-
-    # Root handlers unchanged
-    assert root_before == root_after, "Importing goggles modified root handlers."
+# ---------------------------------------------------------------------------
+# get_logger
+# ---------------------------------------------------------------------------
 
 
-def test_public_exports_match_api_contract():
-    """Ensure top-level API matches declared __all__ surface."""
-    import goggles
+def test_get_logger_returns_text_and_goggles(monkeypatch):
+    dummy_text = object()
+    dummy_metrics = object()
+    monkeypatch.setattr(gg, "_make_text_logger", lambda n, s, t: dummy_text)
+    monkeypatch.setattr(gg, "_make_goggles_logger", lambda n, s, t: dummy_metrics)
 
-    expected = {
-        "RunContext",
-        "TextLogger",
-        "configure",
-        "run",
-        "get_logger",
-        "scalar",
-        "image",
-        "video",
-        # legacy functions should still exist
-        "info",
-        "debug",
-        "warning",
-        "error",
-    }
-    missing = expected - set(dir(goggles))
-    assert not missing, f"Missing expected symbols: {missing}"
+    assert gg.get_logger("x") is dummy_text
+    assert gg.get_logger("x", with_metrics=True) is dummy_metrics
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "RunContext",
-        "TextLogger",
-        "configure",
-        "run",
-        "get_logger",
-        "scalar",
-        "image",
-        "video",
-        "info",
-        "debug",
-        "warning",
-        "error",
-    ],
-)
-def test_symbols_are_callable_or_types(name):
-    """Each public symbol should be importable and callable/type-checkable."""
-    import goggles
-
-    obj = getattr(goggles, name)
-    if callable(obj):
-        # Just call it in a safe way, catching NotImplemented or harmless errors
-        try:
-            sig = inspect.signature(obj)
-            # For parameterless functions, call directly
-            if not sig.parameters:
-                obj()
-            else:
-                # Try minimal dummy args
-                if name in {"info", "debug", "warning", "error"}:
-                    obj("test message")
-                elif name in {"scalar"}:
-                    obj("test", 0.1)
-                elif name in {"image", "video"}:
-                    obj("tag", None)
-                elif name in {"run"}:
-                    # run() returns a context manager; don't enter it yet
-                    cm = obj("test_run")
-                    assert hasattr(cm, "__enter__") or hasattr(cm, "__aenter__")
-                elif name == "get_logger":
-                    log = obj("test")
-                    assert hasattr(log, "info")
-                elif name == "configure":
-                    obj()
-                elif name == "current_run":
-                    obj()
-                elif name == "RunContext":
-                    obj(
-                        run_id="test",
-                        run_name="test",
-                        log_dir="/tmp",
-                        created_at=0,
-                        pid=0,
-                        host="localhost",
-                        python={},
-                        metadata={},
-                        wandb=None,
-                    )
-                elif name == "TextLogger":
-
-                    class Dummy:
-                        def __init__(self, name):
-                            self.name = name
-
-                        def bind(self, **kwargs):
-                            pass
-
-                        def info(self, msg, **kwargs):
-                            pass
-
-                        def debug(self, msg, **kwargs):
-                            pass
-
-                        def warning(self, msg, **kwargs):
-                            pass
-
-                        def error(self, msg, **kwargs):
-                            pass
-
-                    log = Dummy("test")
-                    assert isinstance(log, object)
-        except NotImplementedError:
-            # Allowed for unimplemented stubs
-            pass
-        except Exception as e:
-            pytest.fail(f"Calling goggles.{name}() raised unexpected error: {e}")
+# ---------------------------------------------------------------------------
+# _get_handler_class and register_handler
+# ---------------------------------------------------------------------------
 
 
-def test_reimport_safe(monkeypatch):
-    if "goggles" in list(sys.modules):
-        sys.modules.pop("goggles")
-
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        import goggles  # noqa: F401
-
-        importlib.reload(goggles)
-    dep = [x for x in w if issubclass(x.category, DeprecationWarning)]
-    # Two warnings allowed (import + reload), but nothing fatal
-    assert len(dep) <= 2
+def test_register_and_get_handler_from_registry():
+    gg.register_handler(DummyHandler)
+    assert gg._get_handler_class("DummyHandler") is DummyHandler
 
 
-def _root_state():
-    """Capture a snapshot of the root logger state."""
-    root = logging.getLogger()
-    return {
-        "level": root.level,
-        "handlers": tuple(root.handlers),
-        "propagate": getattr(root, "propagate", None),
-    }
+def test_get_handler_class_falls_back_to_globals(monkeypatch):
+    monkeypatch.setitem(gg.__dict__, "GlobalHandler", DummyHandler)
+    assert gg._get_handler_class("GlobalHandler") is DummyHandler
 
 
-def test_import_has_no_side_effects(monkeypatch):
-    """Importing goggles must not modify the root logger or attach handlers."""
-    before = _root_state()
-
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        import goggles  # noqa: F401
-
-    after = _root_state()
-
-    # Root handler set and level unchanged
-    assert before == after, "Importing goggles changed global logging state"
-
-    # Only allowed warning type: DeprecationWarning (optional)
-    for rec in w:
-        assert issubclass(rec.category, DeprecationWarning)
-
-    # Check that importing added a NullHandler *only* to its own logger
-    g_logger = logging.getLogger("goggles")
-    nulls = [h for h in g_logger.handlers if isinstance(h, logging.NullHandler)]
-    assert nulls, "Goggles logger missing NullHandler"
-    assert all(isinstance(h, logging.NullHandler) for h in g_logger.handlers)
+def test_get_handler_class_raises_keyerror():
+    with pytest.raises(KeyError):
+        gg._get_handler_class("UnknownHandler")
 
 
-def test_reimport_is_idempotent():
-    """Reloading goggles should not add extra handlers."""
-    import goggles
+# ---------------------------------------------------------------------------
+# EventBus
+# ---------------------------------------------------------------------------
 
-    g_logger = logging.getLogger("goggles")
-    before = len(g_logger.handlers)
-    importlib.reload(goggles)
-    after = len(g_logger.handlers)
-    assert before == after, "Reimporting goggles duplicated handlers"
+
+def test_eventbus_attach_and_emit(monkeypatch):
+    gg.register_handler(DummyHandler)
+    bus = gg.EventBus()
+    handler_data = {"cls": "DummyHandler", "data": {"name": "h1"}}
+    bus.attach([handler_data], scopes=["train"])
+
+    assert "h1" in bus.handlers
+    assert "train" in bus.scopes
+    assert "h1" in bus.scopes["train"]
+
+    # Make gg.Event be SimpleNamespace so isinstance(event, Event) passes.
+    monkeypatch.setattr(gg, "Event", types.SimpleNamespace)
+    event = types.SimpleNamespace(scope="train", kind="log")
+    bus.emit(event)
+
+    assert (
+        bus.handlers["h1"].handled_events
+        and bus.handlers["h1"].handled_events[0] is event
+    )
+
+
+def test_eventbus_emit_ignores_scope_and_invalid_type(monkeypatch):
+    bus = gg.EventBus()
+    dummy = DummyHandler()
+    bus.handlers[dummy.name] = dummy
+    bus.scopes["train"] = {dummy.name}
+
+    # Wrong type -> TypeError
+    with pytest.raises(TypeError):
+        bus.emit(123)
+
+    # No scope match — first ensure isinstance(event, Event) holds
+    monkeypatch.setattr(gg, "Event", types.SimpleNamespace)
+    event = types.SimpleNamespace(scope="other", kind="log")
+    bus.emit(event)
+    assert dummy.handled_events == []
+
+
+def test_eventbus_detach_and_shutdown():
+    gg.register_handler(DummyHandler)
+    bus = gg.EventBus()
+    handler_data = {"cls": "DummyHandler", "data": {"name": "h1"}}
+    bus.attach([handler_data], scopes=["train"])
+    assert bus.handlers["h1"].opened
+
+    # Detach removes handler
+    bus.detach("h1", "train")
+    assert "h1" not in bus.handlers
+
+    # Detach again should raise
+    with pytest.raises(ValueError):
+        bus.detach("h1", "train")
+
+    # Reattach multiple and shutdown
+    bus.attach([handler_data], scopes=["train", "test"])
+    bus.shutdown()
+    assert not bus.handlers
+
+
+# ---------------------------------------------------------------------------
+# attach/detach/finish wrapper functions
+# ---------------------------------------------------------------------------
+
+
+def test_attach_detach_finish_call_bus(monkeypatch):
+    mock_bus = types.SimpleNamespace(
+        attach=lambda h, s: setattr(mock_bus, "attached", (h, s)),
+        detach=lambda n, s: setattr(mock_bus, "detached", (n, s)),
+        shutdown=lambda: types.SimpleNamespace(
+            result=lambda: setattr(mock_bus, "shut", True)
+        ),
+    )
+    monkeypatch.setattr(gg, "get_bus", lambda: mock_bus)
+
+    dummy = DummyHandler()
+    gg.attach(dummy, scopes=["run"])
+    assert mock_bus.attached[1] == ["run"]
+
+    gg.detach("x", "scope")
+    assert mock_bus.detached == ("x", "scope")
+
+    gg.finish()
+    assert getattr(mock_bus, "shut", False) is True
+
+
+# ---------------------------------------------------------------------------
+# get_bus caching + import hook
+# ---------------------------------------------------------------------------
+
+
+def test_get_bus_caches_implementation(monkeypatch):
+    """Ensure get_bus imports once, caches the callable, and returns its value."""
+    # Reset cache
+    monkeypatch.setattr(gg, "__impl_get_bus", None, raising=True)
+
+    # Create fake modules to satisfy: from ._core.routing import get_bus
+    fake_core = types.ModuleType("goggles._core")
+    fake_routing = types.ModuleType("goggles._core.routing")
+
+    calls = {"n": 0}
+
+    def fake_get_bus():
+        calls["n"] += 1
+        return "client"
+
+    fake_routing.get_bus = fake_get_bus  # what __init__.get_bus imports
+
+    # Inject into sys.modules so the relative import resolves to our fake
+    sys.modules["goggles._core"] = fake_core
+    sys.modules["goggles._core.routing"] = fake_routing
+
+    # First call imports and caches
+    result1 = gg.get_bus()
+    assert result1 == "client"
+    assert gg.__impl_get_bus is fake_get_bus
+    assert calls["n"] == 1  # called once
+
+    # Second call uses cached callable (no new import) and calls it again
+    result2 = gg.get_bus()
+    assert result2 == "client"
+    assert calls["n"] == 2
