@@ -4,12 +4,22 @@ import signal
 import time
 import goggles
 
+from goggles._core.integrations import ConsoleHandler
+import logging
+
+# Instantiate a TextLogger (No metrics)
+logger = goggles.get_logger(name="examples.interrupt")
+
+goggles.attach(
+    ConsoleHandler(name="examples.interrupt.info", level=logging.INFO), ["global"]
+)
+
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 
 
 # simulate an existing custom SIGINT handler
 def custom_handler(signum, frame):
-    """Custom handler for SIGINT (Ctrl-C) that wraps the previous handler."""
+    """Simulate a custom handler for SIGINT (Ctrl-C) wrapping previous handler."""
     print("Custom handler called for SIGINT (Ctrl-C).")
     print("Now calling what was the previous handler...")
     _prev_sigint_handler(signum, frame)  # call the previous handler if it exists
@@ -24,7 +34,7 @@ print("Started. Press Ctrl-C")
 try:
     counter = 0
     while True:
-        goggles.info(f"Working... {counter}")
+        logger.info(f"Working... {counter}")
         counter += 1
         time.sleep(1)
 except KeyboardInterrupt:

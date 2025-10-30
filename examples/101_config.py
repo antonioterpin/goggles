@@ -3,7 +3,7 @@
 import goggles
 
 # Example usage
-config = goggles.load_configuration("examples/example_config.yaml")
+config = goggles.config.load_configuration("examples/example_config.yaml")
 print(config)
 # we can also access the config like a normal dict
 print(

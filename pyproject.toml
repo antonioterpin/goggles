@@ -1,0 +1,121 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goggles"
+version = "0.1.0"
+authors = [
+    { name = "Antonio Terpin", email = "aterpin@ethz.ch" },
+    { name = "Francesco Banelli", email = "fbanelli@ethz.ch" },
+]
+description = "Observability framework for robotics research"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ruamel.yaml",
+    "rich",
+    "portal>=3.7.3",
+    "typing-extensions>=4.15.0",
+    "netifaces>=0.11.0",
+    "pyyaml>=6.0.3",
+    "numpy>=2.2.6",
+    "imageio[ffmpeg,pyav]>=2.37.0",
+    "matplotlib>=3.10.7",
+]
+
+[tool.setuptools.packages.find]
+include = ["goggles*"]
+exclude = ["wandb*", "tests*", "examples*"]
+
+[project.optional-dependencies]
+# Development and examples
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "hypothesis>=6.0.0",
+    "snowballstemmer==2.2.0",
+    "pre_commit==4.0.1",
+    "tomli"
+]
+# Optional JAX-based GPU history subsystem
+jax = [
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+]
+# Optional W&B integration
+wandb = [
+    "wandb[media]",
+]
+
+# autopep8 configuration for 4-space indentation
+[tool.autopep8]
+max_line_length = 80
+indent_size = 4
+aggressive = 2
+in_place = true
+exclude = ".eggs,.git,.hg,.mypy_cache,.tox,.venv,_build,buck-out,build,dist"
+
+# isort configuration (updated for autopep8 compatibility)
+[tool.isort]
+line_length = 80
+indent = 4
+multi_line_output = 0
+force_single_line = false
+include_trailing_comma = false
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+# MyPy configuration
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+explicit_package_bases = true
+mypy_path = "src"
+
+# Allow untyped decorators in test files for Hypothesis
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_decorators = false
+
+# Pydocstyle configuration
+[tool.pydocstyle]
+convention = "google"
+match-dir = "^(?!tests).*"
+
+# Bandit security configuration
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "build", "dist"]
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+        "-ra",
+        "--strict-markers",
+        "--strict-config",
+        "--cov=src",
+        "--cov-branch",
+        "--cov-report=term-missing",
+        "--cov-report=html",
+        "--cov-report=xml",
+]
+testpaths = ["tests"]
+filterwarnings = [
+        "error",
+        "ignore::UserWarning",
+        "ignore::DeprecationWarning",
+]

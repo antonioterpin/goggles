@@ -2,11 +2,20 @@
 
 import signal
 from typing import Optional
-from .logger import info
 
 
 class GracefulShutdown:
-    """A context manager for graceful shutdowns."""
+    """A context manager for graceful shutdowns.
+
+    Example:
+    >>> with GracefulShutdown(exit_message="Shutting down gracefully...") as gs:
+    ...     while not gs.stop:
+    ...         # Main application logic here, runs until interrupted
+    ...         # by SIGINT or SIGTERM.
+    ...         pass
+    ...     print("Cleanup and exit.")
+
+    """
 
     stop = False
 
@@ -14,11 +23,15 @@ class GracefulShutdown:
         self,
         exit_message: Optional[str] = None,
     ):
-        """Initializes the GracefulShutdown context manager.
+        """Initialize the GracefulShutdown context manager.
 
         Args:
             exit_message (str): The message to log upon shutdown.
+
         """
+        from . import get_logger
+
+        self.logger = get_logger("goggles.shutdown")
         self.exit_message = exit_message
         # placeholders for original handlers
         self._orig_sigint = None
@@ -33,7 +46,7 @@ class GracefulShutdown:
         def handle_signal(signum, frame):
             self.stop = True
             if self.exit_message:
-                info(self.exit_message)
+                self.logger.info(self.exit_message)
 
         # register for both SIGINT and SIGTERM
         signal.signal(signal.SIGINT, handle_signal)
@@ -42,7 +55,14 @@ class GracefulShutdown:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        """Unregister the signal handlers, restoring originals."""
+        """Unregister the signal handlers, restoring originals.
+
+        Args:
+            exc_type: Exception type if any.
+            exc_value: Exception value if any.
+            traceback: Traceback if any.
+
+        """
         # restore original handlers
         if self._orig_sigint is not None:
             signal.signal(signal.SIGINT, self._orig_sigint)
