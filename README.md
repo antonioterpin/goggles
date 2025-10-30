@@ -1,4 +1,299 @@
-# 😎 Goggles
+# 😎 Goggles - Observability for Robotics Research
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![GitHub stars](https://img.shields.io/github/stars/antonioterpin/robostack?style=social)](https://github.com/antonioterpin/goggles/stargazers)
+[![codecov](https://codecov.io/gh/antonioterpin/goggles/graph/badge.svg?token=J49B8TFDSM)](https://codecov.io/gh/antonioterpin/goggles)
+[![Tests](https://github.com/antonioterpin/goggles/actions/workflows/test.yaml/badge.svg)](https://github.com/antonioterpin/goggles/actions/workflows/test.yaml)
+[![Code Style](https://github.com/antonioterpin/goggles/actions/workflows/code-style.yaml/badge.svg)](https://github.com/antonioterpin/goggles/actions/workflows/code-style.yaml)
+[![PyPI version](https://img.shields.io/pypi/v/robo-goggles.svg)](https://pypi.org/project/robo-goggles)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+
+
+A lightweight, flexible Python observability framework designed for robotics research. Goggles provides structured logging, experiment tracking, performance profiling, and device-resident temporal memory management for JAX-based pipelines.
+
+## ✨ Features
+
+- 🤖 **Multi-process (and multi-machines) logging** - Synchronize logs across spawned processes reliably and efficiently (shared memory when available).
+- 🎯 **Multi-output support** - Log to console, files, and remote services simultaneously.
+- 📊 **Experiment tracking** - Native integration with Weights & Biases for metrics, images, and videos.
+- 🕒 **Performance profiling** - `@goggles.timeit` decorator for automatic runtime measurement.
+- 🐞 **Error tracing** - `@goggles.trace_on_error` auto-logs full stack traces on exceptions.
+- 🧠 **Device-resident histories** - JAX-based GPU memory management for efficient, long-running experiments metrics.
+- 🚦 **Graceful shutdown** - Automatic cleanup of resources and handlers.
+- ⚙️ **Structured configuration** - YAML-based config loading with validation.
+- 🔌 **Extensible handlers** - Plugin architecture for custom logging backends.
+
+## 🏗️ Projects Built with Goggles
+
+This framework has been battle-tested across multiple research projects:
+
+[![FluidSControl](https://img.shields.io/badge/GitHub-antonioterpin%2Ffluidscontrol-2ea44f?logo=github)](https://github.com/antonioterpin/fluidscontrol)
+[![FlowGym](https://img.shields.io/badge/GitHub-antonioterpin%2Fflowgym-2ea44f?logo=github)](https://github.com/antonioterpin/flowgym)
+[![SynthPix](https://img.shields.io/badge/GitHub-antonioterpin%2Fsynthpix-2ea44f?logo=github)](https://github.com/antonioterpin/synthpix)
+[![Πnet](https://img.shields.io/badge/GitHub-antonioterpin%2Fpinet-2ea44f?logo=github)](https://github.com/antonioterpin/pinet)
+[![Glitch](https://img.shields.io/badge/GitHub-antonioterpin%2Fglitch-2ea44f?logo=github)](https://github.com/antonioterpin/glitch)
+
+## 🚀 Quick Start
+
+### Installation
+
+```bash
+# Basic installation
+uv add robo-goggles # or pip install robo-goggles
+
+# With Weights & Biases support
+uv add "robo-goggles[wandb]"
+
+# With JAX device-resident histories
+uv add "robo-goggles[jax]"
+```
+
+For the development installation, see our [How to contribute](./CONTRIBUTING.md) page.
+
+### Basic usage
+
+```python
+import goggles as gg
+import logging
+
+# Set up console logging
+logger = gg.get_logger("my_experiment")
+gg.attach(
+    gg.ConsoleHandler(name="console", level=logging.INFO),
+)
+
+# Basic logging
+logger.info("Experiment started")
+logger.warning("This is a warning")
+logger.error("An error occurred")
+```
+
+See also [Example 1](./examples/01_basic_run.py), which you can run after cloning the repo with
+```bash
+uv run examples/01_basic_run.py
+```
+
+### Experiment tracking with W&B
+
+```python
+import goggles as gg
+import numpy as np
+
+# Enable metrics logging
+logger = gg.get_logger("experiment", with_metrics=True)
+gg.attach(
+    gg.WandBHandler(project="my_project", name="run_1"),
+)
+
+# Log metrics, images, and videos
+for step in range(100):
+    logger.scalar("loss", np.random.random(), step=step)
+    logger.scalar("accuracy", 0.8 + 0.2 * np.random.random(), step=step)
+
+# Log images and videos
+image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+logger.image(image, name="sample_image")
+
+video = np.random.randint(0, 255, (30, 3, 64, 64), dtype=np.uint8)
+logger.video(video, name="sample_video", fps=10)
+
+# Ensure proper cleanup
+gg.finish()
+```
+
+### Performance profiling and error tracking
+
+```python
+import goggles as gg
+import logging
+
+class Trainer:
+    @gg.timeit(severity=logging.INFO)
+    def train_step(self, batch):
+        # Your training logic here
+        return {"loss": 0.1}
+
+    @gg.trace_on_error()
+    def risky_operation(self, data):
+        # This will log full traceback on any exception
+        return data / 0  # Will trigger trace logging
+
+trainer = Trainer()
+trainer.train_step({"x": [1, 2, 3]})  # Logs execution time
+
+try:
+    trainer.risky_operation(10)
+except ZeroDivisionError:
+    pass  # Full traceback was automatically logged
+```
+
+### Configuration Management
+
+Load and validate YAML configurations:
+
+```python
+import goggles
+
+# Load configuration with automatic validation
+config = goggles.load_configuration("config.yaml")
+print(config) # Pretty print
+print(config["learning_rate"])  # Access as dict
+
+# Pretty-print configuration
+goggles.save_configuration(config, "output.yaml")
+```
+
+### Supported Platforms 💻
+
+| Platform | Basic | W&B | JAX/GPU | Development |
+|----------|-------|-----|---------|-------------|
+| Linux    | ✅    | ✅   | ✅      | ✅          |
+| macOS    | ✅    | ✅   | ✅      | ✅          |
+| Windows  | ✅    | ✅   | ❌      | ✅          |
+
+*GPU support requires CUDA-compatible hardware and drivers*
+
+## 🔥 Examples
+
+Explore the `examples/` directory for comprehensive usage patterns:
+
+```bash
+# Basic logging setup
+uv run examples/01_basic_run.py
+
+# Advanced: Multi-scope logging
+uv run examples/02_multi_scope.py
+
+# File-based logging (local storage)
+uv run examples/03_local_storage.py
+
+# Weights & Biases integration
+uv run examples/04_wandb.py
+
+# Advanced: Weights & Biases multi-run setup
+uv run examples/05_wandb_multiple_runs.py
+
+# Advanced: Custom handler
+uv run exacmples/06_custom_handler.py
+
+# Graceful shutdown utils
+uv run examples/100_interrupt.py
+
+# Pretty and convenient utils for configuration laoding
+uv run examples/101_config.py
+
+# Advanced: Performance decorators
+uv run examples/102_decorators.py
+
+# Advanced: JAX device-resident histories
+uv run examples/103_history.py
+```
+
+## 🧠 For Goggles power user
+
+This section includes some cool functionalities of `goggles`. Enjoy!
+
+### Multi-scope logging
+
+```python
+# In this example, we set up a handlers associated
+# to different scopes.
+handler1 = gg.ConsoleHandler(name="examples.basic.console.1", level=logging.INFO)
+gg.attach(handler1, scopes=["global", "scope1"])
+
+handler2 = gg.ConsoleHandler(name="examples.basic.console.2", level=logging.INFO)
+gg.attach(handler2, scopes=["global", "scope2"])
+
+# We need to get separate loggers for each scope
+logger_scope1 = gg.get_logger("examples.basic.scope1", scope="scope1")
+logger_scope2 = gg.get_logger("examples.basic.scope2")
+logger_scope2.bind(scope="scope2")  # You can also bind the scope after creation
+logger_global = gg.get_logger("examples.basic.global", scope="global")
+
+# Now we can log messages to different scopes, so that only the interested
+# handlers will process them.
+logger_scope1.info(f"This will be logged only by {handler1.name}")
+logger_scope2.info(f"This will be logged only by {handler2.name}")
+logger_global.info("This will be logged by both handlers.")
+```
+
+### Adding a custom handler
+> [!NOTE]
+> Ideally, you should open a PR: We would love to integrate your work!
+
+Adding a custom handler is straightforward:
+
+```python
+TODO
+```
+
+See also [examples/05_custom_handler.py](./examples/06_custom_handler.py) for a complete example.
+
+### Using multiple scopes
+
+### Multi-run W&B integration
+
+### Device-resident histories
+For long-running GPU experiments that need efficient temporal memory management:
+
+#### Why?
+
+During development of fluid control experiments and reinforcement learning pipelines, we needed to:
+- Track detailed metrics during GPU-accelerated training
+- Avoid expensive device-to-host transfers
+- Maintain temporal state across episodes
+- Support JIT compilation for maximum performance
+
+#### Key Features
+
+- **Pure functional** and **JIT-safe** buffer updates
+- **Per-field history lengths** with episodic reset support
+- **Batch-first convention**: `(B, T, *shape)` for all tensors
+- **Zero host-device synchronization** during updates
+- **Integrated with FlowGym's** `EstimatorState` for temporal RL memory
+
+#### Usage
+
+```python
+from goggles.history import HistorySpec, create_history, update_history
+import jax.numpy as jnp
+
+# Define what to track over time
+spec = HistorySpec.from_config({
+    "states": {"length": 100, "shape": (64, 64, 2), "dtype": jnp.float32},
+    "actions": {"length": 50, "shape": (8,), "dtype": jnp.float32},
+    "rewards": {"length": 100, "shape": (), "dtype": jnp.float32},
+})
+
+# Create GPU-resident history buffers
+history = create_history(spec, batch_size=32)
+print(history["states"].shape)  # (32, 100, 64, 64, 2)
+
+# Update buffers during training (JIT-compiled)
+new_state = jnp.ones((32, 64, 64, 2))
+history = update_history(history, {"states": new_state})
+```
+
+See also [examples/103_history.py](./examples/103_history.py) for a running example.
+
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for detailed information on:
+
+• Development workflow and environment setup
+• Code style requirements and automated checks
+• Testing standards and coverage expectations
+• PR preparation and commit message conventions
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+*Ready to enhance your robotics research with structured observability? Get started with Goggles today! 🚀*gles
 
 A lightweight, flexible Python logging and monitoring library designed to simplify and enhance experiment tracking, performance profiling, and error tracing. Integrates with terminal, file-based logs, and W\&B (Weights & Biases). It is thought primarily for research projects in robotics.
 
@@ -157,109 +452,17 @@ for i in range(100):
 goggles.stop_workers()
 ```
 
-## Full Examples
+## Full list of running examples
 
-See the `examples/` folder for scripts covering:
+We prepared an `examples/` folder with scripts covering:
 
-- Config loading
-- Decorators
-- File vs. terminal logs
-- W&B scalar/vector/image/video
-- Graceful shutdown
-- Async scheduling
+TODO
 
 ## Contributing
 
 PRs, issues, and feature requests are welcome! Open an issue or submit a PR on GitHub.
+See our [contributing guide](./CONTRIBUTING.md) for more information.
 
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## ⚡ Device-Resident History Module (JAX)
-
-Goggles now provides a **device-resident temporal history subsystem** designed for reusable,
-JAX-based on-device memory management.
-
-## Why/When is it needed?
-
-During the development of our fluids control experiments, as well as the estimation framework in FlowGym and subsequent works, we exploited parallelism on accelerators but encountered the need for keeping track of detailed metrics during training. We believe that for long-running pipelines on GPU, in particular when interfacing with hardware (e.g., to train directly on hardware), this is often the case. However, logging comes at a computational price: if done naively, it requires a device-to-host transfer. This goggles module tackles exactly this tradeoff.
-
-### Installation
-
-To use the device history module:
-
-#### CPU only
-
-```bash
-pip install "goggles[jax]"
-```
-
-#### With CUDA (GPU)
-
-Install JAX with GPU support **before** Goggles:
-
-```bash
-# Example for CUDA 12
-pip install --upgrade "jax[cuda12]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-pip install "goggles[jax]"
-```
-
-### Example
-
-```python
-from goggles.history import HistorySpec, create_history, update_history
-import jax.numpy as jnp
-
-spec = HistorySpec.from_config({
-    "images": {"length": 4, "shape": (64, 64, 2), "dtype": jnp.float32},
-    "flow":   {"length": 2, "shape": (64, 64, 2), "dtype": jnp.float32},
-})
-
-history = create_history(spec, batch_size=8)
-print(history["images"].shape)  # (8, 4, 64, 64, 2)
-```
-
-> 💡 **Why not infer shapes and dtypes automatically?**
->
-> JAX operates in a **statically-compiled** model: array shapes and dtypes must be
-> known at graph construction time for JIT compilation and efficient on-device
-> memory allocation.
->
-> Automatically inferring these attributes from runtime data (e.g., the first
-> batch or input) would:
->
-> - introduce implicit host–device synchronization,
-> - make the API non-deterministic across JIT traces, and
-> - complicate multi-device sharding, where all devices must agree on array shapes.
->
-> By requiring users to specify `shape` and `dtype` explicitly in the
-> `HistorySpec`, Goggles ensures predictable device allocation, JIT-safety, and
-> reproducible behavior across pipelines.
-
-### Design Notes
-
-- Implements **pure functional**, **JIT-safe** buffer updates using `jax.numpy` and `jax.lax`.
-- Each field follows the convention `(B, T, *shape)`.
-- Supports **per-field history lengths** and **reset masks** for episodic updates.
-- Integrated with FlowGym’s `EstimatorState` for GPU-local temporal memory.
-
----
-
-📦 **Optional Dependencies**
-
-Goggles keeps JAX optional.
-Install JAX support only if you need GPU-resident histories:
-
-```toml
-[project.optional-dependencies]
-jax = ["jax>=0.4.0", "jaxlib>=0.4.0"]
-```
-
----
-
-### 🧠 Future Directions
-
-- NumPy backend for CPU-only fallback
-- Device sharding support (GSPMD)
-- Seamless integration with RL replay buffers
