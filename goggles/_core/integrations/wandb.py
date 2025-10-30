@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar, Dict, FrozenSet, Literal, Mapping, Optional, Self, Set
+from typing import Any, ClassVar, Dict, FrozenSet, Literal, Mapping, Optional
+from typing_extensions import Self
 
 import wandb
 

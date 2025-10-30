@@ -710,10 +710,15 @@ __all__ = [
     "trace_on_error",
     "GracefulShutdown",
     "ConsoleHandler",
-    "WandbHandler",  # pyright: ignore[reportUnsupportedDunderAll]
-    "JSONLHandler",  # pyright: ignore[reportUnsupportedDunderAll]
+    "JSONLHandler",
     "LocalStorageHandler",
 ]
+try:
+    from ._core.integrations.wandb import WandBHandler
+
+    __all__.append("WandBHandler")
+except ImportError:
+    pass
 
 # ---------------------------------------------------------------------------
 # Import-time safety

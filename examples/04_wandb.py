@@ -2,19 +2,21 @@ import goggles as gg
 from goggles import WandBHandler
 import numpy as np
 
-# In this basic example, we set up a logger that outputs to the console.
-logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)  # type: ignore
-gg.attach(WandBHandler(project="goggles_example"), scopes=["global"])
+# In this example, we set up a logger that outputs to Weights & Biases (W&B).
+logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)
+handler = WandBHandler(project="goggles_example")
+gg.attach(handler, scopes=["global"])
 
 
 logger.info(
     "Logging to Weights & Biases!"
 )  # This will be ignored because there's no log handler attached yet
-logger.scalar("accuracy", 0.95)
+for i in range(100):
+    logger.scalar("accuracy", i, step=i)
 
 # Generate and log an image
 image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-logger.image(image, name="Goggles Logo")  # TODO: replace with actual logo
+logger.image(image, name="Random image")
 
 # Generate and log a video
 video = np.random.randint(

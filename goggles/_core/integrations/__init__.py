@@ -15,13 +15,12 @@ Example:
 from .console import ConsoleHandler
 from .storage import LocalStorageHandler
 
+__all__ = [
+    "ConsoleHandler",
+    "LocalStorageHandler",
+]
+
 try:
     from .wandb import WandBHandler
 except ImportError:
-    WandBHandler = None  # type: ignore
-
-__all__ = [
-    "ConsoleHandler",
-    "WandBHandler",
-    "LocalStorageHandler",
-]
+    __all__.append("WandBHandler")
