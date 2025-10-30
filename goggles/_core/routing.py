@@ -21,7 +21,6 @@ from goggles import EventBus, Event, GOGGLES_HOST, GOGGLES_PORT
 # Singleton factory ---------------------------------------------------------
 __singleton_client: Optional[portal.Client] = None
 __singleton_server: Optional[portal.Server] = None
-__singleton_core_event_bus: Optional[EventBus] = None
 
 
 def __i_am_host() -> bool:
@@ -58,6 +57,26 @@ def __i_am_host() -> bool:
     return GOGGLES_HOST in local_ips
 
 
+def __is_port_in_use(host: str, port: int) -> bool:
+    """Check if a port is already in use.
+
+    Args:
+        host (str): The host to check.
+        port (int): The port to check.
+
+    Returns:
+        bool: True if the port is in use, False otherwise.
+
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1)  # 1 second timeout
+            result = sock.connect_ex((host, port))
+            return result == 0  # 0 means connection successful (port in use)
+    except Exception:
+        return False
+
+
 def get_bus() -> portal.Client:
     """Return the process-wide EventBus singleton.
 
@@ -77,19 +96,23 @@ def get_bus() -> portal.Client:
         portal.Client: The singleton EventBus client.
 
     """
-    global __singleton_core_event_bus
-    if __i_am_host():
+    if __i_am_host() and not __is_port_in_use(GOGGLES_HOST, int(GOGGLES_PORT)):
         global __singleton_server
-        if __singleton_core_event_bus is None:
-            __singleton_core_event_bus = EventBus()
-            __singleton_server = portal.Server(
+        try:
+            event_bus = EventBus()
+            server = portal.Server(
                 GOGGLES_PORT, name=f"EventBus-Server@{socket.gethostname()}"
             )
-            __singleton_server.bind("attach", __singleton_core_event_bus.attach)
-            __singleton_server.bind("detach", __singleton_core_event_bus.detach)
-            __singleton_server.bind("emit", __singleton_core_event_bus.emit)
-            __singleton_server.bind("shutdown", __singleton_core_event_bus.shutdown)
-            __singleton_server.start(block=False)
+            server.bind("attach", event_bus.attach)
+            server.bind("detach", event_bus.detach)
+            server.bind("emit", event_bus.emit)
+            server.bind("shutdown", event_bus.shutdown)
+            server.start(block=False)
+            __singleton_server = server
+        except OSError:
+            # Fallback: Server creation failed for other reasons
+            # (e.g. concurrency), no further need
+            pass
 
     global __singleton_client
     if __singleton_client is None:

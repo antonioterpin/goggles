@@ -1,7 +1,10 @@
+import portal
 import goggles as gg
 from goggles import WandBHandler
 
 # In this example, we set up multiple runs in Weights & Biases (W&B).
+# All runs created by the handler will be grouped under
+# the same project and group.
 logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)
 handler = WandBHandler(
     project="goggles_example", reinit="create_new", group="multiple_runs"
@@ -11,16 +14,29 @@ handler = WandBHandler(
 # episode being a separate W&B run and a global run tracking all episodes.
 num_episodes = 3
 episode_length = 10
-scopes = [f"episode_{episode}" for episode in range(num_episodes)]
+scopes = [f"episode_{episode}" for episode in range(num_episodes + 1)]
 scopes.append("global")
 gg.attach(handler, scopes=scopes)
 
-for i in range(num_episodes):
-    episode_logger = gg.get_logger(scope=f"episode_{i}", with_metrics=True)
-    for j in range(episode_length):
+
+def my_episode(index: int):
+    episode_logger = gg.get_logger(scope=f"episode_{index}", with_metrics=True)
+    for step in range(episode_length):
         # Supports scopes transparently
-        episode_logger.scalar("env/reward", i * episode_length + j, step=j)
+        # and has its own step counter
+        episode_logger.scalar("env/reward", index * episode_length + step, step=step)
+
+
+for i in range(num_episodes):
+    my_episode(i)
     logger.scalar("total_reward", i, step=i)
+
+# # We can also log from different processes... same handler!
+# distributed_episode_process = portal.Process(
+#     my_episode, (num_episodes + 1,)
+# )
+# distributed_episode_process.start()
+# distributed_episode_process.join()
 
 # When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
