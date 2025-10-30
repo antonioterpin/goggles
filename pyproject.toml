@@ -10,11 +10,6 @@ authors = [
     { name = "Francesco Banelli", email = "fbanelli@ethz.ch" },
 ]
 description = "Observability framework for robotics research"
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT",
-  "Operating System :: OS Independent",
-]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -28,6 +23,10 @@ dependencies = [
     "imageio[ffmpeg,pyav]>=2.37.0",
     "matplotlib>=3.10.7",
 ]
+
+[tool.setuptools.packages.find]
+include = ["goggles*"]
+exclude = ["wandb*", "tests*", "examples*"]
 
 [project.optional-dependencies]
 # Development and examples

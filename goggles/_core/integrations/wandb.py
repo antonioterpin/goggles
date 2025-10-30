@@ -40,6 +40,7 @@ class WandBHandler:
         entity: Optional[str] = None,
         run_name: Optional[str] = None,
         config: Optional[Mapping[str, Any]] = None,
+        group: Optional[str] = None,
         reinit: Reinit = "create_new",
     ) -> None:
         """Initialize the W&B handler.
@@ -50,11 +51,13 @@ class WandBHandler:
             run_name (Optional[str]): Base name for W&B runs.
             config (Optional[Mapping[str, Any]]): Configuration dictionary
                 to log with the run(s).
+            group (Optional[str]): W&B group name for runs.
             reinit (Reinit): W&B reinitialization strategy when opening runs.
                 One of {"finish_previous", "return_previous", "create_new", "default"}.
 
         """
-        print("Initializing W&B handler... with reinit =", reinit)
+        self._logger = logging.getLogger(self.name)
+        self._logger.propagate = True
         valid_reinit = {"finish_previous", "return_previous", "create_new", "default"}
         if reinit not in valid_reinit:
             raise ValueError(
@@ -62,10 +65,9 @@ class WandBHandler:
                 f"{', '.join(valid_reinit)}."
             )
 
-        self._logger = logging.getLogger(self.name)
-        self._logger.propagate = True
         self._project = project
         self._entity = entity
+        self._group = group
         self._base_run_name = run_name
         self._config: Dict[str, Any] = dict(config) if config is not None else {}
         self._reinit = reinit or "finish_previous"
@@ -88,19 +90,17 @@ class WandBHandler:
     def open(self) -> None:
         """Initialize the global W&B run."""
         if self._wandb_run is not None:
-            self._logger.debug("W&B run already open; skipping reinit.")
             return
-        print("Opening W&B run... with reinit =", self._reinit)
         self._wandb_run = wandb.init(
             project=self._project,
             entity=self._entity,
             name=self._base_run_name,
             config=self._config,
             reinit=self._reinit,  # type: ignore
+            group=self._group,
         )
         self._runs[self.GLOBAL_SCOPE] = self._wandb_run
         self._current_scope = self.GLOBAL_SCOPE
-        self._logger.debug("Opened W&B run '%s'.", self._base_run_name)
 
     def handle(self, event: Any) -> None:
         """Process a Goggles event and forward it to W&B.
@@ -109,9 +109,6 @@ class WandBHandler:
             event (Any): The Goggles event to process.
 
         """
-        print("Handling event in W&B handler...")
-        print("Event:", event)
-        print("Event scope:", getattr(event, "scope", None))
         scope = getattr(event, "scope", None) or self.GLOBAL_SCOPE
         kind = getattr(event, "kind", None) or "metric"
         step = getattr(event, "step", None)
@@ -126,7 +123,6 @@ class WandBHandler:
                     "Metric event payload must be a mapping of name→value."
                 )
             run.log(dict(payload), step=step)
-            self._logger.debug("Logged metrics: %s", list(payload.keys()))
             return
 
         if kind in {"image", "video"}:
@@ -168,9 +164,6 @@ class WandBHandler:
             if logs:
                 # Use a single API across kinds for consistency
                 run.log(logs, step=step)
-                self._logger.debug(
-                    "Logged %s(s) to W&B (scope=%s): %s", kind, scope, list(logs.keys())
-                )
             return
 
         if kind == "artifact":
@@ -188,7 +181,6 @@ class WandBHandler:
             artifact = wandb.Artifact(name=name, type=art_type)
             artifact.add_file(path)
             run.log_artifact(artifact)
-            self._logger.debug("Uploaded artifact: %s (%s)", name, path)
             return
 
         self._logger.warning("Unsupported event kind: %s", kind)
@@ -199,12 +191,11 @@ class WandBHandler:
             if run is not None:
                 try:
                     run.finish()
-                finally:
-                    self._logger.debug("Finished W&B run for scope '%s'", scope)
+                except:
+                    pass
         self._runs.clear()
         self._wandb_run = None
         self._current_scope = None
-        self._logger.debug("All W&B runs closed.")
 
     def to_dict(self) -> Dict:
         """Serialize the handler for attachment."""
@@ -216,19 +207,20 @@ class WandBHandler:
                 "run_name": self._base_run_name,
                 "config": self._config,
                 "reinit": self._reinit,
+                "group": self._group,
             },
         }
 
     @classmethod
     def from_dict(cls, serialized: Dict) -> Self:
         """De-serialize the handler from its dictionary representation."""
-        data = serialized.get("data", {})
         return cls(
-            project=data.get("project"),
-            entity=data.get("entity"),
-            run_name=data.get("run_name"),
-            config=data.get("config"),
-            reinit=data.get("reinit", "create_new"),
+            project=serialized.get("project"),
+            entity=serialized.get("entity"),
+            run_name=serialized.get("run_name"),
+            config=serialized.get("config"),
+            reinit=serialized.get("reinit", "create_new"),
+            group=serialized.get("group"),
         )
 
     def _get_or_create_run(self, scope: str) -> Run:
@@ -254,8 +246,8 @@ class WandBHandler:
             entity=self._entity,
             name=name,
             config={**self._config, "scope": scope},
+            group=self._group,
             reinit=self._reinit,  # type: ignore
         )
         self._runs[scope] = run
-        self._logger.debug("Created W&B run for scope '%s' (name='%s')", scope, name)
         return run
