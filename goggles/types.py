@@ -3,14 +3,15 @@
 import numpy as np
 from typing import Dict, Literal, Any, Optional
 from dataclasses import dataclass
+from typing import TypeAlias
 
 Kind = Literal["log", "metric", "image", "video", "artifact"]
 
 Metrics = Dict[str, float | int]
-Image = np.ndarray
-Video = np.ndarray
-Vector = np.ndarray
-VectorField = np.ndarray
+Image: TypeAlias = np.ndarray
+Video: TypeAlias = np.ndarray
+Vector: TypeAlias = np.ndarray
+VectorField: TypeAlias = np.ndarray
 
 
 @dataclass(frozen=True)

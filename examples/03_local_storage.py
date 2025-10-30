@@ -62,14 +62,18 @@ dummy_video_mp4 = np.random.rand(T, H, W, 3).astype(np.float32)
 logger.video(dummy_video_gif, format="gif", fps=30, step=1)
 logger.video(dummy_video_mp4, name="custom_name", format="mp4", fps=24, step=1)
 
-# # Artifact logging (with text data as example)
-# print("Logging sample artifact...")
-# artifact_data = "This is sample artifact content\nLine 2\nLine 3"
-# logger.artifact("text_artifact", artifact_data, format="txt", step=1)
-
-# # If the format is unsupported, the event will be skipped with a warning
-# logger.artifact(
-#     "unsupported_artifact", artifact_data, format="unknown_format", step=1)
+# Artifact logging (with text data as example)
+logger.info("Logging sample artifact...")
+artifact_txt = "This is sample artifact content\nLine 2\nLine 3"
+logger.artifact("text_artifact", artifact_txt, format="txt", step=1)
+artifact_json = {"key": "value"}
+logger.artifact("json_artifact", artifact_json, format="json", step=1)
+artifact_yaml = {"key": "value"}
+logger.artifact("yaml_artifact", artifact_yaml, format="yaml", step=1)
+artifact_csv = "col1,col2\n1,2\n3,4"
+logger.artifact("csv_artifact", artifact_csv, format="csv", step=1)
+artifact_unknown = "This is some unknown format data"
+logger.artifact("unknown_artifact", artifact_unknown, format="myformat", step=1)
 
 print()
 print("✓ All events logged successfully!")

@@ -278,15 +278,32 @@ class LocalStorageHandler:
         if event["extra"] and "format" in event["extra"]:
             artifact_format = event["extra"]["format"]
 
-        if artifact_format not in {"txt", "csv", "json"}:
+        if artifact_format not in {"txt", "csv", "json", "yaml"}:
             self._logger.warning(
                 f"Unknown artifact format '{artifact_format}'."
-                " The artifact will not be logged correctly."
-                f" Supported formats are: {self._supported_artifact_formats}."
+                " Supported formats are: 'txt', 'csv', 'json', 'yaml'."
+                " The artifact will not be logged."
             )
             return None
 
-        self._logger.debug("Saving artifact event to file.")
-        self._logger.debug(f"Not implemented yet.")
-        event["payload"] = "/the/path/to/the/artifact.txt"
+        if artifact_format == "json":
+            import json
+
+            event["payload"] = json.dumps(event["payload"], indent=2)
+
+        if artifact_format == "yaml":
+            import yaml
+
+            event["payload"] = yaml.dump(event["payload"])
+
+        artifact_name = str(uuid4())
+        if event["extra"] and "name" in event["extra"]:
+            artifact_name = event["extra"]["name"]
+
+        artifact_path = self._artifacts_dir / Path(f"{artifact_name}.{artifact_format}")
+
+        with open(artifact_path, "w") as f:
+            f.write(event["payload"])
+
+        event["payload"] = str(artifact_path.relative_to(self._base_path))
         return event

@@ -39,7 +39,7 @@ from typing_extensions import Self
 import logging
 import os
 
-from .types import Kind, Event, Video, Image, Vector, Metrics
+from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
 from ._core.integrations import *
 from .decorators import timeit, trace_on_error
 from .shutdown import GracefulShutdown
@@ -426,9 +426,9 @@ class DataLogger(Protocol):
 
     def vector_field(
         self,
-        name: str,
         vector_field: VectorField,
         *,
+        name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
         **extra: Dict[str, Any],
@@ -436,8 +436,8 @@ class DataLogger(Protocol):
         """Emit a vector field artifact.
 
         Args:
-            name (str): Artifact name.
             vector_field (VectorField): Vector field data.
+            name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.
@@ -446,9 +446,9 @@ class DataLogger(Protocol):
 
     def histogram(
         self,
-        name: str,
         histogram: Vector,
         *,
+        name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
         **extra: Dict[str, Any],
@@ -456,8 +456,8 @@ class DataLogger(Protocol):
         """Emit a histogram artifact.
 
         Args:
-            name (str): Artifact name.
             histogram (Vector): Histogram data.
+            name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.
@@ -466,9 +466,9 @@ class DataLogger(Protocol):
 
     def trajectory(
         self,
-        name: str,
         trajectory: List[Union[Vector, Image, VectorField]],
         *,
+        name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
         **extra: Dict[str, Any],
@@ -476,8 +476,8 @@ class DataLogger(Protocol):
         """Emit a trajectory artifact.
 
         Args:
-            name (str): Artifact name.
             trajectory (Vector): Trajectory data.
+            name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             **extra (Dict[str, Any]): Additional routing metadata.
