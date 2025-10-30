@@ -1,5 +1,7 @@
 """Example of using Goggles decorators for measuring performance and tracing errors."""
 
+import logging
+
 import goggles
 
 
@@ -10,7 +12,7 @@ class TestClass:
         """Initialize the class with a value."""
         self.x = x
 
-    @goggles.timeit(severity=goggles.Severity.DEBUG)
+    @goggles.timeit(severity=logging.DEBUG)
     def compute(self, n):
         """Compute the sum of integers from 0 to n-1."""
         total = 0

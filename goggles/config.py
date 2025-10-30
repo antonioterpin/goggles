@@ -10,7 +10,7 @@ class PrettyConfig(dict):
     """Dictionary subclass with pretty-printing using ruamel.yaml."""
 
     def __str__(self):
-        """Return a pretty-printed string representation of the configuration."""
+        """Return a pretty-printed string of the configuration."""
         console = Console()
         plain = dict(self)
         with console.capture() as capture:
@@ -18,14 +18,6 @@ class PrettyConfig(dict):
         return capture.get()
 
     __repr__ = __str__
-
-
-def represent_prettyconfig(dumper, data):
-    """Represent PrettyConfig as a YAML mapping."""
-    return dumper.represent_mapping("tag:yaml.org,2002:map", dict(data))
-
-
-SafeRepresenter.add_representer(PrettyConfig, represent_prettyconfig)
 
 
 def load_configuration(file_path: str) -> PrettyConfig:
@@ -47,3 +39,30 @@ def load_configuration(file_path: str) -> PrettyConfig:
         data = yaml.load(f) or {}
         # Wrap the loaded dict in our PrettyConfig
         return PrettyConfig(data)
+
+
+def represent_prettyconfig(dumper, data):
+    """Represent PrettyConfig as a YAML mapping.
+
+    Args:
+        dumper: The YAML dumper.
+        data: The PrettyConfig instance.
+
+    """
+    return dumper.represent_mapping("tag:yaml.org,2002:map", dict(data))
+
+
+SafeRepresenter.add_representer(PrettyConfig, represent_prettyconfig)
+
+
+def save_configuration(config: PrettyConfig, file_path: str):
+    """Dump PrettyConfig to a YAML file.
+
+    Args:
+        config (PrettyConfig): The configuration to dump.
+        file_path (str): Path to the output YAML file.
+
+    """
+    yaml = YAML(typ="safe", pure=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        yaml.dump(dict(config), f)

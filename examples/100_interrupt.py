@@ -4,6 +4,16 @@ import signal
 import time
 import goggles
 
+from goggles._core.integrations import ConsoleHandler
+import logging
+
+# Instantiate a TextLogger (No metrics)
+logger = goggles.get_logger(name="examples.interrupt")
+
+goggles.attach(
+    ConsoleHandler(name="examples.interrupt.info", level=logging.INFO), ["global"]
+)
+
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 
 
@@ -24,7 +34,7 @@ print("Started. Press Ctrl-C")
 try:
     counter = 0
     while True:
-        goggles.info(f"Working... {counter}")
+        logger.info(f"Working... {counter}")
         counter += 1
         time.sleep(1)
 except KeyboardInterrupt:

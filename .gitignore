@@ -1,5 +1,8 @@
 wandb
 
+# Examples
+examples/logs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -195,3 +198,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 .vscode/
+
+# Test logs
+/tests/_logs/*
+
+# Runs folder
+/runs/
