@@ -404,9 +404,9 @@ class DataLogger(Protocol):
 
     def artifact(
         self,
-        name: str,
-        data: bytes,
+        data: Any,
         *,
+        name: Optional[str] = None,
         format: str = "bin",
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -415,8 +415,8 @@ class DataLogger(Protocol):
         """Emit a generic artifact (encoded bytes).
 
         Args:
-            name (str): Artifact name.
             data (bytes): Artifact data.
+            name (Optional[str]): Artifact name.
             format (str): Artifact format, e.g., "txt", "bin".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
@@ -457,26 +457,6 @@ class DataLogger(Protocol):
 
         Args:
             histogram (Vector): Histogram data.
-            name (Optional[str]): Artifact name.
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
-
-        """
-
-    def trajectory(
-        self,
-        trajectory: List[Union[Vector, Image, VectorField]],
-        *,
-        name: Optional[str] = None,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
-        **extra: Dict[str, Any],
-    ) -> None:
-        """Emit a trajectory artifact.
-
-        Args:
-            trajectory (Vector): Trajectory data.
             name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.

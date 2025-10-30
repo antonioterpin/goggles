@@ -10,7 +10,7 @@ External code should not import from this module. Instead, depend on:
 
 import logging
 import inspect
-from typing import Any, Dict, Mapping, Optional, List, Union
+from typing import Any, Dict, Mapping, Optional, Any
 from typing_extensions import Self
 
 from goggles import TextLogger, GogglesLogger, Event
@@ -435,9 +435,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
     def artifact(
         self,
-        name: str,
-        data: bytes,
+        data: Any,
         *,
+        name: Optional[str] = None,
         format: str = "bin",
         step: Optional[int] = None,
         time: Optional[float] = None,
@@ -541,44 +541,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 kind="histogram",
                 scope=self._scope,
                 payload=histogram,
-                level=None,
-                filepath=filepath,
-                lineno=lineno,
-                step=step,
-                time=time,
-                extra=extra,
-            ).to_dict()
-        ).result()
-
-    def trajectory(
-        self,
-        trajectory: List[Union[Vector, Image, VectorField]],
-        *,
-        name: Optional[str] = None,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
-        **extra: Dict[str, Any],
-    ) -> None:
-        """Emit a trajectory artifact.
-
-        Args:
-            trajectory (Vector): Trajectory data.
-            name (Optional[str]): Artifact name.
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
-
-        """
-        filepath, lineno = _caller_id()
-        extra = {**self._bound, **extra}
-        if name is not None:
-            extra["name"] = name
-
-        self._client.emit(
-            Event(
-                kind="trajectory",
-                scope=self._scope,
-                payload=trajectory,
                 level=None,
                 filepath=filepath,
                 lineno=lineno,
