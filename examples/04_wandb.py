@@ -28,4 +28,5 @@ logger.video(video, name="Random Video", fps=10)
 artifact = np.random.rand(100, 100, 3)
 logger.artifact(artifact, name="Random Artifact")
 
+# When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
