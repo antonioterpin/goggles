@@ -195,12 +195,10 @@ uv run examples/103_history.py
 This section includes some cool functionalities of `goggles`. Enjoy!
 
 ### Multi-scope logging
-Goggles supports multiple logging scopes, allowing you to direct log messages to different handlers based on their scope.
+Goggles allow easily to set up different handlers for different scopes. That is, one can have an handler attached to multiple scopes, and a scope having multiple handlers. Each logger is associated to a single scope (by default: `global`), and logging with that logger will invoke all the loggers associated with the scope.
 
 #### Why?
-In complex experiments, you might want to separate logs for different components or modules. For example, you may have a global logger for overall experiment status, and separate loggers for specific subsystems (e.g., data loading, model training). Multi-scope logging allows you to achieve this separation cleanly. Here we show it with console handlers, we delegate the W&B example to `examples/06_custom_handler.py`.
-
-#### Features
+Within the same run, we may have logs that belong to different scopes. An example is training in Reinforcement Learning, where in a single training run there are multiple episodes. A complete example for this is provided in the [multiple runs in WandB](#multiple-runs-in-wandb) section.
 
 #### Usage
 
@@ -228,6 +226,56 @@ logger_global.info("This will be logged by both handlers.")
 
 See also [examples/02_multi_scope.py](./examples/02_multi_scope.py) for a running example.
 
+### Multiple runs in WandB
+An example of the benefit of scopes is given by the WandBHandler, which instantiate a different WandB run for each scope and groups them together:
+
+```python
+import goggles as gg
+from goggles import WandBHandler
+
+# In this example, we set up multiple runs in Weights & Biases (W&B).
+# All runs created by the handler will be grouped under
+# the same project and group.
+logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)
+handler = WandBHandler(
+    project="goggles_example", reinit="create_new", group="multiple_runs"
+)
+
+# In particular, we set up multiple runs in an RL training loop, with each
+# episode being a separate W&B run and a global run tracking all episodes.
+num_episodes = 3
+episode_length = 10
+scopes = [f"episode_{episode}" for episode in range(num_episodes + 1)]
+scopes.append("global")
+gg.attach(handler, scopes=scopes)
+
+
+def my_episode(index: int):
+    episode_logger = gg.get_logger(scope=f"episode_{index}", with_metrics=True)
+    for step in range(episode_length):
+        # Supports scopes transparently
+        # and has its own step counter
+        episode_logger.scalar("env/reward", index * episode_length + step, step=step)
+
+
+for i in range(num_episodes):
+    my_episode(i)
+    logger.scalar("total_reward", i, step=i)
+
+# When using asynchronous logging (like wandb), make sure to finish
+gg.finish()
+```
+
+### Fully asynchronous logging
+As in the WandB example, all the handlers work in the background. By default, the logging calls are blocking, but can be made not blocking by setting the environment variable `GOGGLES_ASYNC` to `1` or `true`. When you use the async mode, remember to call `gg.finish()` at the end from your host machine!
+>[!WARNING]
+> This functionality still needs thorough tesing, as well as a better documentation. Help is appreciated! 🤗
+
+### Multi-machine logging
+Goggles provides options to synchronize logging across machines, since there is always only a single server active. The relevant environment variables here are `GOGGLES_HOST` and `GOGGLES_PORT`.
+>[!WARNING]
+> This functionality still needs thorough tesing, as well as a better documentation. Help is appreciated! 🤗
+
 ### Adding a custom handler
 > [!NOTE]
 > Ideally, you should open a PR: We would love to integrate your work!
@@ -235,14 +283,40 @@ See also [examples/02_multi_scope.py](./examples/02_multi_scope.py) for a runnin
 Adding a custom handler is straightforward:
 
 ```python
-TODO
+import goggles as gg
+import logging
+
+
+class CustomConsoleHandler(gg.ConsoleHandler):
+    """A custom console handler that adds a prefix to each log message."""
+
+    def handle(self, event: gg.Event) -> None:
+        dict = event.to_dict()
+
+        dict["payload"] = f"[CUSTOM PREFIX] {dict['payload']}"
+
+        event = gg.Event.from_dict(dict)
+        super().handle(event)
+
+
+# Register the custom handler so it can be serialized/deserialized
+gg.register_handler(CustomConsoleHandler)
+
+# In this basic example, we set up a logger that outputs to the console.
+logger = gg.get_logger("examples.custom_handler")
+
+
+gg.attach(
+    CustomConsoleHandler(name="examples.custom.console", level=logging.INFO),
+    scopes=["global"],
+)
+# Because the logging level is set to INFO, the debug message will not be shown.
+logger.info("Hello, world!")
+logger.debug("you won't see this at INFO")
+
 ```
 
 See also [examples/05_custom_handler.py](./examples/06_custom_handler.py) for a complete example.
-
-### Using multiple scopes
-
-### Multi-run W&B integration
 
 ### Device-resident histories
 For long-running GPU experiments that need efficient temporal memory management:
@@ -448,7 +522,7 @@ from PIL import Image
 goggles.new_wandb_run("video_demo", {})
 goggles.init_scheduler(num_workers=4)
 
-def save_and_log_frame(frame, idx):
+def save_and_log_frame(frame, idx):v
     path = f"/tmp/frame_{idx}.png"
     frame.save(path)
     goggles.image(f"frame_{idx}", frame)
