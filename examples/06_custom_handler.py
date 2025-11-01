@@ -1,5 +1,4 @@
 import goggles as gg
-import logging
 
 
 class CustomConsoleHandler(gg.ConsoleHandler):
@@ -22,7 +21,7 @@ logger = gg.get_logger("examples.custom_handler")
 
 
 gg.attach(
-    CustomConsoleHandler(name="examples.custom.console", level=logging.INFO),
+    CustomConsoleHandler(name="examples.custom.console", level=gg.INFO),
     scopes=["global"],
 )
 # Because the logging level is set to INFO, the debug message will not be shown.

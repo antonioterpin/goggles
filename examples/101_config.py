@@ -1,9 +1,9 @@
 """Example of loading a configuration file using Goggles."""
 
-import goggles
+import goggles as gg
 
 # Example usage
-config = goggles.config.load_configuration("examples/example_config.yaml")
+config = gg.config.load_configuration("examples/example_config.yaml")
 print(config)
 # we can also access the config like a normal dict
 print(

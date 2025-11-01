@@ -1,21 +1,31 @@
 """Goggles: Structured logging and experiment tracking.
+===
 
 This package provides a stable public API for logging experiments, metrics,
 and media in a consistent and composable way.
 
 >>>    import goggles as gg
 >>>
->>>    with gg.run("experiment_42"):
->>>        logger = gg.get_logger("train", seed=0)
->>>        logger.info("Training started.")
->>>        logger.scalar("train/loss", 0.123, step=0)
+>>>    logger = gg.get_logger(__name__)
+>>>    gg.attach(
+            gg.ConsoleHandler(name="examples.basic.console", level=gg.INFO),
+            scopes=["global"],
+        )
+>>>    logger.info("Hello, world!")
+>>>    gg.attach(
+            gg.LocalStorageHandler(
+            path=Path("examples/logs"),
+            name="examples.jsonl",
+        )
+       )
+>>>    logger.scalar("awesomeness", 42)
 
 See Also:
     - README.md for detailed usage examples.
     - API docs for full reference of public interfaces.
     - Internal implementations live under `goggles/_core/`
 
-"""
+"""  # noqa: D205
 
 from __future__ import annotations
 
@@ -52,7 +62,7 @@ GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
 # Handler registry for custom handlers
 _HANDLER_REGISTRY: Dict[str, type] = {}
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
-GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "0").lower() in ("1", "true", "yes")
+GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "1").lower() in ("1", "true", "yes")
 
 # Cache the implementation after first use to avoid repeated imports
 __impl_get_bus: Optional[Callable[[], EventBus]] = None
@@ -753,6 +763,16 @@ def _get_handler_class(class_name: str) -> type:
     )
 
 
+# ---------------------------------------------------------------------------
+# Logging Levels
+# ---------------------------------------------------------------------------
+
+INFO = logging.INFO
+DEBUG = logging.DEBUG
+WARNING = logging.WARNING
+ERROR = logging.ERROR
+CRITICAL = logging.CRITICAL
+
 try:
     from ._core.integrations.wandb import WandBHandler
 except Exception:
@@ -773,6 +793,11 @@ __all__ = [
     "ConsoleHandler",
     "LocalStorageHandler",
     "WandBHandler",
+    "INFO",
+    "DEBUG",
+    "WARNING",
+    "ERROR",
+    "CRITICAL",
 ]
 
 # ---------------------------------------------------------------------------
