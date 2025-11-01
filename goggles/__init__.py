@@ -62,7 +62,7 @@ GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
 # Handler registry for custom handlers
 _HANDLER_REGISTRY: Dict[str, type] = {}
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
-GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "0").lower() in ("1", "true", "yes")
+GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "1").lower() in ("1", "true", "yes")
 
 # Cache the implementation after first use to avoid repeated imports
 __impl_get_bus: Optional[Callable[[], EventBus]] = None
