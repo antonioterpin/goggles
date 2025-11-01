@@ -2,17 +2,14 @@
 
 import signal
 import time
-import goggles
+import goggles as gg
 
 from goggles._core.integrations import ConsoleHandler
-import logging
 
 # Instantiate a TextLogger (No metrics)
-logger = goggles.get_logger(name="examples.interrupt")
+logger = gg.get_logger(name="examples.interrupt")
 
-goggles.attach(
-    ConsoleHandler(name="examples.interrupt.info", level=logging.INFO), ["global"]
-)
+gg.attach(ConsoleHandler(name="examples.interrupt.info", level=gg.INFO), ["global"])
 
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 

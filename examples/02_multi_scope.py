@@ -1,12 +1,11 @@
-import logging
 import goggles as gg
 
 # In this example, we set up a handlers associated
 # to different scopes.
-handler1 = gg.ConsoleHandler(name="examples.basic.console.1", level=logging.INFO)
+handler1 = gg.ConsoleHandler(name="examples.basic.console.1", level=gg.INFO)
 gg.attach(handler1, scopes=["global", "scope1"])
 
-handler2 = gg.ConsoleHandler(name="examples.basic.console.2", level=logging.INFO)
+handler2 = gg.ConsoleHandler(name="examples.basic.console.2", level=gg.INFO)
 gg.attach(handler2, scopes=["global", "scope2"])
 
 # We need to get separate loggers for each scope

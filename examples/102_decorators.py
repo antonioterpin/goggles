@@ -1,8 +1,6 @@
 """Example of using Goggles decorators for measuring performance and tracing errors."""
 
-import logging
-
-import goggles
+import goggles as gg
 
 
 class TestClass:
@@ -12,7 +10,7 @@ class TestClass:
         """Initialize the class with a value."""
         self.x = x
 
-    @goggles.timeit(severity=logging.DEBUG)
+    @gg.timeit(severity=gg.DEBUG)
     def compute(self, n):
         """Compute the sum of integers from 0 to n-1."""
         total = 0
@@ -20,7 +18,7 @@ class TestClass:
             total += i
         return total
 
-    @goggles.trace_on_error()
+    @gg.trace_on_error()
     def fail_method(self, y):
         """Intentionally raise a ZeroDivisionError."""
         return self.x / y
