@@ -174,6 +174,10 @@ def sample_history():
     }
 
 
+@pytest.mark.skipif(
+    all(d.platform == "cpu" for d in __import__("jax").devices()),
+    reason="No GPU/TPU available",
+)
 def test_to_device_and_to_host_roundtrip(sample_history):
     # Act
     device_hist = to_device(sample_history)

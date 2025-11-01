@@ -1,7 +1,6 @@
 import goggles as gg
 from pathlib import Path
 import numpy as np
-import logging
 
 # In this example, we set up a logger that stores events
 # in a structured directory:
@@ -23,7 +22,7 @@ gg.attach(
     )
 )
 gg.attach(
-    gg.ConsoleHandler(name="examples.jsonl.console", level=logging.INFO),
+    gg.ConsoleHandler(name="examples.jsonl.console", level=gg.INFO),
 )
 
 print("=== Goggles Local Storage Handler Example ===")
