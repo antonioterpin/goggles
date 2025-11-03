@@ -27,3 +27,5 @@ gg.attach(
 # Because the logging level is set to INFO, the debug message will not be shown.
 logger.info("Hello, world!")
 logger.debug("you won't see this at INFO")
+
+gg.finish()

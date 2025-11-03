@@ -36,3 +36,5 @@ try:
         time.sleep(1)
 except KeyboardInterrupt:
     print("KeyboardInterrupt caught in main; exiting.")
+finally:
+    gg.finish()

@@ -93,31 +93,6 @@ def _make_goggles_logger(
 # ---------------------------------------------------------------------------
 
 
-@overload
-def get_logger(
-    name: Optional[str] = None,
-    /,
-    *,
-    scope: str = "global",
-    **to_bind: Any,
-) -> TextLogger: ...
-
-
-@overload
-def get_logger(
-    name: Optional[str] = None,
-    /,
-    *,
-    with_metrics: Literal[True],
-    scope: str = "global",
-    **to_bind: Any,
-) -> GogglesLogger: ...
-
-
-@overload
-def get_logger(name: Optional[str] = None, /, **to_bind: Any) -> TextLogger: ...
-
-
 def get_logger(
     name: Optional[str] = None,
     /,
