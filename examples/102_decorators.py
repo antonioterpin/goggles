@@ -34,3 +34,5 @@ try:
     tc.fail_method(0)
 except ZeroDivisionError:
     pass
+finally:
+    gg.finish()

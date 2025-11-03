@@ -65,8 +65,22 @@ class ConsoleHandler:
                 pass  # fallback to absolute if outside root
         path_str = f"{path}:{event.lineno}"
 
+        # ANSI color codes for different log levels
+        level_name = logging.getLevelName(level)
+        color_codes = {
+            "DEBUG": "\033[36m",  # Cyan
+            "INFO": "\033[34m",  # Blue
+            "WARNING": "\033[33m",  # Yellow
+            "ERROR": "\033[31m",  # Red
+            "CRITICAL": "\033[91m",  # Bright Red
+        }
+        reset_code = "\033[0m"  # Reset color
+
+        color = color_codes.get(level_name, "")
+        colored_message = f"{color}{path_str} - {message}{reset_code}"
+
         # We manually construct prefix since stacklevel=3 may mislead
-        self._logger.log(level, f"{path_str} - {message}", stacklevel=2)
+        self._logger.log(level, colored_message, stacklevel=2)
 
     def open(self) -> None:
         """Initialize the handler (create logger and formatter)."""

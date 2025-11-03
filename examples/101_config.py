@@ -10,3 +10,5 @@ print(
     "We can also access the config like a normal dict:",
     f"{config['time_per_experiment']=}",
 )
+
+gg.finish()

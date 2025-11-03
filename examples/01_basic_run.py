@@ -11,6 +11,11 @@ gg.attach(
 logger.info("Hello, world!")
 logger.debug("you won't see this at INFO")
 
+# There are different colors
+logger.warning("This is a warning!")
+logger.error("This is an error!")
+logger.critical("This is critical!")
+
 # If we attach a handler with a lower logging level, debug messages will be shown.
 gg.attach(
     gg.ConsoleHandler(name="examples.basic.debug_console", level=gg.DEBUG),
@@ -18,3 +23,5 @@ gg.attach(
 )
 
 logger.debug("Now you will see this debug message!")
+
+gg.finish()

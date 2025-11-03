@@ -168,3 +168,5 @@ print("- examples/logs/artifacts/ (contains saved artifact files)")
 print("- examples/logs/vector_fields/ (contains saved vector field files)")
 print("- examples/logs/histograms/ (contains saved histogram files)")
 print("- Media files are referenced by relative paths in the JSONL log")
+
+gg.finish()
