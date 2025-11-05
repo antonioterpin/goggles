@@ -129,7 +129,10 @@ class LocalStorageHandler:
         try:
             with self._lock:
                 json.dump(
-                    event, self._fp, ensure_ascii=False, default=self._json_serializer
+                    event_dict,
+                    self._fp,
+                    ensure_ascii=False,
+                    default=self._json_serializer,
                 )
                 self._fp.write("\n")
                 self._fp.flush()
