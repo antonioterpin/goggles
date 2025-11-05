@@ -123,7 +123,15 @@ class WandBHandler:
                 raise ValueError(
                     "Metric event payload must be a mapping of name→value."
                 )
-            run.log(dict(payload), step=step)
+            payload = {k: v for k, v in payload.items() if v is not None}
+            if not payload:
+                self._logger.warning(
+                    "Skipping metric log with empty payload (scope=%s).", scope
+                )
+                return
+            for k, v in extra.items():
+                payload[k] = v
+            run.log(payload, step=step)
             return
 
         if kind in {"image", "video"}:

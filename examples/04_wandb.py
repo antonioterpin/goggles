@@ -7,7 +7,10 @@ import numpy as np
 
 # In this example, we set up a logger that outputs to Weights & Biases (W&B).
 logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)
-handler = WandBHandler(project="goggles_example")
+handler = WandBHandler(
+    project="goggles_example",
+    run_name="example_run",
+)
 gg.attach(handler, scopes=["global"])
 
 
@@ -57,6 +60,6 @@ for i in range(10):
     data = np.random.randn(1000) + i  # Shift mean over time
     logger.histogram(data, name="Dynamic Random Values Histogram", step=151 + i)
 
-time.sleep(10)
+time.sleep(2)
 # When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
