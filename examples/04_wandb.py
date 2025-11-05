@@ -1,6 +1,4 @@
 import time
-
-import wandb
 import goggles as gg
 from goggles import WandBHandler
 import numpy as np

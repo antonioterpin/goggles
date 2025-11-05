@@ -567,10 +567,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """
         filepath, lineno = _caller_id()
         extra = {**self._bound, **extra}
-        if static:
-            extra["static"] = True
-        else:
-            extra["static"] = False
+        extra["static"] = static
         if name is not None:
             extra["name"] = name
 
