@@ -551,6 +551,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
+        static: bool = False,
         **extra: Dict[str, Any],
     ) -> None:
         """Emit a histogram artifact.
@@ -560,11 +561,16 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             histogram (Vector): Histogram data.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
+            static (bool): If True, treat as static histogram.
             **extra (Dict[str, Any]): Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
         extra = {**self._bound, **extra}
+        if static:
+            extra["static"] = True
+        else:
+            extra["static"] = False
         if name is not None:
             extra["name"] = name
 

@@ -442,6 +442,7 @@ class DataLogger(Protocol):
         name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
+        static: bool = False,
         **extra: Dict[str, Any],
     ) -> None:
         """Emit a histogram artifact.
@@ -451,6 +452,7 @@ class DataLogger(Protocol):
             name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
+            static (bool): If True, treat as static histogram.
             **extra (Dict[str, Any]): Additional routing metadata.
 
         """

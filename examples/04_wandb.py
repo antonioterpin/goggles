@@ -1,4 +1,6 @@
 import time
+
+import wandb
 import goggles as gg
 from goggles import WandBHandler
 import numpy as np
@@ -41,9 +43,20 @@ for i in range(101, 151):
             np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8),
             name="Random image with custom step",
             step=i,  # Global step
-            custom_step=i // 10 - 10,  # Extra field to be used as x-axis
+            custom_step={
+                "custom_step": i // 10 - 10
+            },  # Extra field to be used as x-axis
         )
 
-time.sleep(2)
+# Log a static histogram (that does not change over time)
+data = np.random.randn(1000)
+logger.histogram(data, name="Random Values Histogram", static=True)
+
+# Or a dynamic histogram (that changes over time)
+for i in range(10):
+    data = np.random.randn(1000) + i  # Shift mean over time
+    logger.histogram(data, name="Dynamic Random Values Histogram", step=151 + i)
+
+time.sleep(10)
 # When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
