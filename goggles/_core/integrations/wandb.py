@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar, Dict, FrozenSet, Literal, Mapping, Optional
+from typing import Any, ClassVar, Dict, FrozenSet, Literal, Mapping, Optional, Sequence
+import numpy as np
 from typing_extensions import Self
 
 import wandb
@@ -30,7 +31,7 @@ class WandBHandler:
 
     name: str = "wandb"
     capabilities: ClassVar[FrozenSet[Kind]] = frozenset(
-        {"metric", "image", "video", "artifact"}
+        {"metric", "image", "video", "artifact", "histogram"}
     )
     GLOBAL_SCOPE: ClassVar[str] = "global"
 
@@ -122,13 +123,21 @@ class WandBHandler:
                 raise ValueError(
                     "Metric event payload must be a mapping of name→value."
                 )
-            run.log(dict(payload), step=step)
+            payload = {k: v for k, v in payload.items() if v is not None}
+            if not payload:
+                self._logger.warning(
+                    "Skipping metric log with empty payload (scope=%s).", scope
+                )
+                return
+            for k, v in extra.items():
+                payload[k] = v
+            run.log(payload, step=step)
             return
 
         if kind in {"image", "video"}:
             # Preferred key name comes from event.extra["name"], else "image"/"video"
             default_key = "image" if kind == "image" else "video"
-            key_name = extra.get("name", default_key)
+            key_name = extra.pop("name", default_key)
 
             # Allow payload to be either a mapping {name: data} or a single datum
             items = (
@@ -136,7 +145,6 @@ class WandBHandler:
                 if isinstance(payload, Mapping)
                 else [(key_name, payload)]
             )
-
             logs = {}
             for name, value in items:
                 if value is None:
@@ -160,6 +168,9 @@ class WandBHandler:
                         )
                         fmt = "mp4"
                     logs[name] = wandb.Video(value, fps=fps, format=fmt)  # type: ignore
+            # Add the extra fields to the logged object
+            for k, v in extra.items():
+                logs[k] = v
 
             if logs:
                 # Use a single API across kinds for consistency
@@ -178,9 +189,58 @@ class WandBHandler:
             if not isinstance(path, str):
                 self._logger.warning("Artifact missing valid 'path' field; skipping.")
                 return
-            artifact = wandb.Artifact(name=name, type=art_type)
+            artifact = wandb.Artifact(name=name, type=art_type, metadata=extra)
             artifact.add_file(path)
             run.log_artifact(artifact)
+            return
+
+        if kind == "histogram":
+            # Support a vector of samples or an (hist, bin_edges) tuple via `np_hist`.
+            # Name defaults to "histogram" unless provided in extra.
+            name = extra.pop("name", "histogram")
+            static = extra.pop("static", False)
+            # `num_bins` can be overridden through extra; default to 64 like W&B.
+            num_bins = int(
+                extra.pop("num_bins", extra.pop("bins", 64))
+            )  # TODO: check if bins is needed
+
+            logs: Dict[str, Any] = {}
+
+            try:
+                if not isinstance(payload, (Sequence, np.ndarray)):
+                    self._logger.warning(
+                        "Invalid histogram payload for '%s' (scope=%s): must be a sequence or tuple.",
+                        name,
+                        scope,
+                    )
+                    return
+
+                if static:
+                    payload_list = list(payload)
+                    data = [[v] for v in payload_list]
+                    table = wandb.Table(data=data, columns=["values"])
+                    # Treat payload as a 1D sequence of samples.
+                    logs[name] = wandb.plot.histogram(
+                        table, "values", title="Histogram of Random Values"
+                    )
+                else:
+                    logs[name] = wandb.Histogram(
+                        np_histogram=np.histogram(payload, bins=num_bins)
+                    )
+
+            except Exception as exc:  # noqa: BLE001
+                self._logger.warning(
+                    "Invalid histogram payload for '%s' (scope=%s): %s",
+                    name,
+                    scope,
+                    exc,
+                )
+                return
+            for k, v in extra.items():
+                logs[k] = v
+
+            if logs:
+                run.log(logs, step=step)
             return
 
         self._logger.warning("Unsupported event kind: %s", kind)

@@ -250,7 +250,7 @@ class CoreTextLogger(TextLogger):
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Log a CRITICAL message with optional per-call structured fields.
 
@@ -301,7 +301,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a batch of scalar metrics.
 
@@ -309,7 +309,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             metrics (Metrics): (Name,value) pairs.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]):
+            **extra (Any):
                 Additional routing metadata (e.g., split="train").
 
         """
@@ -338,7 +338,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a single scalar metric.
 
@@ -347,7 +347,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             value (float|int): Metric value.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]):
+            **extra (Any):
                 Additional routing metadata (e.g., split="train").
 
         """
@@ -377,7 +377,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         format: str = "png",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit an image artifact (encoded bytes).
 
@@ -421,7 +421,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         format: str = "gif",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
@@ -432,7 +432,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             format (str): Video format, e.g., "gif", "mp4".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            **extra (Any): Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -467,7 +467,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         format: str = "bin",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a generic artifact (encoded bytes).
 
@@ -477,7 +477,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             format (str): Artifact format, e.g., "txt", "bin".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            **extra (Any): Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -510,7 +510,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a vector field artifact.
 
@@ -519,7 +519,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            **extra (Any): Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -551,7 +551,8 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        static: bool = False,
+        **extra: Any,
     ) -> None:
         """Emit a histogram artifact.
 
@@ -560,11 +561,13 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             histogram (Vector): Histogram data.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            static (bool): If True, treat as static histogram.
+            **extra (Any): Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
         extra = {**self._bound, **extra}
+        extra["static"] = static
         if name is not None:
             extra["name"] = name
 
