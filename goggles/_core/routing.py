@@ -124,4 +124,4 @@ def get_bus() -> portal.Client:
     return __singleton_client
 
 
-__all__ = ["Event", "CoreEventBus", "get_bus", "Handler"]
+__all__ = ["Event", "get_bus"]

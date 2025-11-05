@@ -313,7 +313,7 @@ class DataLogger(Protocol):
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a batch of scalar metrics.
 
@@ -321,7 +321,7 @@ class DataLogger(Protocol):
             metrics (Metrics): (Name,value) pairs.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]):
+            **extra (Any):
                 Additional routing metadata (e.g., split="train").
 
         """
@@ -333,7 +333,7 @@ class DataLogger(Protocol):
         *,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a single scalar metric.
 
@@ -342,7 +342,7 @@ class DataLogger(Protocol):
             value (float|int): Metric value.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]):
+            **extra (Any):
                 Additional routing metadata (e.g., split="train").
 
         """
@@ -355,7 +355,7 @@ class DataLogger(Protocol):
         format: str = "png",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit an image artifact (encoded bytes).
 
@@ -365,7 +365,7 @@ class DataLogger(Protocol):
             format (str): Image format, e.g., "png", "jpeg".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra: Dict[str, Any]: Additional routing metadata.
+            **extra: Any: Additional routing metadata.
 
         """
 
@@ -378,7 +378,7 @@ class DataLogger(Protocol):
         format: str = "gif",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
@@ -389,7 +389,7 @@ class DataLogger(Protocol):
             format (str): Video format, e.g., "gif", "mp4".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            **extra (Any): Additional routing metadata.
 
         """
 
@@ -401,7 +401,7 @@ class DataLogger(Protocol):
         format: str = "bin",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a generic artifact (encoded bytes).
 
@@ -411,7 +411,7 @@ class DataLogger(Protocol):
             format (str): Artifact format, e.g., "txt", "bin".
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            **extra (Any): Additional routing metadata.
 
         """
 
@@ -422,7 +422,7 @@ class DataLogger(Protocol):
         name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a vector field artifact.
 
@@ -431,7 +431,7 @@ class DataLogger(Protocol):
             name (Optional[str]): Artifact name.
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            **extra (Any): Additional routing metadata.
 
         """
 
@@ -443,7 +443,7 @@ class DataLogger(Protocol):
         step: Optional[int] = None,
         time: Optional[float] = None,
         static: bool = False,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a histogram artifact.
 
@@ -453,7 +453,7 @@ class DataLogger(Protocol):
             step (Optional[int]): Optional global step index.
             time (Optional[float]): Optional global timestamp.
             static (bool): If True, treat as static histogram.
-            **extra (Dict[str, Any]): Additional routing metadata.
+            **extra (Any): Additional routing metadata.
 
         """
 
