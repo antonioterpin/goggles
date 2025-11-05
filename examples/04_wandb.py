@@ -1,3 +1,4 @@
+import time
 import goggles as gg
 from goggles import WandBHandler
 import numpy as np
@@ -28,5 +29,21 @@ logger.video(video, name="Random Video", fps=10)
 artifact = np.random.rand(100, 100, 3)
 logger.artifact(artifact, name="Random Artifact")
 
+# Add extra fields to any metric logged to be used as x-axis in W&B
+for i in range(101, 151):
+    logger.scalar(
+        "loss",
+        150 - i,
+        step=i,
+    )
+    if i % 10 == 0:
+        logger.image(
+            np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8),
+            name="Random image with custom step",
+            step=i,  # Global step
+            custom_step=i // 10 - 10,  # Extra field to be used as x-axis
+        )
+
+time.sleep(2)
 # When using asynchronous logging (like wandb), make sure to finish
 gg.finish()

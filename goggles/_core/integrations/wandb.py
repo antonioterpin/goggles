@@ -128,7 +128,7 @@ class WandBHandler:
         if kind in {"image", "video"}:
             # Preferred key name comes from event.extra["name"], else "image"/"video"
             default_key = "image" if kind == "image" else "video"
-            key_name = extra.get("name", default_key)
+            key_name = extra.pop("name", default_key)
 
             # Allow payload to be either a mapping {name: data} or a single datum
             items = (
@@ -136,7 +136,6 @@ class WandBHandler:
                 if isinstance(payload, Mapping)
                 else [(key_name, payload)]
             )
-
             logs = {}
             for name, value in items:
                 if value is None:
@@ -160,6 +159,9 @@ class WandBHandler:
                         )
                         fmt = "mp4"
                     logs[name] = wandb.Video(value, fps=fps, format=fmt)  # type: ignore
+            # Add the extra fields to the logged object
+            for k, v in extra.items():
+                logs[k] = v
 
             if logs:
                 # Use a single API across kinds for consistency
