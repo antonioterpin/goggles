@@ -5,7 +5,9 @@ from typing import Dict, Literal, Any, Optional
 from dataclasses import dataclass
 from typing import TypeAlias
 
-Kind = Literal["log", "metric", "image", "video", "artifact", "histogram"]
+Kind = Literal[
+    "log", "metric", "image", "video", "artifact", "histogram", "vector", "vector_field"
+]
 
 Metrics = Dict[str, float | int]
 Image: TypeAlias = np.ndarray

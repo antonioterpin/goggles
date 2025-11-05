@@ -105,22 +105,22 @@ class LocalStorageHandler:
             event (Event): The event to serialize.
 
         """
-        event = event.to_dict()
+        event_dict = event.to_dict()
 
         # Handle media events by saving files and updating payload
-        kind = event["kind"]
+        kind = event_dict["kind"]
         if kind == "image":
-            event = self._save_image_to_file(event)
+            event_dict = self._save_image_to_file(event_dict)
         elif kind == "video":
-            event = self._save_video_to_file(event)
+            event_dict = self._save_video_to_file(event_dict)
         elif kind == "artifact":
-            event = self._save_artifact_to_file(event)
+            event_dict = self._save_artifact_to_file(event_dict)
         elif kind == "vector_field":
-            event = self._save_vector_field_to_file(event)
+            event_dict = self._save_vector_field_to_file(event_dict)
         elif kind == "histogram":
-            event = self._save_histogram_to_file(event)
+            event_dict = self._save_histogram_to_file(event_dict)
 
-        if event is None:
+        if event_dict is None:
             self._logger.warning(
                 "Skipping event logging due to unsupported media format."
             )

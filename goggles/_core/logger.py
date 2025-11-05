@@ -377,7 +377,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         format: str = "png",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit an image artifact (encoded bytes).
 
@@ -421,7 +421,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         format: str = "gif",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
@@ -467,7 +467,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         format: str = "bin",
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a generic artifact (encoded bytes).
 
@@ -510,7 +510,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         name: Optional[str] = None,
         step: Optional[int] = None,
         time: Optional[float] = None,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a vector field artifact.
 
@@ -552,7 +552,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         step: Optional[int] = None,
         time: Optional[float] = None,
         static: bool = False,
-        **extra: Dict[str, Any],
+        **extra: Any,
     ) -> None:
         """Emit a histogram artifact.
 
