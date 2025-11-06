@@ -1,8 +1,9 @@
 """Creation and update interfaces for device-resident history buffers."""
 
+from __future__ import annotations
+
 import jax
 import jax.numpy as jnp
-from typing import Dict, Optional
 from .spec import HistorySpec
 from .types import PRNGKey, Array, History
 
@@ -12,7 +13,7 @@ def _apply_reset(
     new_row: Array,
     reset: Array,
     init_mode: str,
-    key: Optional[PRNGKey] = None,
+    key: PRNGKey | None = None,
 ) -> Array:
     """Shift and optionally reset a single history row.
 
@@ -24,7 +25,7 @@ def _apply_reset(
         new_row: Array shaped (1, *shape), appended at the end along time.
         reset: Boolean scalar (0-dim) indicating whether to reset this row.
         init_mode: One of {"zeros", "ones", "randn", "none"}.
-        key: Optional PRNGKey (shape (2,)) used when `init_mode == "randn"`.
+        key: PRNGKey | None (shape (2,)) used when `init_mode == "randn"`.
 
     Returns:
         Array with the same shape as `hist_row`, updated for this step.
@@ -51,14 +52,14 @@ def _apply_reset(
 
 
 def create_history(
-    spec: HistorySpec, batch_size: int, rng: Optional[PRNGKey] = None
+    spec: HistorySpec, batch_size: int, rng: PRNGKey | None = None
 ) -> History:
     """Allocate device-resident history tensors following (B, T, *shape).
 
     Args:
         spec (HistorySpec): Describing each field.
         batch_size (int): Batch size (B).
-        rng (Optional[PRNGKey]): Optional PRNG key for randomized initialization
+        rng (PRNGKey | None): Optional PRNG key for randomized initialization
             of the buffers (e.g., for initial values or noise).
 
     Returns:
@@ -98,10 +99,10 @@ def create_history(
 
 def update_history(
     history: History,
-    new_data: Dict[str, Array],
-    reset_mask: Optional[Array] = None,
-    spec: Optional[HistorySpec] = None,
-    rng: Optional[jax.Array] = None,
+    new_data: dict[str, Array],
+    reset_mask: Array | None = None,
+    spec: HistorySpec | None = None,
+    rng: jax.Array | None = None,
 ) -> History:
     """Shift and append new items along the temporal axis.
 
@@ -112,10 +113,10 @@ def update_history(
 
     Args:
         history (History): Current history dict (B, T, *shape).
-        new_data (Dict[str, Array]): New entries per field, shaped (B, 1, *shape).
-        reset_mask (Optional[Array]): Optional boolean mask for resets (B,).
-        spec (Optional[HistorySpec]): Optional spec describing reset initialization.
-        rng (Optional[jax.Array]): Optional PRNG key for randomized resets.
+        new_data (dict[str, Array]): New entries per field, shaped (B, 1, *shape).
+        reset_mask (Array | None): Optional boolean mask for resets (B,).
+        spec (HistorySpec | None): Optional spec describing reset initialization.
+        rng (jax.Array | None): Optional PRNG key for randomized resets.
 
     Returns:
         History: Updated history dict.

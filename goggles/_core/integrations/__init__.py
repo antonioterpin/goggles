@@ -10,8 +10,6 @@ Example:
 
 """
 
-# TODO: actually write the docs here
-
 from .console import ConsoleHandler
 from .storage import LocalStorageHandler
 
@@ -22,5 +20,10 @@ __all__ = [
 
 try:
     from .wandb import WandBHandler
+
+    __all__ = [
+        *__all__,
+        "WandBHandler",
+    ]
 except Exception:
-    __all__.append("WandBHandler")
+    pass

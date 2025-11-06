@@ -1,7 +1,6 @@
 """Simple util for graceful shutdowns in Python applications."""
 
 import signal
-from typing import Optional
 
 
 class GracefulShutdown:
@@ -21,7 +20,7 @@ class GracefulShutdown:
 
     def __init__(
         self,
-        exit_message: Optional[str] = None,
+        exit_message: str | None = None,
     ):
         """Initialize the GracefulShutdown context manager.
 

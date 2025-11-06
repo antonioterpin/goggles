@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar, Dict, FrozenSet, Literal, Mapping, Optional, Sequence
+from typing import Any, ClassVar, Literal
+from collections.abc import Mapping, Sequence
 import numpy as np
 from typing_extensions import Self
 
@@ -30,29 +31,29 @@ class WandBHandler:
     """
 
     name: str = "wandb"
-    capabilities: ClassVar[FrozenSet[Kind]] = frozenset(
+    capabilities: ClassVar[frozenset[Kind]] = frozenset(
         {"metric", "image", "video", "artifact", "histogram"}
     )
     GLOBAL_SCOPE: ClassVar[str] = "global"
 
     def __init__(
         self,
-        project: Optional[str] = None,
-        entity: Optional[str] = None,
-        run_name: Optional[str] = None,
-        config: Optional[Mapping[str, Any]] = None,
-        group: Optional[str] = None,
+        project: str | None = None,
+        entity: str | None = None,
+        run_name: str | None = None,
+        config: Mapping[str, Any] | None = None,
+        group: str | None = None,
         reinit: Reinit = "create_new",
     ) -> None:
         """Initialize the W&B handler.
 
         Args:
-            project (Optional[str]): W&B project name.
-            entity (Optional[str]): W&B entity (user or team) name.
-            run_name (Optional[str]): Base name for W&B runs.
-            config (Optional[Mapping[str, Any]]): Configuration dictionary
+            project (str | None): W&B project name.
+            entity (str | None): W&B entity (user or team) name.
+            run_name (str | None): Base name for W&B runs.
+            config (Mapping[str, Any] | None): Configuration dictionary
                 to log with the run(s).
-            group (Optional[str]): W&B group name for runs.
+            group (str | None): W&B group name for runs.
             reinit (Reinit): W&B reinitialization strategy when opening runs.
                 One of {"finish_previous", "return_previous", "create_new", "default"}.
 
@@ -70,11 +71,11 @@ class WandBHandler:
         self._entity = entity
         self._group = group
         self._base_run_name = run_name
-        self._config: Dict[str, Any] = dict(config) if config is not None else {}
+        self._config: dict[str, Any] = dict(config) if config is not None else {}
         self._reinit = reinit or "finish_previous"
-        self._runs: Dict[str, Run] = {}
-        self._wandb_run: Optional[Run] = None
-        self._current_scope: Optional[str] = None
+        self._runs: dict[str, Run] = {}
+        self._wandb_run: Run | None = None
+        self._current_scope: str | None = None
 
     def can_handle(self, kind: str) -> bool:
         """Return True if the handler supports this event kind.
@@ -204,7 +205,7 @@ class WandBHandler:
                 extra.pop("num_bins", extra.pop("bins", 64))
             )  # TODO: check if bins is needed
 
-            logs: Dict[str, Any] = {}
+            logs: dict[str, Any] = {}
 
             try:
                 if not isinstance(payload, (Sequence, np.ndarray)):
@@ -257,7 +258,7 @@ class WandBHandler:
         self._wandb_run = None
         self._current_scope = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize the handler for attachment."""
         return {
             "cls": self.__class__.__name__,
@@ -272,7 +273,7 @@ class WandBHandler:
         }
 
     @classmethod
-    def from_dict(cls, serialized: Dict) -> Self:
+    def from_dict(cls, serialized: dict) -> Self:
         """De-serialize the handler from its dictionary representation."""
         return cls(
             project=serialized.get("project"),

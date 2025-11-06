@@ -3,7 +3,7 @@
 import json
 import threading
 from pathlib import Path
-from typing import Any, FrozenSet, Optional
+from typing import Any
 from uuid import uuid4
 from typing_extensions import Self
 import logging
@@ -40,7 +40,7 @@ class LocalStorageHandler:
     """
 
     name: str = "jsonl"
-    capabilities: FrozenSet[str] = frozenset(
+    capabilities: frozenset[str] = frozenset(
         {"log", "metric", "image", "video", "artifact", "vector_field", "histogram"}
     )
 
@@ -275,14 +275,14 @@ class LocalStorageHandler:
             event["payload"] = str(mp4_path.relative_to(self._base_path))
         return event
 
-    def _save_artifact_to_file(self, event: dict) -> Optional[dict]:
+    def _save_artifact_to_file(self, event: dict) -> dict | None:
         """Save artifact data to file and update event with file path.
 
         Args:
             event (dict): Event dictionary.
 
         Returns:
-            Optional[dict]: Updated event with file path instead of raw data.
+            dict | None: Updated event with file path instead of raw data.
                 If the artifact format is unknown, returns None.
 
         """
@@ -320,14 +320,14 @@ class LocalStorageHandler:
         event["payload"] = str(artifact_path.relative_to(self._base_path))
         return event
 
-    def _save_vector_field_to_file(self, event: dict) -> Optional[dict]:
+    def _save_vector_field_to_file(self, event: dict) -> dict | None:
         """Save vector field data to file and update event with file path.
 
         Args:
             event (dict): Event dictionary.
 
         Returns:
-            dict: Updated event with file path instead of raw data.
+            dict | None: Updated event with file path instead of raw data.
 
         """
         vector_field_name = str(uuid4())
@@ -364,7 +364,7 @@ class LocalStorageHandler:
         event["payload"] = str(vector_field_path.relative_to(self._base_path))
         return event
 
-    def _save_histogram_to_file(self, event: dict) -> Optional[dict]:
+    def _save_histogram_to_file(self, event: dict) -> dict | None:
         """Save histogram data to file and update event with file path.
 
         Args:

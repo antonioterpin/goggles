@@ -1,7 +1,7 @@
 """Types used in Goggles."""
 
 import numpy as np
-from typing import Dict, Literal, Any, Optional
+from typing import Literal, Any
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -9,7 +9,7 @@ Kind = Literal[
     "log", "metric", "image", "video", "artifact", "histogram", "vector", "vector_field"
 ]
 
-Metrics = Dict[str, float | int]
+Metrics = dict[str, float | int]
 Image: TypeAlias = np.ndarray
 Video: TypeAlias = np.ndarray
 Vector: TypeAlias = np.ndarray
@@ -26,10 +26,10 @@ class Event:
         payload (Any): Event payload.
         filepath (str): File path of the caller emitting the event.
         lineno (int): Line number of the caller emitting the event.
-        level (Optional[int]): Optional log level for "log" events.
-        step (Optional[int]): Optional global step index.
-        time (Optional[float]): Optional global timestamp.
-        extra (Optional[dict[str, Any]]): Optional extra metadata.
+        level (int | None): Optional log level for "log" events.
+        step (int | None): Optional global step index.
+        time (float | None): Optional global timestamp.
+        extra (dict[str, Any] | None): Optional extra metadata.
 
     """
 
@@ -38,12 +38,12 @@ class Event:
     payload: Any
     filepath: str
     lineno: int
-    level: Optional[int] = None
-    step: Optional[int] = None
-    time: Optional[float] = None
-    extra: Optional[Dict[str, Any]] = None
+    level: int | None = None
+    step: int | None = None
+    time: float | None = None
+    extra: dict[str, Any] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert Event to dictionary."""
         result = {
             "kind": self.kind,
@@ -66,7 +66,7 @@ class Event:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Event":
+    def from_dict(cls, data: dict[str, Any]) -> "Event":
         """Create Event from dictionary."""
         return cls(
             kind=data["kind"],

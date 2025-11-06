@@ -10,7 +10,7 @@ This script shows how to:
 
 import time
 import os
-from typing import Callable, Dict
+from collections.abc import Callable
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Use GPU 0 if available
 import jax
@@ -19,7 +19,6 @@ import jax.numpy as jnp
 from goggles.history import (
     create_history,
     update_history,
-    to_device,
     to_host,
 )
 from goggles.history.spec import HistorySpec
@@ -55,7 +54,7 @@ def main() -> None:  # noqa: D103
     # Define update function
     def simulate_updates(
         update_fn: Callable, n_steps: int = 20
-    ) -> Dict[str, History | float]:
+    ) -> dict[str, History | float]:
         hist = history
         t0 = time.perf_counter()
         for t in range(n_steps):

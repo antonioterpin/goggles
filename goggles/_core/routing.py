@@ -11,7 +11,6 @@ Example:
 
 from __future__ import annotations
 
-from typing import Optional
 import portal
 import socket
 import netifaces
@@ -19,8 +18,8 @@ import netifaces
 from goggles import EventBus, Event, GOGGLES_HOST, GOGGLES_PORT
 
 # Singleton factory ---------------------------------------------------------
-__singleton_client: Optional[portal.Client] = None
-__singleton_server: Optional[portal.Server] = None
+__singleton_client: portal.Client | None = None
+__singleton_server: portal.Server | None = None
 
 
 def __i_am_host() -> bool:

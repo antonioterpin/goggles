@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from goggles._core.logger import CoreTextLogger, CoreGogglesLogger
-from goggles import Event
 
 
 @pytest.fixture

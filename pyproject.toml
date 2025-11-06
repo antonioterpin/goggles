@@ -57,7 +57,8 @@ dev = [
     "hypothesis>=6.0.0",
     "snowballstemmer==2.2.0",
     "pre_commit==4.0.1",
-    "tomli"
+    "tomli",
+    "pyupgrade>=3.19.0",
 ]
 # Optional JAX-based GPU history subsystem
 jax = [
@@ -139,3 +140,41 @@ filterwarnings = [
         "ignore::UserWarning",
         "ignore::DeprecationWarning",
 ]
+
+# Ruff configuration for linting and modern typing enforcement
+[tool.ruff]
+line-length = 80
+target-version = "py310"
+
+[tool.ruff.lint]
+# Enable comprehensive rule sets
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes (including unused imports F401)
+    "UP",     # pyupgrade (modern typing patterns)
+    "I",      # isort
+    "N",      # pep8-naming
+    "D",      # pydocstyle
+    "PL",     # pylint
+    "RUF",    # ruff-specific rules
+]
+
+ignore = [
+    "D100",   # Missing docstring in public module
+    "D104",   # Missing docstring in public package
+    "D105",   # Missing docstring in magic method
+    "PLR0913", # Too many arguments to function call
+    "PLR2004", # Magic value used in comparison
+]
+
+# Specific rules for modern typing enforcement
+[tool.ruff.lint.pyupgrade]
+# Keep this empty to use all pyupgrade rules
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "PLR2004"]  # Ignore docstring rules in tests
+"examples/*" = ["D"]          # Ignore docstring rules in examples
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

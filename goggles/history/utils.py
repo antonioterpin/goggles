@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
 
 import jax
 import jaxlib.xla_client as xc
@@ -16,7 +16,7 @@ def slice_history(
     history: History,
     start: int,
     length: int,
-    fields: Optional[Union[Sequence[str], str]] = None,
+    fields: Sequence[str] | None = None,
 ) -> History:
     """Return a temporal slice [start : start+length] for selected fields.
 
@@ -24,7 +24,7 @@ def slice_history(
         history (History): Mapping field -> array of shape (B, T, ...).
         start (int): Starting timestep (0-based).
         length (int): Number of timesteps to include (> 0).
-        fields (Optional[Sequence[str] | str]): One or more field names to slice.
+        fields (Sequence[str] | None): One or more field names to slice.
             If a single string is provided, only that field is sliced.
             If a list or tuple is provided, all listed fields are sliced.
             If None, all fields in `history` are sliced.
@@ -111,8 +111,8 @@ def peek_last(history: History, k: int = 1) -> History:
 
 def to_device(
     history: History,
-    devices: Optional[Sequence[Device]] = None,  # type: ignore[type-arg]
-    keys: Optional[Tuple[str, ...]] = None,
+    devices: Sequence[Device] | None = None,  # type: ignore[type-arg]
+    keys: tuple[str, ...] | None = None,
 ) -> History:
     """Move selected history arrays to one or more JAX devices.
 
@@ -124,8 +124,8 @@ def to_device(
 
     Args:
         history (History): Mapping field to array (or PyTree of arrays).
-        devices (Optional[Sequence[Device]]): Target devices. Defaults to first device.
-        keys (Optional[tuple[str, ...]]): Subset of fields to move. If None, move all.
+        devices (Sequence[Device] | None): Target devices. Defaults to first device.
+        keys (tuple[str, ...] | None): Subset of fields to move. If None, move all.
 
     Returns:
         History: Copy of the history with selected arrays placed on the target device(s).
@@ -156,7 +156,7 @@ def to_device(
 
 def to_host(
     history: History,
-    keys: Optional[Tuple[str, ...]] = None,
+    keys: tuple[str, ...] | None = None,
 ) -> History:
     """Copy selected history arrays from device to host memory.
 
@@ -165,7 +165,7 @@ def to_host(
 
     Args:
         history (History): Mapping field to array (or PyTree of arrays).
-        keys (Optional[tuple[str, ...]]): Subset of fields to copy. If None, all.
+        keys (tuple[str, ...] | None): Subset of fields to copy. If None, all.
 
     Returns:
         History: Copy of the history with arrays stored in host (NumPy) memory.

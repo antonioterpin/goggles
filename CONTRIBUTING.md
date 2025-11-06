@@ -47,6 +47,14 @@ The `Coding style validation` action will fail if the pre-commit checks do not p
 ```sh
 pre-commit install --hook-type pre-commit
 ```
+
+Our pre-commit configuration includes several automated checks:
+
+- **Black**: Code formatting
+- **Ruff**: Linting, docstring checks, modern typing enforcement, and unused import detection
+- **PyUpgrade**: Automatic modernization of Python syntax (Python 3.10+)
+- **Standard hooks**: YAML validation, trailing whitespace, end-of-file fixes
+
 To run the pre-commit checks on specific files:
 ```bash
 pre-commit run --files <files>
@@ -151,6 +159,59 @@ Our coding style is inspired to the [Linux kernel coding style](https://www.kern
    - Prefer vectorized JAX operations. Avoid Python loops when possible.
    - Use `jax.jit` and `jax.vmap` judiciously. Keep functions testable both with and without jit. When writing tests, effectively check that functions that should be jitted are jitted effectively.
    - Add tests to measure the speed of functions. This is particularly important for jitted functions. For this, use [timeit](https://docs.python.org/3/library/timeit.html).
+
+### Type hints and modern typing practices
+We use modern Python typing patterns following PEP 585, PEP 604, and current best practices:
+
+#### Modern type imports (Python 3.10+):
+```python
+# ✅ PREFERRED - Modern typing
+from typing import Any, ClassVar, Literal  # No builtin replacement
+from typing_extensions import TypeAlias
+from collections.abc import Mapping, Sequence  # PEP 585 generics
+
+# ✅ PREFERRED - Builtin generics (Python 3.9+)
+def process_data(items: list[str]) -> dict[str, int]:
+    """Use builtin list, dict, tuple, set, frozenset."""
+    result: dict[str, int] = {}
+    return result
+
+# ✅ PREFERRED - Union syntax (Python 3.10+)
+def handle_value(x: int | float | None) -> str | None:
+    """Use | instead of Union and Optional."""
+    if x is None:
+        return None
+    return str(x)
+
+# ❌ AVOID - Legacy typing (pre-PEP 585)
+from typing import List, Dict, Tuple, Set, FrozenSet, Union, Optional
+def old_style(items: List[str]) -> Optional[Dict[str, int]]:
+    pass
+```
+
+#### Type alias definitions:
+```python
+# ✅ PREFERRED - Modern type aliases
+from typing_extensions import TypeAlias
+
+UserId: TypeAlias = int
+UserData: TypeAlias = dict[str, Any]
+Coordinates: TypeAlias = tuple[float, float]
+
+# For JAX arrays (forward references to avoid import issues)
+Array: TypeAlias = "jax.Array"
+PRNGKey: TypeAlias = "jax.Array"
+```
+
+#### Specific guidelines:
+- **Any**: Still use `typing.Any` (no builtin replacement)
+- **ClassVar**: Still use `typing.ClassVar` (no builtin replacement)
+- **Literal**: Still use `typing.Literal` (no builtin replacement)
+- **FrozenSet**: Use `frozenset[T]` instead of `typing.FrozenSet[T]`
+- **Mapping/Sequence**: Use `collections.abc.Mapping[K, V]` and `collections.abc.Sequence[T]`
+- **Optional[T]**: Use `T | None` instead of `typing.Optional[T]`
+- **Union**: Use `T | U` instead of `typing.Union[T, U]`
+- **List/Dict/Tuple**: Use builtin `list[T]`, `dict[K, V]`, `tuple[T, ...]`
 
 ### Docstrings and documentation
 We adopt the [Google style docstrings](https://google.github.io/styleguide/pyguide.html#383-functions-and-methods), but always keep type information both in the signature and in the docstring sections (`Args`, `Returns`, `Raises`) so that editors get accurate autocomplete while readers can rely on the rendered documentation.

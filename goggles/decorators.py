@@ -8,7 +8,7 @@ def timeit(severity=logging.INFO, name=None):
 
     Args:
         severity (Severity): Log severity level for timing message.
-        name (str): Optional name for the timing entry.
+        name (str | None): Optional name for the timing entry.
             If None, uses filename:function_name.
 
     Example:

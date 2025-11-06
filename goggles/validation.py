@@ -1,7 +1,5 @@
 """Utility functions for validation."""
 
-from typing import Union
-
 
 def round_up_to_multiple(number: float, multiple: int) -> int:
     """Round up a number to the nearest multiple.
@@ -19,14 +17,14 @@ def round_up_to_multiple(number: float, multiple: int) -> int:
     return (number + multiple - 1) // multiple * multiple
 
 
-def is_int(val: Union[int, float]) -> bool:
+def is_int(val: int | float) -> bool:
     """Check if a value is an integer.
 
     Args:
-        val (Union[int, float]): The value to check.
+        val (int | float): The value to check.
 
     Returns:
-        bool: True if the value is an integer, False otherwise.ge
+        bool: True if the value is an integer, False otherwise.
 
     """
     if isinstance(val, int):

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Mapping, Tuple
+from typing import Any, Literal
+from collections.abc import Mapping
 
 import jax.numpy as jnp
 
@@ -16,7 +17,7 @@ class HistoryFieldSpec:
 
     Attributes:
         length (int): Number of stored timesteps for this field.
-        shape (Tuple[int, ...]): Per-timestep payload shape (no batch/time dims).
+        shape (tuple[int, ...]): Per-timestep payload shape (no batch/time dims).
         dtype (jnp.dtype): Array dtype.
         init (InitMode): Initialization policy ("zeros" | "ones" | "randn" | "none").
 
@@ -40,7 +41,7 @@ class HistorySpec:
     fields: Mapping[str, HistoryFieldSpec]
 
     @classmethod
-    def from_config(cls, config: Mapping[str, Any]) -> "HistorySpec":
+    def from_config(cls, config: Mapping[str, Any]) -> HistorySpec:
         """Construct a HistorySpec from a nested config dictionary.
 
         Args:
@@ -66,8 +67,8 @@ class HistorySpec:
         if not isinstance(config, Mapping):
             raise TypeError("config must be a Mapping[str, Any].")
 
-        allowed_inits: Tuple[str, ...] = ("zeros", "ones", "randn", "none")
-        out: Dict[str, HistoryFieldSpec] = {}
+        allowed_inits: tuple[str, ...] = ("zeros", "ones", "randn", "none")
+        out: dict[str, HistoryFieldSpec] = {}
 
         for name, spec in config.items():
             if isinstance(spec, HistoryFieldSpec):

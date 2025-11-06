@@ -35,7 +35,7 @@ def load_configuration(file_path: str) -> PrettyConfig:
     """
     yaml = YAML(typ="safe", pure=True)
 
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         data = yaml.load(f) or {}
         # Wrap the loaded dict in our PrettyConfig
         return PrettyConfig(data)

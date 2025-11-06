@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from goggles.history.utils import peek_last, slice_history, to_device, to_host
-from goggles.history.types import History
 
 
 def _make_history(B, T, shapes):

@@ -1,9 +1,9 @@
 """Shared type aliases for history package."""
 
 from __future__ import annotations
-from typing import Dict
-import jax.numpy as jnp
+from typing import TypeAlias
+import jax
 
-PRNGKey = jnp.ndarray
-Array = jnp.ndarray
-History = Dict[str, Array]
+PRNGKey: TypeAlias = "jax.Array"
+Array: TypeAlias = "jax.Array"
+History: TypeAlias = dict[str, Array]

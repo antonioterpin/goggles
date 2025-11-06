@@ -33,19 +33,11 @@ import portal
 from collections import defaultdict
 from typing import (
     Any,
-    Callable,
-    Callable,
     ClassVar,
-    FrozenSet,
-    List,
-    Literal,
-    Optional,
     Protocol,
-    Dict,
-    Set,
-    overload,
     runtime_checkable,
 )
+from collections.abc import Callable
 from typing_extensions import Self
 import logging
 import os
@@ -60,16 +52,16 @@ from .config import load_configuration, save_configuration
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
 
 # Handler registry for custom handlers
-_HANDLER_REGISTRY: Dict[str, type] = {}
+_HANDLER_REGISTRY: dict[str, type] = {}
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "1").lower() in ("1", "true", "yes")
 
 # Cache the implementation after first use to avoid repeated imports
-__impl_get_bus: Optional[Callable[[], EventBus]] = None
+__impl_get_bus: Callable[[], EventBus] | None = None
 
 
 def _make_text_logger(
-    name: Optional[str],
+    name: str | None,
     scope: str,
     to_bind: dict[str, Any],
 ) -> TextLogger:
@@ -79,7 +71,7 @@ def _make_text_logger(
 
 
 def _make_goggles_logger(
-    name: Optional[str],
+    name: str | None,
     scope: str,
     to_bind: dict[str, Any],
 ) -> GogglesLogger:
@@ -94,7 +86,7 @@ def _make_goggles_logger(
 
 
 def get_logger(
-    name: Optional[str] = None,
+    name: str | None = None,
     /,
     *,
     with_metrics: bool = False,
@@ -109,13 +101,13 @@ def get_logger(
     into each emitted log record.
 
     Args:
-        name (Optional[str]): Logger name. If None, the root logger is used.
+        name (str | None): Logger name. If None, the root logger is used.
         with_metrics (bool): If True, return a logger exposing `.metrics`.
         scope (str): The logging scope, e.g., "global" or "run".
         **to_bind (Any): Fields persisted and injected into every record.
 
     Returns:
-        Union[TextLogger, GogglesLogger]: A text-only `TextLogger` by default,
+        TextLogger | GogglesLogger: A text-only `TextLogger` by default,
         or a `GogglesLogger` when `with_metrics=True`.
 
     Examples:
@@ -173,8 +165,8 @@ class TextLogger(Protocol):
         msg: str,
         /,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Log message at the given severity with optional structured extras.
@@ -182,8 +174,8 @@ class TextLogger(Protocol):
         Args:
             severity (int): Numeric log level (e.g., logging.INFO).
             msg (str): The log message.
-            step (Optional[int]): The step number.
-            time (Optional[float]): The timestamp.
+            step (int | None): The step number.
+            time (float | None): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
@@ -207,16 +199,16 @@ class TextLogger(Protocol):
         msg: str,
         /,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Log a DEBUG message with optional structured extras.
 
         Args:
             msg (str): The log message.
-            step (Optional[int]): The step number.
-            time (Optional[float]): The timestamp.
+            step (int | None): The step number.
+            time (float | None): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
@@ -227,16 +219,16 @@ class TextLogger(Protocol):
         msg: str,
         /,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Log an INFO message with optional structured extras.
 
         Args:
             msg (str): The log message.
-            step (Optional[int]): The step number.
-            time (Optional[float]): The timestamp.
+            step (int | None): The step number.
+            time (float | None): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
@@ -247,16 +239,16 @@ class TextLogger(Protocol):
         msg: str,
         /,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Log a WARNING message with optional structured extras.
 
         Args:
             msg (str): The log message.
-            step (Optional[int]): The step number.
-            time (Optional[float]): The timestamp.
+            step (int | None): The step number.
+            time (float | None): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
@@ -267,16 +259,16 @@ class TextLogger(Protocol):
         msg: str,
         /,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Log an ERROR message with optional structured extras.
 
         Args:
             msg (str): The log message.
-            step (Optional[int]): The step number.
-            time (Optional[float]): The timestamp.
+            step (int | None): The step number.
+            time (float | None): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
@@ -287,16 +279,16 @@ class TextLogger(Protocol):
         msg: str,
         /,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Log a CRITICAL message with current exception info attached.
 
         Args:
             msg (str): The log message.
-            step (Optional[int]): The step number.
-            time (Optional[float]): The timestamp.
+            step (int | None): The step number.
+            time (float | None): The timestamp.
             **extra (Any):
                 Additional structured key-value pairs for this record.
 
@@ -311,16 +303,16 @@ class DataLogger(Protocol):
         self,
         metrics: Metrics,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit a batch of scalar metrics.
 
         Args:
             metrics (Metrics): (Name,value) pairs.
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
+            step (int | None): Optional global step index.
+            time (float | None): Optional global timestamp.
             **extra (Any):
                 Additional routing metadata (e.g., split="train").
 
@@ -331,8 +323,8 @@ class DataLogger(Protocol):
         name: str,
         value: float | int,
         *,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit a single scalar metric.
@@ -340,8 +332,8 @@ class DataLogger(Protocol):
         Args:
             name (str): Metric name.
             value (float|int): Metric value.
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
+            step (int | None): Optional global step index.
+            time (float | None): Optional global timestamp.
             **extra (Any):
                 Additional routing metadata (e.g., split="train").
 
@@ -351,20 +343,20 @@ class DataLogger(Protocol):
         self,
         image: Image,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         format: str = "png",
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit an image artifact (encoded bytes).
 
         Args:
-            name (str): Artifact name.
+            name (str | None): Optional artifact name.
             image (Image): Image.
             format (str): Image format, e.g., "png", "jpeg".
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
+            step (int | None): Optional global step index.
+            time (float | None): Optional global timestamp.
             **extra: Any: Additional routing metadata.
 
         """
@@ -373,22 +365,22 @@ class DataLogger(Protocol):
         self,
         video: Video,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         fps: int = 30,
         format: str = "gif",
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
         Args:
             video (Video): Video.
-            name (Optional[str]): Artifact name.
+            name (str | None): Optional artifact name.
             fps (int): Frames per second.
             format (str): Video format, e.g., "gif", "mp4".
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
+            step (int | None): Optional global step index.
+            time (float | None): Optional global timestamp.
             **extra (Any): Additional routing metadata.
 
         """
@@ -397,20 +389,20 @@ class DataLogger(Protocol):
         self,
         data: Any,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         format: str = "bin",
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit a generic artifact (encoded bytes).
 
         Args:
             data (bytes): Artifact data.
-            name (Optional[str]): Artifact name.
+            name (str | None): Optional artifact name.
             format (str): Artifact format, e.g., "txt", "bin".
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
+            step (int | None): Optional global step index.
+            time (float | None): Optional global timestamp.
             **extra (Any): Additional routing metadata.
 
         """
@@ -419,18 +411,18 @@ class DataLogger(Protocol):
         self,
         vector_field: VectorField,
         *,
-        name: Optional[str] = None,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        name: str | None = None,
+        step: int | None = None,
+        time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit a vector field artifact.
 
         Args:
             vector_field (VectorField): Vector field data.
-            name (Optional[str]): Artifact name.
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
+            name (str | None): Optional artifact name.
+            step (int | None): Optional global step index.
+            time (float | None): Optional global timestamp.
             **extra (Any): Additional routing metadata.
 
         """
@@ -439,9 +431,9 @@ class DataLogger(Protocol):
         self,
         histogram: Vector,
         *,
-        name: Optional[str] = None,
-        step: Optional[int] = None,
-        time: Optional[float] = None,
+        name: str | None = None,
+        step: int | None = None,
+        time: float | None = None,
         static: bool = False,
         **extra: Any,
     ) -> None:
@@ -449,9 +441,9 @@ class DataLogger(Protocol):
 
         Args:
             histogram (Vector): Histogram data.
-            name (Optional[str]): Artifact name.
-            step (Optional[int]): Optional global step index.
-            time (Optional[float]): Optional global timestamp.
+            name (str | None): Optional artifact name.
+            step (int | None): Optional global step index.
+            time (float | None): Optional global timestamp.
             static (bool): If True, treat as static histogram.
             **extra (Any): Additional routing metadata.
 
@@ -485,13 +477,13 @@ class Handler(Protocol):
 
     Attributes:
         name (str): Stable handler identifier for diagnostics.
-        capabilities (FrozenSet[Kind]):
+        capabilities (frozenset[Kind]):
             Supported kinds, e.g. {'logs','metrics','artifacts', ...}.
 
     """
 
     name: str
-    capabilities: ClassVar[FrozenSet[Kind]]
+    capabilities: ClassVar[frozenset[Kind]]
 
     def can_handle(self, kind: Kind) -> bool:
         """Return whether this handler can process events of the given kind.
@@ -522,11 +514,11 @@ class Handler(Protocol):
         """Flush and release resources (called when leaving a scope).
 
         Args:
-            run (Optional[RunContext]): The active run context if any.
+            run (RunContext | None): The active run context if any.
 
         """
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize the handler.
 
         This method is needed during attachment. Will be called before binding.
@@ -541,11 +533,11 @@ class Handler(Protocol):
         ...
 
     @classmethod
-    def from_dict(cls, serialized: Dict) -> Self:
+    def from_dict(cls, serialized: dict) -> Self:
         """De-serialize the handler.
 
         Args:
-            serialized (Dict): Serialized handler with handler.to_dict
+            serialized (dict): Serialized handler with handler.to_dict
 
         Returns:
             Self: The Handler instance.
@@ -560,13 +552,13 @@ class Handler(Protocol):
 class EventBus:
     """Protocol for the process-wide event router."""
 
-    handlers: Dict[str, Handler]
-    scopes: Dict[str, Set[str]]
+    handlers: dict[str, Handler]
+    scopes: dict[str, set[str]]
 
     def __init__(self):
         super().__init__()
-        self.handlers: Dict[str, Handler] = {}
-        self.scopes: Dict[str, Set[str]] = defaultdict(set)
+        self.handlers: dict[str, Handler] = {}
+        self.scopes: dict[str, set[str]] = defaultdict(set)
 
     def shutdown(self) -> None:
         """Shutdown the EventBus and close all handlers."""
@@ -578,13 +570,13 @@ class EventBus:
             for handler_name in handlers_names:
                 self.detach(handler_name, scope)
 
-    def attach(self, handlers: List[dict], scopes: List[str]) -> None:
+    def attach(self, handlers: list[dict], scopes: list[str]) -> None:
         """Attach a handler under the given scope.
 
         Args:
-            handlers (List[dict]):
+            handlers (list[dict]):
                 The serialized handlers to attach to the scopes.
-            scopes (List[str]): The scopes under which to attach.
+            scopes (list[str]): The scopes under which to attach.
 
         """
         for handler_dict in handlers:
@@ -623,7 +615,7 @@ class EventBus:
             self.handlers[handler_name].close()
             del self.handlers[handler_name]
 
-    def emit(self, event: Dict | Event) -> None:
+    def emit(self, event: dict | Event) -> None:
         """Emit an event to eligible handlers (errors isolated per handler).
 
         Args:
@@ -661,12 +653,12 @@ def get_bus() -> portal.Client:
     return __impl_get_bus()  # type: ignore
 
 
-def attach(handler: Handler, scopes: List[str] = ["global"]) -> None:
+def attach(handler: Handler, scopes: list[str] = ["global"]) -> None:
     """Attach a handler to the global EventBus under the specified scopes.
 
     Args:
         handler (Handler): The handler to attach.
-        scopes (List[str]): The scopes under which to attach.
+        scopes (list[str]): The scopes under which to attach.
 
     Raises:
         ValueError: If the handler disallows the requested scope.
