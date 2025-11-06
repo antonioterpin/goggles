@@ -49,9 +49,9 @@ class CoreTextLogger(TextLogger):
         """Initialize the CoreTextLogger.
 
         Args:
-            scope (str): Scope to bind the logger to (e.g., "global", "run", ecc.).
-            name (str | None): Optional name of the logger.
-            to_bind (Mapping[str, Any] | None):
+            scope: Scope to bind the logger to (e.g., "global", "run", ecc.).
+            name: Optional name of the logger.
+            to_bind:
                 Optional initial persistent context to bind.
 
         """
@@ -95,7 +95,7 @@ class CoreTextLogger(TextLogger):
         """Get a copy of the current persistent bound context.
 
         Returns:
-            dict[str, Any]: A shallow copy of the bound context dictionary.
+            A shallow copy of the bound context dictionary.
 
         """
         return dict(self._bound)
@@ -147,11 +147,10 @@ class CoreTextLogger(TextLogger):
         """Log an INFO message with optional structured extras.
 
         Args:
-            msg (str): The log message.
-            step (int | None): The step number.
-            time (float | None): The timestamp.
-            **extra (Any):
-                Additional structured key-value pairs for this record.
+            msg: The log message.
+            step: The step number.
+            time: The timestamp.
+            **extra: Additional structured key-value pairs for this record.
 
         """
         filepath, lineno = _caller_id()
@@ -185,8 +184,8 @@ class CoreTextLogger(TextLogger):
 
         Args:
             msg: Human-readable message.
-            step (int | None): The step number.
-            time (float | None): The timestamp.
+            step: (int | None): The step number.
+            time: (float | None): The timestamp.
             **extra: Per-call structured fields merged with the bound context.
 
         """
@@ -221,8 +220,8 @@ class CoreTextLogger(TextLogger):
 
         Args:
             msg: Human-readable message.
-            step (int | None): The step number.
-            time (float | None): The timestamp.
+            step: The step number.
+            time: The timestamp.
             **extra: Per-call structured fields merged with the bound context.
 
         """
@@ -257,8 +256,8 @@ class CoreTextLogger(TextLogger):
 
         Args:
             msg: Human-readable message.
-            step (int | None): The step number.
-            time (float | None): The timestamp.
+            step: (int | None): The step number.
+            time: (float | None): The timestamp.
             **extra: Per-call structured fields merged with the bound context.
 
         """
@@ -307,11 +306,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a batch of scalar metrics.
 
         Args:
-            metrics (Metrics): (Name,value) pairs.
-            step (int | None): Optional global step index.
-            time (float | None): Optional global timestamp.
-            **extra (Any):
-                Additional routing metadata (e.g., split="train").
+            metrics: (Name,value) pairs.
+            step: Optional global step index.
+            time: Optional global timestamp.
+            **extra: Additional routing metadata (e.g., split="train").
 
         """
         filepath, lineno = _caller_id()
@@ -344,12 +342,11 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a single scalar metric.
 
         Args:
-            name (str): Metric name.
-            value (float|int): Metric value.
-            step (int | None): Optional global step index.
-            time (float | None): Optional global timestamp.
-            **extra (Any):
-                Additional routing metadata (e.g., split="train").
+            name: Metric name.
+            value: Metric value.
+            step: Optional global step index.
+            time: Optional global timestamp.
+            **extra: Additional routing metadata (e.g., split="train").
 
         """
         filepath, lineno = _caller_id()
@@ -383,12 +380,12 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit an image artifact (encoded bytes).
 
         Args:
-            name (str): Artifact name.
-            image (Image): Image.
-            format (str): Image format, e.g., "png", "jpeg".
-            step (int | None): Optional global step index.
-            time (float | None): Optional global timestamp.
-            **extra: dict[str, Any]: Additional routing metadata.
+            name: Artifact name.
+            image: Image.
+            format: Image format, e.g., "png", "jpeg".
+            step: Optional global step index.
+            time: Optional global timestamp.
+            **extra: Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -427,13 +424,13 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a video artifact (encoded bytes).
 
         Args:
-            video (Video): Video.
-            name (str | None): Artifact name.
-            fps (int): Frames per second.
-            format (str): Video format, e.g., "gif", "mp4".
-            step (int | None): Optional global step index.
-            time (float | None): Optional global timestamp.
-            **extra (Any): Additional routing metadata.
+            video: Video.
+            name: Artifact name.
+            fps: Frames per second.
+            format: Video format, e.g., "gif", "mp4".
+            step: Optional global step index.
+            time: Optional global timestamp.
+            **extra: Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -473,12 +470,12 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a generic artifact (encoded bytes).
 
         Args:
-            name (str): Artifact name.
-            data (bytes): Artifact data.
-            format (str): Artifact format, e.g., "txt", "bin".
-            step (int | None): Optional global step index.
-            time (float | None): Optional global timestamp.
-            **extra (Any): Additional routing metadata.
+            name: Artifact name.
+            data: Artifact data.
+            format: Artifact format, e.g., "txt", "bin".
+            step: Optional global step index.
+            time: Optional global timestamp.
+            **extra: Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -516,11 +513,11 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a vector field artifact.
 
         Args:
-            vector_field (VectorField): Vector field data.
-            name (str | None): Optional artifact name.
-            step (int | None): Optional global step index.
-            time (float | None): Optional global timestamp.
-            **extra (Any): Additional routing metadata.
+            vector_field: Vector field data.
+            name: Optional artifact name.
+            step: Optional global step index.
+            time: Optional global timestamp.
+            **extra: Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -558,12 +555,12 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a histogram artifact.
 
         Args:
-            name (str | None): Optional artifact name.
-            histogram (Vector): Histogram data.
-            step (int | None): Optional global step index.
-            time (float | None): Optional global timestamp.
-            static (bool): If True, treat as static histogram.
-            **extra (Any): Additional routing metadata.
+            name: Optional artifact name.
+            histogram: Histogram data.
+            step: Optional global step index.
+            time: Optional global timestamp.
+            static: If True, treat as static histogram.
+            **extra: Additional routing metadata.
 
         """
         filepath, lineno = _caller_id()
@@ -594,7 +591,7 @@ def _caller_id() -> tuple[str, int]:
     """Get the caller's filepath and line number for logging purposes.
 
     Returns:
-        tuple[str, int]: A tuple of (file path, line number).
+        A tuple of (file path, line number).
 
     """
     frame = inspect.currentframe()

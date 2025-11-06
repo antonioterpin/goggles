@@ -21,16 +21,16 @@ def slice_history(
     """Return a temporal slice [start : start+length] for selected fields.
 
     Args:
-        history (History): Mapping field -> array of shape (B, T, ...).
-        start (int): Starting timestep (0-based).
-        length (int): Number of timesteps to include (> 0).
-        fields (Sequence[str] | None): One or more field names to slice.
+        history: Mapping field -> array of shape (B, T, ...).
+        start: Starting timestep (0-based).
+        length: Number of timesteps to include (> 0).
+        fields: One or more field names to slice.
             If a single string is provided, only that field is sliced.
             If a list or tuple is provided, all listed fields are sliced.
             If None, all fields in `history` are sliced.
 
     Returns:
-        History: Mapping of sliced arrays with shape (B, length, ...).
+        Mapping of sliced arrays with shape (B, length, ...).
 
     Raises:
         ValueError: If `length` <= 0, `start` out of bounds, or slice exceeds T.
@@ -83,11 +83,11 @@ def peek_last(history: History, k: int = 1) -> History:
     """Return the last `k` timesteps for all fields.
 
     Args:
-        history (History): Mapping field -> array of shape (B, T, *payload).
-        k (int): Number of trailing timesteps to select (1 ≤ k ≤ T).
+        history: Mapping field -> array of shape (B, T, *payload).
+        k: Number of trailing timesteps to select (1 ≤ k ≤ T).
 
     Returns:
-        History: Mapping field -> sliced array of shape (B, k, *payload).
+        Mapping field -> sliced array of shape (B, k, *payload).
 
     Raises:
         ValueError: If `k` < 1 or `k` > T for any field.
@@ -123,12 +123,12 @@ def to_device(
     Non-array values (e.g., metadata, scalars, strings) are left unchanged.
 
     Args:
-        history (History): Mapping field to array (or PyTree of arrays).
-        devices (Sequence[Device] | None): Target devices. Defaults to first device.
-        keys (tuple[str, ...] | None): Subset of fields to move. If None, move all.
+        history: Mapping field to array (or PyTree of arrays).
+        devices: Target devices. Defaults to first device.
+        keys: Subset of fields to move. If None, move all.
 
     Returns:
-        History: Copy of the history with selected arrays placed on the target device(s).
+        Copy of the history with selected arrays placed on the target device(s).
 
     """
     devices = devices or jax.devices()

@@ -24,8 +24,8 @@ class WandBHandler:
     EventBus.
 
     Attributes:
-        name (str): Stable handler identifier.
-        capabilities (set[str]): Supported event kinds
+        name: Stable handler identifier.
+        capabilities: Supported event kinds
             ({"metric", "image", "video", "artifact"}).
 
     """
@@ -48,13 +48,12 @@ class WandBHandler:
         """Initialize the W&B handler.
 
         Args:
-            project (str | None): W&B project name.
-            entity (str | None): W&B entity (user or team) name.
-            run_name (str | None): Base name for W&B runs.
-            config (Mapping[str, Any] | None): Configuration dictionary
-                to log with the run(s).
-            group (str | None): W&B group name for runs.
-            reinit (Reinit): W&B reinitialization strategy when opening runs.
+            project: W&B project name.
+            entity: W&B entity (user or team) name.
+            run_name: Base name for W&B runs.
+            config: Configuration dictionary to log with the run(s).
+            group: W&B group name for runs.
+            reinit: W&B reinitialization strategy when opening runs.
                 One of {"finish_previous", "return_previous", "create_new", "default"}.
 
         """
@@ -81,10 +80,10 @@ class WandBHandler:
         """Return True if the handler supports this event kind.
 
         Args:
-            kind (str): Kind of event ("log", "metric", "image", "artifact").
+            kind: Kind of event ("log", "metric", "image", "artifact").
 
         Returns:
-            bool: True if the kind is supported, False otherwise.
+            True if the kind is supported, False otherwise.
 
         """
         return kind in self.capabilities
@@ -108,7 +107,7 @@ class WandBHandler:
         """Process a Goggles event and forward it to W&B.
 
         Args:
-            event (Any): The Goggles event to process.
+            event: The Goggles event to process.
 
         """
         scope = getattr(event, "scope", None) or self.GLOBAL_SCOPE
@@ -259,7 +258,11 @@ class WandBHandler:
         self._current_scope = None
 
     def to_dict(self) -> dict:
-        """Serialize the handler for attachment."""
+        """Serialize the handler for attachment.
+
+        Returns:
+            The dictionary representation of the handler.
+        """
         return {
             "cls": self.__class__.__name__,
             "data": {
@@ -274,7 +277,14 @@ class WandBHandler:
 
     @classmethod
     def from_dict(cls, serialized: dict) -> Self:
-        """De-serialize the handler from its dictionary representation."""
+        """De-serialize the handler from its dictionary representation.
+
+        Args:
+            serialized: The dictionary representation of the handler.
+
+        Returns:
+            The reconstructed WandBHandler instance.
+        """
         return cls(
             project=serialized.get("project"),
             entity=serialized.get("entity"),
@@ -288,10 +298,10 @@ class WandBHandler:
         """Get or create a W&B run for the given scope.
 
         Args:
-            scope (str): The scope for which to get or create the W&B run.
+            scope: The scope for which to get or create the W&B run.
 
         Returns:
-            Run: The W&B run associated with the given scope.
+            The W&B run associated with the given scope.
 
         """
         run = self._runs.get(scope)

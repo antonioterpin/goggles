@@ -10,6 +10,11 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:
+    """Convert a NumPy array to uint8 format for image/video saving.
+
+    Args:
+        arr: Input array of arbitrary dtype and range.
+    """
     if arr.dtype == np.uint8:
         return arr
     a = arr.astype(np.float32)
@@ -24,7 +29,16 @@ def _to_uint8(arr: np.ndarray) -> np.ndarray:
     return np.clip(a, 0, 255).astype(np.uint8)
 
 
-def _normalize_frames(frames: np.ndarray):
+def _normalize_frames(frames: np.ndarray) -> tuple[np.ndarray, str]:
+    """Normalize input frames to uint8 and determine mode.
+
+    Args:
+        frames: Input clip as a NumPy array of shape
+            (T, H, W) or (T, H, W, C) where C is 1 or 3.
+
+    Returns:
+        Tuple of (uint8 array, mode string).
+    """
     arr = np.asarray(frames)
     if arr.ndim < 3:
         raise ValueError("Expected shape (T, *image_shape[, C]).")
@@ -43,6 +57,14 @@ def _normalize_frames(frames: np.ndarray):
 
 
 def _ensure_even_hw(u8: np.ndarray) -> np.ndarray:
+    """Ensure height and width are even by padding if necessary.
+
+    Args:
+        u8: Input uint8 array of shape (T, H, W) or (T, H, W, C).
+
+    Returns:
+        Padded uint8 array with even height and width.
+    """
     if u8.ndim == 3:  # (T,H,W)
         T, H, W = u8.shape
         pad_h, pad_w = H % 2, W % 2
@@ -67,12 +89,11 @@ def save_numpy_gif(
     """Save a NumPy clip to GIF using imageio.
 
     Args:
-        frames (np.ndarray): Input clip as a NumPy array of shape
+        frames: Input clip as a NumPy array of shape
             (T, H, W) or (T, H, W, C) where C is 1 or 3.
-        out_path (str): Output file path.
-        fps (int): Frames per second.
-        loop (int): Number of times the GIF should loop (0 = infinite).
-
+        out_path: Output file path.
+        fps: Frames per second.
+        loop: Number of times the GIF should loop (0 = infinite).
     """
     arr_u8, _ = _normalize_frames(frames)
     imgs = [arr_u8[i] for i in range(arr_u8.shape[0])]
@@ -101,16 +122,16 @@ def save_numpy_mp4(
     """Save a NumPy clip to MP4 using imageio-ffmpeg.
 
     Args:
-        frames (np.ndarray): Input clip as a NumPy array of shape
+        frames: Input clip as a NumPy array of shape
             (T, H, W) or (T, H, W, C) where C is 1 or 3.
-        out_path (str): Output file path.
-        fps (int): Frames per second.
-        codec (str): Video codec to use.
-        pix_fmt (str): Pixel format for ffmpeg.
-        bitrate (str | None): Bitrate string for ffmpeg (e.g. "4M").
-        crf (int | None): Constant Rate Factor for quality control.
-        convert_gray_to_rgb (bool): Whether to convert grayscale to RGB.
-        preset (str | None): ffmpeg preset for speed/quality tradeoff.
+        out_path: Output file path.
+        fps: Frames per second.
+        codec: Video codec to use.
+        pix_fmt: Pixel format for ffmpeg.
+        bitrate: Bitrate string for ffmpeg (e.g. "4M").
+        crf: Constant Rate Factor for quality control.
+        convert_gray_to_rgb: Whether to convert grayscale to RGB.
+        preset: ffmpeg preset for speed/quality tradeoff.
 
     """
     arr_u8, mode = _normalize_frames(frames)
@@ -155,10 +176,10 @@ def save_numpy_image(image: np.ndarray, out_path: str, format: str) -> None:
     """Save a NumPy image to file using imageio.
 
     Args:
-        image (np.ndarray): Input image as a NumPy array of shape
+        image: Input image as a NumPy array of shape
             (H, W) or (H, W, C) where C is 1 or 3.
-        out_path (str): Output file path.
-        format (str): Image format (e.g., 'png', 'jpg', 'jpeg').
+        out_path: Output file path.
+        format: Image format (e.g., 'png', 'jpg', 'jpeg').
 
     """
     arr_u8, _ = _normalize_frames(image[np.newaxis, ...])
@@ -177,13 +198,13 @@ def save_numpy_vector_field_visualization(
     """Save a 2D vector field visualization as a PNG image.
 
     Args:
-        vector_field (np.ndarray): Input vector field of shape (H, W, 2).
-        dir (Path): Output directory path.
-        name (str): Base name for the output PNG file (without extension).
-        mode (Literal["vorticity", "magnitude"]): Visualization mode.
-        arrow_stride (int): Stride for downsampling arrows (every Nth point).
-        dpi (int): Resolution of the output image.
-        add_colorbar (bool): Whether to include a colorbar.
+        vector_field: Input vector field of shape (H, W, 2).
+        dir: Output directory path.
+        name: Base name for the output PNG file (without extension).
+        mode: Visualization mode.
+        arrow_stride: Stride for downsampling arrows (every Nth point).
+        dpi: Resolution of the output image.
+        add_colorbar: Whether to include a colorbar.
 
     """
     # Store original backend to restore later

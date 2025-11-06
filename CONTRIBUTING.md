@@ -98,7 +98,7 @@ Our coding style is inspired to the [Linux kernel coding style](https://www.kern
             **kwargs: Fields to update
 
         Returns:
-            RobotState: New state instance with updates
+            New state instance with updates
         """
         result = replace(self, **kwargs)
         return result
@@ -114,11 +114,11 @@ Our coding style is inspired to the [Linux kernel coding style](https://www.kern
         """Calculate next position.
 
         Args:
-            state (RobotState): Current robot state
-            time_delta (float): Time step in seconds
+            state: Current robot state
+            time_delta: Time step in seconds
 
         Returns:
-            tuple[float, float]: Next position coordinates
+            Next position coordinates
         """
         # Single calculation path with single return
         new_x = state.position[0] + state.velocity[0] * time_delta
@@ -212,13 +212,37 @@ PRNGKey: TypeAlias = "jax.Array"
 - **List/Dict/Tuple**: Use builtin `list[T]`, `dict[K, V]`, `tuple[T, ...]`
 
 ### Docstrings and documentation
-We adopt the [Google style docstrings](https://google.github.io/styleguide/pyguide.html#383-functions-and-methods), but always keep type information both in the signature and in the docstring sections (`Args`, `Returns`, `Raises`) so that editors get accurate autocomplete while readers can rely on the rendered documentation.
+We adopt the [Google style docstrings](https://google.github.io/styleguide/pyguide.html#383-functions-and-methods). Type information should only be kept in the function signature, not duplicated in the docstring sections (`Args`, `Returns`, `Raises`). This avoids redundancy and ensures type information is maintained in a single source of truth.
+
+Example:
+```python
+def process_data(
+    items: list[str],
+    threshold: float = 0.5,
+    output_format: str = "json"
+) -> dict[str, Any]:
+    """Process a list of items with the given threshold.
+
+    Args:
+        items: List of string items to process.
+        threshold: Minimum score threshold for filtering.
+        output_format: Format for the output ("json" or "csv").
+
+    Returns:
+        Processed data as a dictionary.
+
+    Raises:
+        ValueError: If threshold is not between 0 and 1.
+
+    """
+```
 
 Principles:
 - Keep docstrings focused on what the callable does, its inputs, outputs, and side effects. Provide only the smallest example necessary to clarify ambiguous behavior.
 - Avoid mirroring high-level guidance, design principles, or extensive how-to material in docstrings; redirect that content to the project documentation instead of duplicating it in code.
 - When functionality relies on domain concepts, reference the documentation section that covers them rather than restating the underlying principles inline.
 - Do NOT explain HOW your code works in a comment. Make sure the code is not obscure and describe WHAT it is doing.
+- Type information should only appear in function signatures, not in docstring parameter descriptions.
 
 ## Development workflow
 We follow a [Git feature branch](https://www.atlassian.com/git/tutorials/comparing-workflows/feature-branch-workflow) workflow with test-driven-development. Prefer many, small PRs over single, large ones.

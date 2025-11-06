@@ -12,8 +12,8 @@ class ConsoleHandler:
     """Handle 'log' events and output them to console using Python's logging API.
 
     Attributes:
-        name (str): Stable handler identifier.
-        capabilities (set[str]): Supported event kinds (only {"log"}).
+        name: Stable handler identifier.
+        capabilities: Supported event kinds (only {"log"}).
 
     """
 
@@ -31,11 +31,11 @@ class ConsoleHandler:
         """Initialize the ConsoleHandler.
 
         Args:
-            name (str): Stable handler identifier.
-            level (int): Minimum log level to handle.
-            path_style (Literal["absolute", "relative"]): Whether to print absolute
+            name: Stable handler identifier.
+            level: Minimum log level to handle.
+            path_style: Whether to print absolute
                 or relative file paths. Defaults to "relative".
-            project_root (Path | None): Root path used for relative paths.
+            project_root: Root path used for relative paths.
 
         """
         self.name = name
@@ -45,11 +45,22 @@ class ConsoleHandler:
         self._logger: logging.Logger
 
     def can_handle(self, kind: Kind) -> bool:
-        """Return whether this handler can process the given kind."""
+        """Return whether this handler can process the given kind.
+
+        Args:
+            kind: The event kind to check.
+
+        Returns:
+            True if the handler can process the kind, False otherwise.
+        """
         return kind in self.capabilities
 
     def handle(self, event: Event) -> None:
-        """Forward a log event to Python's logging system."""
+        """Forward a log event to Python's logging system.
+
+        Args:
+            event: The log event to handle.
+        """
         if event.kind != "log":
             raise ValueError(f"Unsupported event kind '{event.kind}'")
 

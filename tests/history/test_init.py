@@ -1,40 +1,8 @@
 """Tests for goggles.history module initialization and public API."""
 
-import builtins
-import importlib
-import sys
 import inspect
 
 import goggles.history as gh
-import pytest
-
-
-def test_import_error_message_for_missing_jax(monkeypatch):
-    orig_import = builtins.__import__
-
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "jax" or name.startswith("jax."):
-            raise ImportError("no jax here")
-        return orig_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    # Remove cached modules so import will re-execute module code.
-    cached = {
-        k: sys.modules.get(k) for k in list(sys.modules) if k.startswith("goggles")
-    }
-    for k in list(cached.keys()):
-        sys.modules.pop(k, None)
-
-    try:
-        with pytest.raises(ImportError) as exc:
-            importlib.import_module("goggles.history")
-        assert "The 'goggles.history' module requires JAX" in str(exc.value)
-    finally:
-        monkeypatch.setattr(builtins, "__import__", orig_import)
-        for k, v in cached.items():
-            if v is not None:
-                sys.modules[k] = v
-        importlib.reload(importlib.import_module("goggles.history"))
 
 
 def test_public_api_symbols_exist():

@@ -26,7 +26,7 @@ def __i_am_host() -> bool:
     """Return whether this process is the goggles event bus host.
 
     Returns:
-        bool: True if this process is the host, False otherwise.
+        True if this process is the host, False otherwise.
 
     """
     # If GOGGLES_HOST is localhost/127.0.0.1, we are always the host
@@ -60,11 +60,11 @@ def __is_port_in_use(host: str, port: int) -> bool:
     """Check if a port is already in use.
 
     Args:
-        host (str): The host to check.
-        port (int): The port to check.
+        host: The host to check.
+        port: The port to check.
 
     Returns:
-        bool: True if the port is in use, False otherwise.
+        True if the port is in use, False otherwise.
 
     """
     try:
@@ -92,7 +92,7 @@ def get_bus() -> portal.Client:
     threads within the same process.
 
     Returns:
-        portal.Client: The singleton EventBus client.
+        The singleton EventBus client.
 
     """
     if __i_am_host() and not __is_port_in_use(GOGGLES_HOST, int(GOGGLES_PORT)):
