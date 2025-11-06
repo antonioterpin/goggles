@@ -36,17 +36,74 @@ from typing import (
     ClassVar,
     Protocol,
     runtime_checkable,
+    overload,
 )
 from collections.abc import Callable
 from typing_extensions import Self
+from typing import Literal, TypeVar, ParamSpec
 import logging
 import os
 
 from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
 from ._core.integrations import ConsoleHandler, LocalStorageHandler
-from .decorators import timeit, trace_on_error
+from ._core.decorators import timeit as _timeit, trace_on_error as _trace_on_error
 from .shutdown import GracefulShutdown
 from .config import load_configuration, save_configuration
+
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def timeit(
+    severity: int = logging.INFO,
+    name: str | None = None,
+    scope: str = "global",
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Measure the execution time of a function via decorators.
+
+    Args:
+        severity (int): Log severity level for timing message.
+        name (str | None): Optional name for the timing entry.
+            If None, uses filename:function_name.
+        scope (str): Scope of the logged event (e.g., "global" or "run").
+
+    Returns:
+        Callable[[F], F]: Decorated function with same signature as input.
+
+    Example:
+    >>> @timeit(severity=logging.DEBUG, name="my_function_timing")
+    ... def my_function():
+    ...     # function logic here
+    ...     pass
+    >>> my_function()
+    DEBUG: my_function_timing took 0.123456s
+
+    """
+    # just forward to the real implementation
+    return _timeit(severity=severity, name=name, scope=scope)
+
+
+def trace_on_error(
+    scope: str = "global",
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Trace errors and log function parameters via decorators.
+
+    Args:
+        scope (str): Scope of the logged event ("global" or "run").
+
+    Example:
+    >>> @trace_on_error()
+    ... def my_function(x, y):
+    ...     return x / y  # may raise ZeroDivisionError
+    >>> my_function(10, 0)
+    ERROR: Exception in my_function: division by zero, state:
+    {'args': (10, 0), 'kwargs': {}}
+
+    """
+    # just forward to the real implementation
+    return _trace_on_error(scope=scope)
+
 
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
@@ -83,6 +140,28 @@ def _make_goggles_logger(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+@overload
+def get_logger(
+    name: str | None = None,
+    /,
+    *,
+    with_metrics: Literal[False] = False,
+    scope: str = "global",
+    **to_bind: Any,
+) -> TextLogger: ...
+
+
+@overload
+def get_logger(
+    name: str | None = None,
+    /,
+    *,
+    with_metrics: Literal[True],
+    scope: str = "global",
+    **to_bind: Any,
+) -> GogglesLogger: ...
 
 
 def get_logger(
