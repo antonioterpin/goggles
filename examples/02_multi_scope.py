@@ -19,3 +19,5 @@ logger_global = gg.get_logger("examples.basic.global", scope="global")
 logger_scope1.info(f"This will be logged only by {handler1.name}")
 logger_scope2.info(f"This will be logged only by {handler2.name}")
 logger_global.info("This will be logged by both handlers.")
+
+gg.finish()
