@@ -11,15 +11,13 @@ This page summarizes the development workflow and software engineering practices
 │   ├── workflows/          # CI/CD pipelines
 │   ├── ISSUE_TEMPLATE/     # Issue templates
 │   └── pull_request_template.md
-├── src/                    # Source code
+├── goggles/                # Source code
 ├── tests/                  # Test suite
-├── docs/                   # Documentation
-├── scripts/                # Utils, like custom hooks
+├── examples/               # Examples
 ├── .pre-commit-config.yaml # Code quality hooks
 ├── pyproject.toml          # Project configuration
-├── Dockerfile              # Container setup
-├── docker-compose.yaml     # Development containers
 └── CONTRIBUTING.md         # Development guidelines
+└── README.md               # Docs
 ```
 
 We use [uv](https://docs.astral.sh/) to manage the virtual environment and dependencies.
