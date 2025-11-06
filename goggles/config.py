@@ -24,7 +24,7 @@ def load_configuration(file_path: str) -> PrettyConfig:
     """Load YAML configuration from file and return as PrettyConfig.
 
     Args:
-        file_path (str): Path to the YAML configuration file.
+        file_path: Path to the YAML configuration file.
 
     Returns:
         PrettyConfig: A PrettyConfig object containing the loaded configuration.
@@ -59,8 +59,8 @@ def save_configuration(config: PrettyConfig, file_path: str):
     """Dump PrettyConfig to a YAML file.
 
     Args:
-        config (PrettyConfig): The configuration to dump.
-        file_path (str): Path to the output YAML file.
+        config: The configuration to dump.
+        file_path: Path to the output YAML file.
 
     """
     yaml = YAML(typ="safe", pure=True)

@@ -5,11 +5,11 @@ def round_up_to_multiple(number: float, multiple: int) -> int:
     """Round up a number to the nearest multiple.
 
     Args:
-        number (float): The number to round up.
-        multiple (int): The multiple to round up to.
+        number: The number to round up.
+        multiple: The multiple to round up to.
 
     Returns:
-        int: The rounded up number.
+        The rounded up number.
 
     """
     if number % multiple == 0:
@@ -21,10 +21,10 @@ def is_int(val: int | float) -> bool:
     """Check if a value is an integer.
 
     Args:
-        val (int | float): The value to check.
+        val: The value to check.
 
     Returns:
-        bool: True if the value is an integer, False otherwise.
+        True if the value is an integer, False otherwise.
 
     """
     if isinstance(val, int):

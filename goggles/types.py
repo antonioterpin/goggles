@@ -2,6 +2,7 @@
 
 import numpy as np
 from typing import Literal, Any
+from typing_extensions import Self
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -21,15 +22,15 @@ class Event:
     """Structured event routed through the EventBus.
 
     Args:
-        kind (Kind): Kind of event ("log", "metric", "image", "artifact").
-        scope (str): Scope of the event ("global" or "run").
-        payload (Any): Event payload.
-        filepath (str): File path of the caller emitting the event.
-        lineno (int): Line number of the caller emitting the event.
-        level (int | None): Optional log level for "log" events.
-        step (int | None): Optional global step index.
-        time (float | None): Optional global timestamp.
-        extra (dict[str, Any] | None): Optional extra metadata.
+        kind: Kind of event ("log", "metric", "image", "artifact").
+        scope: Scope of the event ("global" or "run").
+        payload: Event payload.
+        filepath: File path of the caller emitting the event.
+        lineno: Line number of the caller emitting the event.
+        level: Optional log level for "log" events.
+        step: Optional global step index.
+        time: Optional global timestamp.
+        extra: Optional extra metadata.
 
     """
 
@@ -44,7 +45,11 @@ class Event:
     extra: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert Event to dictionary."""
+        """Convert Event to dictionary.
+
+        Returns:
+            Dictionary representation of the Event.
+        """
         result = {
             "kind": self.kind,
             "scope": self.scope,
@@ -66,8 +71,15 @@ class Event:
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Event":
-        """Create Event from dictionary."""
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        """Create Event from dictionary.
+
+        Args:
+            data: Dictionary representation of an Event.
+
+        Returns:
+            Parsed Event instance.
+        """
         return cls(
             kind=data["kind"],
             scope=data["scope"],

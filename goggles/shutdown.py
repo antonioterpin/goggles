@@ -1,6 +1,8 @@
 """Simple util for graceful shutdowns in Python applications."""
 
 import signal
+import types
+from typing_extensions import Self
 
 
 class GracefulShutdown:
@@ -21,11 +23,11 @@ class GracefulShutdown:
     def __init__(
         self,
         exit_message: str | None = None,
-    ):
+    ) -> None:
         """Initialize the GracefulShutdown context manager.
 
         Args:
-            exit_message (str): The message to log upon shutdown.
+            exit_message: The message to log upon shutdown.
 
         """
         from . import get_logger
@@ -36,7 +38,7 @@ class GracefulShutdown:
         self._orig_sigint = None
         self._orig_sigterm = None
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         """Register the signal handlers."""
         # save existing handlers
         self._orig_sigint = signal.getsignal(signal.SIGINT)
@@ -53,7 +55,12 @@ class GracefulShutdown:
 
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type: type | None,
+        exc_value: Exception | None,
+        traceback: types.TracebackType | None,
+    ) -> None:
         """Unregister the signal handlers, restoring originals.
 
         Args:

@@ -48,8 +48,8 @@ class LocalStorageHandler:
         """Initialize the handler with a base directory.
 
         Args:
-            path (Path): Base directory for logs and media files. Will be created if it doesn't exist.
-            name (str): Handler identifier (for logging diagnostics).
+            path: Base directory for logs and media files. Will be created if it doesn't exist.
+            name: Handler identifier (for logging diagnostics).
 
         """
         self.name = name
@@ -90,7 +90,7 @@ class LocalStorageHandler:
         """Return True if this handler supports the given event kind.
 
         Args:
-            kind (Kind): Kind of event ("log", "metric", "image", "artifact").
+            kind: Kind of event ("log", "metric", "image", "artifact").
 
         Returns:
             bool: True if the kind is supported, False otherwise.
@@ -102,7 +102,7 @@ class LocalStorageHandler:
         """Write a single event to the JSONL file.
 
         Args:
-            event (Event): The event to serialize.
+            event: The event to serialize.
 
         """
         event_dict = event.to_dict()
@@ -177,7 +177,7 @@ class LocalStorageHandler:
         """Save image data to file and update event with file path.
 
         Args:
-            event (dict): Event dictionary.
+            event: Event dictionary.
 
         Returns:
             dict: Updated event with file path instead of raw data.
@@ -205,7 +205,7 @@ class LocalStorageHandler:
         """Save video data to file and update event with file path.
 
         Args:
-            event (dict): Event dictionary.
+            event: Event dictionary.
 
         Returns:
             dict: Updated event with file path instead of raw data.
@@ -279,7 +279,7 @@ class LocalStorageHandler:
         """Save artifact data to file and update event with file path.
 
         Args:
-            event (dict): Event dictionary.
+            event: Event dictionary.
 
         Returns:
             dict | None: Updated event with file path instead of raw data.
@@ -324,7 +324,7 @@ class LocalStorageHandler:
         """Save vector field data to file and update event with file path.
 
         Args:
-            event (dict): Event dictionary.
+            event: Event dictionary.
 
         Returns:
             dict | None: Updated event with file path instead of raw data.
@@ -368,7 +368,7 @@ class LocalStorageHandler:
         """Save histogram data to file and update event with file path.
 
         Args:
-            event (dict): Event dictionary.
+            event: Event dictionary.
 
         Returns:
             dict: Updated event with file path instead of raw data.

@@ -16,10 +16,10 @@ class HistoryFieldSpec:
     """Describe one temporal field stored on device.
 
     Attributes:
-        length (int): Number of stored timesteps for this field.
-        shape (tuple[int, ...]): Per-timestep payload shape (no batch/time dims).
-        dtype (jnp.dtype): Array dtype.
-        init (InitMode): Initialization policy ("zeros" | "ones" | "randn" | "none").
+        length: Number of stored timesteps for this field.
+        shape: Per-timestep payload shape (no batch/time dims).
+        dtype: Array dtype.
+        init: Initialization policy ("zeros" | "ones" | "randn" | "none").
 
     """
 
@@ -34,7 +34,7 @@ class HistorySpec:
     """Bundle multiple named history field specs.
 
     Attributes:
-        fields (Mapping[str, HistoryFieldSpec]): Mapping from field name to spec
+        fields: Mapping from field name to spec
 
     """
 
@@ -45,7 +45,7 @@ class HistorySpec:
         """Construct a HistorySpec from a nested config dictionary.
 
         Args:
-            config (Mapping[str, Any]): Dict mapping field name to kwargs for
+            config: Dict mapping field name to kwargs for
                 `HistoryFieldSpec` or to an already-built `HistoryFieldSpec`. Each
                 kwargs dict must include:
                 - "length" (int): Number of timesteps (T >= 1).
@@ -55,7 +55,7 @@ class HistorySpec:
                 - "init": One of {"zeros", "ones", "randn", "none"}.
 
         Returns:
-            HistorySpec: Parsed specification bundle.
+            Parsed specification bundle.
 
         Raises:
             TypeError: If `config` is not a mapping, or a field entry has

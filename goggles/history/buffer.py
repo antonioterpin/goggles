@@ -57,9 +57,9 @@ def create_history(
     """Allocate device-resident history tensors following (B, T, *shape).
 
     Args:
-        spec (HistorySpec): Describing each field.
-        batch_size (int): Batch size (B).
-        rng (PRNGKey | None): Optional PRNG key for randomized initialization
+        spec: Describing each field.
+        batch_size: Batch size (B).
+        rng: Optional PRNG key for randomized initialization
             of the buffers (e.g., for initial values or noise).
 
     Returns:
@@ -112,11 +112,11 @@ def update_history(
     multi-device/pmap scenarios.
 
     Args:
-        history (History): Current history dict (B, T, *shape).
-        new_data (dict[str, Array]): New entries per field, shaped (B, 1, *shape).
-        reset_mask (Array | None): Optional boolean mask for resets (B,).
-        spec (HistorySpec | None): Optional spec describing reset initialization.
-        rng (jax.Array | None): Optional PRNG key for randomized resets.
+        history: Current history dict (B, T, *shape).
+        new_data: New entries per field, shaped (B, 1, *shape).
+        reset_mask: Optional boolean mask for resets (B,).
+        spec: Optional spec describing reset initialization.
+        rng: Optional PRNG key for randomized resets.
 
     Returns:
         History: Updated history dict.

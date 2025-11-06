@@ -19,13 +19,13 @@ def timeit(
     """Measure the execution time of a function via decorators.
 
     Args:
-        severity (int): Log severity level for timing message.
-        name (str | None): Optional name for the timing entry.
+        severity: Log severity level for timing message.
+        name: Optional name for the timing entry.
             If None, uses filename:function_name.
-        scope (str): Scope of the logged event (e.g., "global" or "run").
+        scope: Scope of the logged event (e.g., "global" or "run").
 
     Returns:
-        Callable[[F], F]: Decorated function with same signature as input.
+        Decorated function with same signature as input.
 
     Example:
     >>> @timeit(severity=logging.DEBUG, name="my_function_timing")
@@ -65,7 +65,7 @@ def trace_on_error(scope: str = "global") -> Callable[[F], F]:
     """Trace errors and log function parameters via decorators.
 
     Args:
-        scope (str): Scope of the logged event ("global" or "run").
+        scope: Scope of the logged event (e.g., "global" or "run").
 
     Example:
     >>> @trace_on_error()
