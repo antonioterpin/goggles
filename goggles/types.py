@@ -10,7 +10,7 @@ Kind = Literal[
     "log", "metric", "image", "video", "artifact", "histogram", "vector", "vector_field"
 ]
 
-Metrics = dict[str, float | int]
+Metrics = dict[str, float | int | np.ndarray]
 Image: TypeAlias = np.ndarray
 Video: TypeAlias = np.ndarray
 Vector: TypeAlias = np.ndarray

@@ -40,7 +40,7 @@ class LocalStorageHandler:
     """
 
     name: str = "jsonl"
-    capabilities: frozenset[str] = frozenset(
+    capabilities: frozenset[Kind] = frozenset(
         {"log", "metric", "image", "video", "artifact", "vector_field", "histogram"}
     )
 
