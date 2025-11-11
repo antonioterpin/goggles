@@ -1,5 +1,6 @@
 """Media utilities for saving images and videos from numpy arrays."""
 
+import yaml
 from typing import Literal
 import numpy as np
 import imageio
@@ -303,3 +304,52 @@ def save_numpy_vector_field_visualization(
     finally:
         # Restore original matplotlib backend
         matplotlib.use(original_backend)
+
+
+class NumpyDumper(yaml.SafeDumper):
+    """YAML Dumper that handles NumPy data types."""
+
+    pass
+
+
+def _represent_numpy_scalar(dumper, value):
+    # Order matters: bool first (bool is a subclass of integer in Python)
+    if isinstance(value, np.bool_):
+        return dumper.represent_bool(bool(value))
+    if isinstance(value, np.integer):
+        return dumper.represent_int(int(value))
+    if isinstance(value, np.floating):
+        return dumper.represent_float(float(value))
+    # Fallback: just stringify
+    return dumper.represent_str(str(value))
+
+
+def _represent_ndarray(dumper, data: np.ndarray):
+    if data.ndim == 0:
+        # 0-D array -> scalar
+        return _represent_numpy_scalar(dumper, data.item())
+    # Higher-D -> nested lists
+    return dumper.represent_list(data.tolist())
+
+
+def _represent_numpy_generic(dumper, data: np.generic):
+    # Handles np.int64, np.float32, np.bool_, etc.
+    return _represent_numpy_scalar(dumper, data)
+
+
+# Register representers
+NumpyDumper.add_representer(np.ndarray, _represent_ndarray)
+NumpyDumper.add_multi_representer(np.generic, _represent_numpy_generic)
+
+
+def yaml_dump(obj, **kwargs) -> str:
+    """Dump an object to a YAML string, handling NumPy types.
+
+    Args:
+        obj: The object to dump.
+        **kwargs: Additional keyword arguments to pass to `yaml.dump`.
+
+    Returns:
+        YAML string representation of the object.
+    """
+    return yaml.dump(obj, Dumper=NumpyDumper, **kwargs)

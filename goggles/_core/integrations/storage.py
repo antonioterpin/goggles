@@ -15,6 +15,7 @@ from goggles.media import (
     save_numpy_image,
     save_numpy_mp4,
     save_numpy_vector_field_visualization,
+    yaml_dump,
 )
 
 
@@ -93,7 +94,7 @@ class LocalStorageHandler:
             kind: Kind of event ("log", "metric", "image", "artifact").
 
         Returns:
-            bool: True if the kind is supported, False otherwise.
+            True if the kind is supported, False otherwise.
 
         """
         return kind in self.capabilities
@@ -151,7 +152,14 @@ class LocalStorageHandler:
 
     @classmethod
     def from_dict(cls, serialized: dict) -> Self:
-        """Reconstruct a handler from its serialized representation."""
+        """Reconstruct a handler from its serialized representation.
+
+        Args:
+            serialized: Serialized handler dictionary.
+
+        Returns:
+            Reconstructed LocalStorageHandler instance.
+        """
         data = serialized.get("data", serialized)
         return cls(
             path=Path(data["path"]),
@@ -164,6 +172,8 @@ class LocalStorageHandler:
         Args:
             obj: Object to serialize.
 
+        Returns:
+            JSON-serializable representation of the object.
         """
         if isinstance(obj, np.ndarray):
             return obj.tolist()
@@ -173,14 +183,15 @@ class LocalStorageHandler:
         # For other non-serializable objects, convert to string
         return str(obj)
 
-    def _save_image_to_file(self, event: dict) -> dict:
+    def _save_image_to_file(self, event: dict) -> dict | None:
         """Save image data to file and update event with file path.
 
         Args:
             event: Event dictionary.
 
         Returns:
-            dict: Updated event with file path instead of raw data.
+            Updated event with file path instead of raw data.
+            None if the image could not be saved.
 
         """
         image_format = "png"
@@ -192,11 +203,14 @@ class LocalStorageHandler:
             image_name = event["extra"]["name"]
 
         image_path = self._images_dir / Path(f"{image_name}.{image_format}")
-        save_numpy_image(
-            event["payload"],
-            str(image_path),
-            format=image_format,
-        )
+        try:
+            save_numpy_image(
+                event["payload"],
+                str(image_path),
+                format=image_format,
+            )
+        except Exception:
+            return None
 
         event["payload"] = str(image_path.relative_to(self._base_path))
         return event
@@ -208,7 +222,8 @@ class LocalStorageHandler:
             event: Event dictionary.
 
         Returns:
-            dict: Updated event with file path instead of raw data.
+            Updated event with file path instead of raw data.
+            None if the video could not be saved.
 
         """
         video_format = "mp4"
@@ -282,8 +297,8 @@ class LocalStorageHandler:
             event: Event dictionary.
 
         Returns:
-            dict | None: Updated event with file path instead of raw data.
-                If the artifact format is unknown, returns None.
+            Updated event with file path instead of raw data.
+            If the artifact format is unknown, returns None.
 
         """
         artifact_format = "txt"
@@ -291,22 +306,13 @@ class LocalStorageHandler:
             artifact_format = event["extra"]["format"]
 
         if artifact_format not in {"txt", "csv", "json", "yaml"}:
-            self._logger.warning(
-                f"Unknown artifact format '{artifact_format}'."
-                " Supported formats are: 'txt', 'csv', 'json', 'yaml'."
-                " The artifact will not be logged."
-            )
             return None
 
         if artifact_format == "json":
-            import json
-
             event["payload"] = json.dumps(event["payload"], indent=2)
 
         if artifact_format == "yaml":
-            import yaml
-
-            event["payload"] = yaml.dump(event["payload"])
+            event["payload"] = yaml_dump(event["payload"])
 
         artifact_name = str(uuid4())
         if event["extra"] and "name" in event["extra"]:
