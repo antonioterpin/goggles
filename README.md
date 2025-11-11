@@ -267,7 +267,7 @@ gg.finish()
 ```
 
 ### Fully asynchronous logging
-As in the WandB example, all the handlers work in the background. By default, the logging calls are blocking, but can be made not blocking by setting the environment variable `GOGGLES_ASYNC` to `1` or `true`. When you use the async mode, remember to call `gg.finish()` at the end from your host machine!
+As in the WandB example, all the handlers work in the background. By default, the logging calls are not blocking, but can be made blocking by setting the environment variable `GOGGLES_ASYNC` to `0` or `false`. When you use the async mode, remember to call `gg.finish()` at the end from your host machine!
 >[!WARNING]
 > This functionality still needs thorough tesing, as well as a better documentation. Help is appreciated! 🤗
 
