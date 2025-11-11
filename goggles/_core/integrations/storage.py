@@ -168,7 +168,7 @@ class LocalStorageHandler:
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         elif isinstance(obj, (np.integer, np.floating)):
-            return obj.item()
+            return str(obj.item())
 
         # For other non-serializable objects, convert to string
         return str(obj)
@@ -194,14 +194,14 @@ class LocalStorageHandler:
         image_path = self._images_dir / Path(f"{image_name}.{image_format}")
         save_numpy_image(
             event["payload"],
-            image_path,
+            str(image_path),
             format=image_format,
         )
 
         event["payload"] = str(image_path.relative_to(self._base_path))
         return event
 
-    def _save_video_to_file(self, event: dict) -> dict:
+    def _save_video_to_file(self, event: dict) -> dict | None:
         """Save video data to file and update event with file path.
 
         Args:
@@ -236,7 +236,7 @@ class LocalStorageHandler:
             if event["extra"] and "loop" in event["extra"]:
                 loop = event["extra"]["loop"]
             gif_path = self._videos_dir / Path(f"{video_name}.gif")
-            save_numpy_gif(video_data, gif_path, fps=fps, loop=loop)
+            save_numpy_gif(video_data, str(gif_path), fps=int(fps), loop=loop)
             event["payload"] = str(gif_path.relative_to(self._base_path))
         elif video_format == "mp4":
             video_data: np.ndarray = event["payload"]
@@ -264,7 +264,7 @@ class LocalStorageHandler:
             save_numpy_mp4(
                 video_data,
                 mp4_path,
-                fps=fps,
+                fps=int(fps),
                 codec=video_codec,
                 pix_fmt=pix_fmt,
                 bitrate=bitrate,

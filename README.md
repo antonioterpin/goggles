@@ -51,6 +51,10 @@ uv add "robo-goggles[jax]"
 
 For the development installation, see our [How to contribute](./CONTRIBUTING.md) page.
 
+> [!WARNING]
+> **Port selection**: Goggles requires a port for communication, and works multi-process, multi-machine, multi-user. If different projects have the same port, the behavior is undefined. You can set a unique port for each projet by setting in `.env` the variable `GOGGLES_PORT`.
+
+
 ### Basic usage
 
 ```python

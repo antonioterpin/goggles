@@ -130,7 +130,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
         if not GOGGLES_ASYNC:
             future.result()
@@ -165,7 +165,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -201,7 +201,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -237,7 +237,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -273,7 +273,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -324,7 +324,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -361,7 +361,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -404,7 +404,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -451,7 +451,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -495,7 +495,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -536,7 +536,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -580,7 +580,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:

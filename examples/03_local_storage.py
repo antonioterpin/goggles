@@ -69,7 +69,7 @@ artifact_txt = "This is sample artifact content\nLine 2\nLine 3"
 logger.artifact(artifact_txt, name="text_artifact", format="txt")
 artifact_json = {"key": "value"}
 logger.artifact(artifact_json, name="json_artifact", format="json")
-artifact_yaml = {"key": "value"}
+artifact_yaml = {"key": "value", "list": [1, 2, 3]}
 logger.artifact(artifact_yaml, name="yaml_artifact", format="yaml")
 artifact_csv = "col1,col2\n1,2\n3,4"
 logger.artifact(artifact_csv, name="csv_artifact", format="csv")
