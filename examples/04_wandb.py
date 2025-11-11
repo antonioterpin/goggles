@@ -22,11 +22,26 @@ for i in range(100):
 image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
 logger.image(image, name="Random image")
 
+# Generate and log an RGBA image (with alpha channel)
+rgba_image = np.random.randint(0, 255, (100, 100, 4), dtype=np.uint8)
+# Create a gradient alpha effect
+for i in range(100):
+    rgba_image[i, :, 3] = int(255 * (i / 100))  # Vertical alpha gradient
+logger.image(rgba_image, name="Random RGBA image")
+
 # Generate and log a video
 video = np.random.randint(
     0, 255, (30, 3, 64, 64), dtype=np.uint8
 )  # 30 frames of 64x64 RGB
 logger.video(video, name="Random Video", fps=10)
+
+# Generate and log an RGBA video (with alpha channel)
+rgba_video = np.random.randint(0, 255, (15, 64, 64, 4), dtype=np.uint8)
+# Create a fading effect over time
+for t in range(15):
+    alpha_value = int(255 * (1 - t / 14))  # Fade out over time
+    rgba_video[t, :, :, 3] = alpha_value
+logger.video(rgba_video, name="Random RGBA Video", fps=5)
 
 # Load and log artifact
 artifact = np.random.rand(100, 100, 3)

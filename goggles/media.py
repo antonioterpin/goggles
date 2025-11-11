@@ -48,7 +48,7 @@ def _normalize_frames(frames: np.ndarray) -> tuple[np.ndarray, str]:
         C = 1
     else:  # (T,H,W,C)
         C = arr.shape[-1]
-        if C not in (1, 3):
+        if C not in (1, 3, 4):
             raise ValueError(f"Last dimension must be 1 or 3 channels, got {C}.")
     if arr.ndim >= 4 and C == 1:
         arr = arr[..., 0]  # -> (T,H,W)

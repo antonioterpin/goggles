@@ -55,6 +55,14 @@ dummy_image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
 logger.image(dummy_image, format="png")
 logger.image(dummy_image, name="custom_name", format="jpg")
 
+# RGBA image logging (with alpha channel)
+logger.info("Logging sample RGBA image...")
+dummy_rgba_image = np.random.randint(0, 255, (64, 64, 4), dtype=np.uint8)
+# Make some areas transparent by setting alpha to different values
+dummy_rgba_image[16:32, 16:32, 3] = 128  # Semi-transparent center
+dummy_rgba_image[48:64, 48:64, 3] = 0  # Fully transparent corner
+logger.image(dummy_rgba_image, name="rgba_image", format="png")
+
 # Video logging
 logger.info("Logging sample video...")
 T, H, W = 10, 128, 128
@@ -62,6 +70,21 @@ dummy_video_gif = np.random.rand(T, H, W, 3).astype(np.float32)
 dummy_video_mp4 = np.random.rand(T, H, W, 3).astype(np.float32)
 logger.video(dummy_video_gif, format="gif", fps=30)
 logger.video(dummy_video_mp4, name="custom_name", format="mp4", fps=24)
+
+# RGBA video logging (with alpha channel)
+logger.info("Logging sample RGBA video...")
+dummy_rgba_video = np.random.rand(T, H, W, 4).astype(np.float32)
+# Add some interesting alpha patterns
+for t in range(T):
+    # Create a moving transparent circle
+    y, x = np.ogrid[:H, :W]
+    center_y, center_x = H // 2 + 20 * np.sin(2 * np.pi * t / T), W // 2 + 20 * np.cos(
+        2 * np.pi * t / T
+    )
+    mask = (x - center_x) ** 2 + (y - center_y) ** 2 < 400
+    dummy_rgba_video[t, :, :, 3] = 0.8  # Base alpha
+    dummy_rgba_video[t, mask, 3] = 0.2  # Transparent circle
+logger.video(dummy_rgba_video, name="rgba_video", format="mp4", fps=15)
 
 # Artifact logging (with text data as example)
 logger.info("Logging sample artifact...")
