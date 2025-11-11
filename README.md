@@ -71,6 +71,10 @@ gg.attach(
 logger.info("Experiment started")
 logger.warning("This is a warning")
 logger.error("An error occurred")
+
+# Goggles works by default in async mode,
+# to ensure all the jobs are finished use
+gg.finish()
 ```
 
 See also [Example 1](./examples/01_basic_run.py), which you can run after cloning the repo with
@@ -102,7 +106,6 @@ logger.image(image, name="sample_image")
 video = np.random.randint(0, 255, (30, 3, 64, 64), dtype=np.uint8)
 logger.video(video, name="sample_video", fps=10)
 
-# Ensure proper cleanup
 gg.finish()
 ```
 
@@ -226,6 +229,13 @@ logger_global = gg.get_logger("examples.basic.global", scope="global")
 logger_scope1.info(f"This will be logged only by {handler1.name}")
 logger_scope2.info(f"This will be logged only by {handler2.name}")
 logger_global.info("This will be logged by both handlers.")
+
+# The same result can be achieved using namespaces,
+# which are indicated by dot notation.
+logger_namespace = gg.get_logger("examples.basic.namespace", scope="namespace")
+logger_namespace.info("This will be logged by both handlers.")
+
+gg.finish()
 ```
 
 See also [examples/02_multi_scope.py](./examples/02_multi_scope.py) for a running example.
@@ -266,7 +276,6 @@ for i in range(num_episodes):
     my_episode(i)
     logger.scalar("total_reward", i, step=i)
 
-# When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
 ```
 
@@ -318,6 +327,7 @@ gg.attach(
 logger.info("Hello, world!")
 logger.debug("you won't see this at INFO")
 
+gg.finish()
 ```
 
 See also [examples/05_custom_handler.py](./examples/06_custom_handler.py) for a complete example.

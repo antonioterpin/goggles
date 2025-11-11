@@ -234,6 +234,7 @@ class TextLogger(Protocol):
             New logger instance with persistent fields.
 
         """
+        ...
 
     def log(
         self,
@@ -289,6 +290,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def info(
         self,
@@ -309,6 +311,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def warning(
         self,
@@ -329,6 +332,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def error(
         self,
@@ -349,6 +353,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def critical(
         self,
@@ -369,6 +374,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
 
 @runtime_checkable
@@ -393,6 +399,7 @@ class DataLogger(Protocol):
                 Additional routing metadata (e.g., split="train").
 
         """
+        ...
 
     def scalar(
         self,
@@ -414,6 +421,7 @@ class DataLogger(Protocol):
                 Additional routing metadata (e.g., split="train").
 
         """
+        ...
 
     def image(
         self,
@@ -436,6 +444,7 @@ class DataLogger(Protocol):
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def video(
         self,
@@ -460,6 +469,7 @@ class DataLogger(Protocol):
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def artifact(
         self,
@@ -482,6 +492,7 @@ class DataLogger(Protocol):
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def vector_field(
         self,
@@ -502,6 +513,7 @@ class DataLogger(Protocol):
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def histogram(
         self,
@@ -524,6 +536,7 @@ class DataLogger(Protocol):
             **extra: Additional routing metadata.
 
         """
+        ...
 
 
 @runtime_checkable
@@ -582,9 +595,11 @@ class Handler(Protocol):
             event: The event to handle.
 
         """
+        ...
 
     def open(self) -> None:
         """Initialize the handler (called when entering a scope)."""
+        ...
 
     def close(self) -> None:
         """Flush and release resources (called when leaving a scope).
@@ -593,6 +608,7 @@ class Handler(Protocol):
             run: The active run context if any.
 
         """
+        ...
 
     def to_dict(self) -> dict:
         """Serialize the handler.
@@ -703,13 +719,30 @@ class EventBus:
         elif not isinstance(event, Event):
             raise TypeError(f"emit expects a dict or Event, got {type(event)!r}")
 
-        if event.scope not in self.scopes:
+        # collect all scopes that this event should hit:
+        scope = event.scope
+        prefix = scope + "."
+
+        # Example:
+        # event.scope == "global"
+        # matches: "global", "global.local1", "global.local2", but not "another"
+        target_scopes = [s for s in self.scopes if s == scope or s.startswith(prefix)]
+
+        if not target_scopes:
             return
 
-        for handler_name in self.scopes[event.scope]:
-            handler = self.handlers.get(handler_name)
-            if handler and handler.can_handle(event.kind):
-                handler.handle(event)
+        # Ensure we don't call the same handler twice
+        # if it's attached to multiple scopes
+        seen_handlers: set[str] = set()
+
+        for s in target_scopes:
+            for handler_name in self.scopes[s]:
+                if handler_name in seen_handlers:
+                    continue
+                handler = self.handlers.get(handler_name)
+                if handler and handler.can_handle(event.kind):
+                    handler.handle(event)
+                seen_handlers.add(handler_name)
 
 
 def get_bus() -> portal.Client:
