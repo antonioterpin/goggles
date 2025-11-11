@@ -1,9 +1,7 @@
 name: Python CI
 
 on:
-    push:
-        branches:
-            - '**'
+    workflow_dispatch:
 
 jobs:
     test:
