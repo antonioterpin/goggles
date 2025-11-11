@@ -3,7 +3,7 @@
 import json
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from uuid import uuid4
 from typing_extensions import Self
 import logging
@@ -41,7 +41,7 @@ class LocalStorageHandler:
     """
 
     name: str = "jsonl"
-    capabilities: frozenset[Kind] = frozenset(
+    capabilities: ClassVar[frozenset[Kind]] = frozenset(
         {"log", "metric", "image", "video", "artifact", "vector_field", "histogram"}
     )
 

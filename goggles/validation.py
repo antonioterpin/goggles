@@ -13,8 +13,8 @@ def round_up_to_multiple(number: float, multiple: int) -> int:
 
     """
     if number % multiple == 0:
-        return number
-    return (number + multiple - 1) // multiple * multiple
+        return int(number)
+    return int((number + multiple - 1) // multiple * multiple)
 
 
 def is_int(val: int | float) -> bool:
