@@ -195,8 +195,8 @@ class LocalStorageHandler:
 
         """
         image_format = "png"
-        if event["extra"] and "format" in event["extra"]:
-            image_format = event["extra"]["format"]
+        if "extra.format" in event:
+            image_format = event["extra.format"]
 
         image_path = self._make_media_name(event, self._images_dir, image_format)
         try:
@@ -223,22 +223,22 @@ class LocalStorageHandler:
 
         """
         video_format = "mp4"
-        if "format" in event["extra"]:
-            video_format = event["extra"]["format"]
+        if "extra.format" in event:
+            video_format = event["extra.format"]
         if video_format not in {"mp4", "gif"}:
             return None
 
         video_path = self._make_media_name(event, self._videos_dir, video_format)
 
         fps = 1.0
-        if event["extra"] and "fps" in event["extra"]:
-            fps = float(event["extra"]["fps"])
+        if "extra.fps" in event:
+            fps = float(event["extra.fps"])
 
         if video_format == "gif":
             video_data: np.ndarray = event["payload"]
             loop = 0
-            if event["extra"] and "loop" in event["extra"]:
-                loop = event["extra"]["loop"]
+            if "extra.loop" in event:
+                loop = event["extra.loop"]
             save_numpy_gif(video_data, str(video_path), fps=int(fps), loop=loop)
             event["payload"] = str(video_path.relative_to(self._base_path))
         elif video_format == "mp4":
@@ -249,19 +249,18 @@ class LocalStorageHandler:
             crf = 18
             convert_gray_to_rgb = True
             preset = "medium"
-            if event["extra"]:
-                if "codec" in event["extra"]:
-                    video_codec = event["extra"]["codec"]
-                if "pix_fmt" in event["extra"]:
-                    pix_fmt = event["extra"]["pix_fmt"]
-                if "bitrate" in event["extra"]:
-                    bitrate = event["extra"]["bitrate"]
-                if "crf" in event["extra"]:
-                    crf = event["extra"]["crf"]
-                if "convert_gray_to_rgb" in event["extra"]:
-                    convert_gray_to_rgb = event["extra"]["convert_gray_to_rgb"]
-                if "preset" in event["extra"]:
-                    preset = event["extra"]["preset"]
+            if "extra.codec" in event:
+                video_codec = event["extra.codec"]
+            if "extra.pix_fmt" in event:
+                pix_fmt = event["extra.pix_fmt"]
+            if "extra.bitrate" in event:
+                bitrate = event["extra.bitrate"]
+            if "extra.crf" in event:
+                crf = event["extra.crf"]
+            if "extra.convert_gray_to_rgb" in event:
+                convert_gray_to_rgb = event["extra.convert_gray_to_rgb"]
+            if "extra.preset" in event:
+                preset = event["extra.preset"]
 
             save_numpy_mp4(
                 video_data,
@@ -289,8 +288,8 @@ class LocalStorageHandler:
 
         """
         artifact_format = "txt"
-        if event["extra"] and "format" in event["extra"]:
-            artifact_format = event["extra"]["format"]
+        if "extra.format" in event:
+            artifact_format = event["extra.format"]
 
         artifact_path = self._make_media_name(
             event, self._artifacts_dir, artifact_format
@@ -323,14 +322,14 @@ class LocalStorageHandler:
         """
         vector_field_path = self._make_media_name(event, self._vector_fields_dir, "npy")
 
-        if event["extra"] and "store_visualization" in event["extra"]:
+        if "extra.store_visualization" in event:
             add_colorbar = False
-            if event["extra"] and "add_colorbar" in event["extra"]:
-                add_colorbar = event["extra"]["add_colorbar"]
+            if "extra.add_colorbar" in event:
+                add_colorbar = event["extra.add_colorbar"]
 
             mode = "magnitude"
-            if event["extra"] and "mode" in event["extra"]:
-                mode = event["extra"]["mode"]
+            if "extra.mode" in event:
+                mode = event["extra.mode"]
 
             if mode not in {"vorticity", "magnitude"}:
                 self._logger.warning(
@@ -380,8 +379,8 @@ class LocalStorageHandler:
             Path: Path to the media file.
         """
         media_name = str(uuid4())
-        if event["extra"] and "name" in event["extra"]:
-            media_name = event["extra"]["name"]
+        if "extra.name" in event:
+            media_name = event["extra.name"]
         if "step" in event and event["step"] is not None:
             media_name += f"_{event['step']}"
         path = media_dir / Path(f"{media_name}.{ext}")
