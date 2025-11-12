@@ -66,7 +66,8 @@ class Event:
         if self.time is not None:
             result["time"] = self.time
         if self.extra is not None:
-            result["extra"] = self.extra
+            for key, value in self.extra.items():
+                result["extra." + key] = value
 
         return result
 
@@ -80,6 +81,9 @@ class Event:
         Returns:
             Parsed Event instance.
         """
+        extra_dict = {
+            k[len("extra.") :]: v for k, v in data.items() if k.startswith("extra.")
+        }
         return cls(
             kind=data["kind"],
             scope=data["scope"],
@@ -89,5 +93,5 @@ class Event:
             level=data.get("level"),
             step=data.get("step"),
             time=data.get("time"),
-            extra=data.get("extra"),
+            extra=extra_dict if extra_dict else None,
         )
