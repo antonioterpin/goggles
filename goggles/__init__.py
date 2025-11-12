@@ -384,8 +384,8 @@ class DataLogger(Protocol):
     def push(
         self,
         metrics: Metrics,
+        step: int,
         *,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -393,7 +393,7 @@ class DataLogger(Protocol):
 
         Args:
             metrics: (Name,value) pairs.
-            step: Optional global step index.
+            step: Global step index.
             time: Optional global timestamp.
             **extra:
                 Additional routing metadata (e.g., split="train").
@@ -405,8 +405,8 @@ class DataLogger(Protocol):
         self,
         name: str,
         value: float | int,
+        step: int,
         *,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -415,7 +415,7 @@ class DataLogger(Protocol):
         Args:
             name: Metric name.
             value: Metric value.
-            step: Optional global step index.
+            step: Global step index.
             time: Optional global timestamp.
             **extra:
                 Additional routing metadata (e.g., split="train").
@@ -426,10 +426,10 @@ class DataLogger(Protocol):
     def image(
         self,
         image: Image,
+        step: int,
         *,
         name: str | None = None,
         format: str = "png",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -437,9 +437,9 @@ class DataLogger(Protocol):
 
         Args:
             image: Image.
+            step: Global step index.
             name: Optional artifact name.
             format: Image format, e.g., "png", "jpeg".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -449,11 +449,11 @@ class DataLogger(Protocol):
     def video(
         self,
         video: Video,
+        step: int,
         *,
         name: str | None = None,
         fps: int = 30,
         format: str = "gif",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -461,10 +461,10 @@ class DataLogger(Protocol):
 
         Args:
             video: Video.
+            step: Global step index.
             name: Optional artifact name.
             fps: Frames per second.
             format: Video format, e.g., "gif", "mp4".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -474,10 +474,10 @@ class DataLogger(Protocol):
     def artifact(
         self,
         data: Any,
+        step: int,
         *,
         name: str | None = None,
         format: str = "bin",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -485,9 +485,9 @@ class DataLogger(Protocol):
 
         Args:
             data: Artifact data.
+            step: Global step index.
             name: Optional artifact name.
             format: Artifact format, e.g., "txt", "bin".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -497,9 +497,9 @@ class DataLogger(Protocol):
     def vector_field(
         self,
         vector_field: VectorField,
+        step: int,
         *,
         name: str | None = None,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -507,8 +507,8 @@ class DataLogger(Protocol):
 
         Args:
             vector_field: Vector field data.
+            step: Global step index.
             name: Optional artifact name.
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -518,9 +518,9 @@ class DataLogger(Protocol):
     def histogram(
         self,
         histogram: Vector,
+        step: int,
         *,
         name: str | None = None,
-        step: int | None = None,
         time: float | None = None,
         static: bool = False,
         **extra: Any,
@@ -529,8 +529,8 @@ class DataLogger(Protocol):
 
         Args:
             histogram: Histogram data.
+            step: Global step index.
             name: Optional artifact name.
-            step: Optional global step index.
             time: Optional global timestamp.
             static: If True, treat as static histogram.
             **extra: Additional routing metadata.

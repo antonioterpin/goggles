@@ -34,9 +34,10 @@ print("- examples/logs/artifacts/ (other files)")
 print()
 
 # Scalar metrics
-logger.scalar("accuracy", 0.95)
-logger.scalar("loss", 0.123)
-logger.scalar("learning_rate", 0.001)
+# Step is required to ensure proper ordering across different handlers
+logger.scalar("accuracy", 0.95, step=0)
+logger.scalar("loss", 0.123, step=0)
+logger.scalar("learning_rate", 0.001, step=0)
 
 # Batch metrics
 logger.push(
@@ -52,8 +53,8 @@ logger.push(
 # Image logging
 logger.info("Logging sample image...")
 dummy_image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
-logger.image(dummy_image, format="png")
-logger.image(dummy_image, name="custom_name", format="jpg")
+logger.image(dummy_image, format="png", step=3)
+logger.image(dummy_image, name="custom_name", format="jpg", step=3)
 
 # RGBA image logging (with alpha channel)
 logger.info("Logging sample RGBA image...")
@@ -61,15 +62,15 @@ dummy_rgba_image = np.random.randint(0, 255, (64, 64, 4), dtype=np.uint8)
 # Make some areas transparent by setting alpha to different values
 dummy_rgba_image[16:32, 16:32, 3] = 128  # Semi-transparent center
 dummy_rgba_image[48:64, 48:64, 3] = 0  # Fully transparent corner
-logger.image(dummy_rgba_image, name="rgba_image", format="png")
+logger.image(dummy_rgba_image, name="rgba_image", format="png", step=4)
 
 # Video logging
 logger.info("Logging sample video...")
 T, H, W = 10, 128, 128
 dummy_video_gif = np.random.rand(T, H, W, 3).astype(np.float32)
 dummy_video_mp4 = np.random.rand(T, H, W, 3).astype(np.float32)
-logger.video(dummy_video_gif, format="gif", fps=30)
-logger.video(dummy_video_mp4, name="custom_name", format="mp4", fps=24)
+logger.video(dummy_video_gif, format="gif", fps=30, step=5)
+logger.video(dummy_video_mp4, name="custom_name", format="mp4", fps=24, step=5)
 
 # RGBA video logging (with alpha channel)
 logger.info("Logging sample RGBA video...")
@@ -84,24 +85,24 @@ for t in range(T):
     mask = (x - center_x) ** 2 + (y - center_y) ** 2 < 400
     dummy_rgba_video[t, :, :, 3] = 0.8  # Base alpha
     dummy_rgba_video[t, mask, 3] = 0.2  # Transparent circle
-logger.video(dummy_rgba_video, name="rgba_video", format="mp4", fps=15)
+logger.video(dummy_rgba_video, name="rgba_video", format="mp4", fps=15, step=6)
 
 # Artifact logging (with text data as example)
 logger.info("Logging sample artifact...")
 artifact_txt = "This is sample artifact content\nLine 2\nLine 3"
-logger.artifact(artifact_txt, name="text_artifact", format="txt")
+logger.artifact(artifact_txt, name="text_artifact", format="txt", step=7)
 artifact_json = {"key": "value"}
-logger.artifact(artifact_json, name="json_artifact", format="json")
+logger.artifact(artifact_json, name="json_artifact", format="json", step=7)
 artifact_yaml = {
     "key": "value",
     "list": [1, 2, 3],
     "nested": {"a": 10, "b": [20, 30]},
 }
-logger.artifact(artifact_yaml, name="yaml_artifact", format="yaml")
+logger.artifact(artifact_yaml, name="yaml_artifact", format="yaml", step=7)
 artifact_csv = "col1,col2\n1,2\n3,4"
-logger.artifact(artifact_csv, name="csv_artifact", format="csv")
+logger.artifact(artifact_csv, name="csv_artifact", format="csv", step=7)
 artifact_unknown = "This is some unknown format data"
-logger.artifact(artifact_unknown, name="unknown_artifact", format="myformat")
+logger.artifact(artifact_unknown, name="unknown_artifact", format="myformat", step=7)
 
 # Vector field logging
 logger.info("Logging sample vector field...")
@@ -161,6 +162,7 @@ logger.vector_field(
     dummy_vector_field,
     name="lamb_oseen_dipole",
     store_visualization=False,  # optional, False by default
+    step=8,
 )
 # We can also log with visualization saving enabled, but will take longer atm.
 logger.vector_field(
@@ -168,6 +170,7 @@ logger.vector_field(
     name="lamb_oseen_dipole_magnitude",
     store_visualization=True,
     mode="magnitude",  # optional
+    step=8,
 )
 # Default is a magnitude plot, but we can also visualize the vorticity
 # and we can add a colorbar to the visualization
@@ -177,12 +180,13 @@ logger.vector_field(
     store_visualization=True,
     mode="vorticity",
     add_colorbar=True,
+    step=8,
 )
 
 # Histogram logging
 logger.info("Logging sample histogram...")
 histogram_data = np.random.randn(1000)
-logger.histogram(histogram_data, name="sample_histogram")
+logger.histogram(histogram_data, name="sample_histogram", step=9)
 
 print()
 print("✓ All events logged successfully!")

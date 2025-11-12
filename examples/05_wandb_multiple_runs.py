@@ -1,3 +1,6 @@
+from pathlib import Path
+import numpy as np
+
 import goggles as gg
 from goggles import WandBHandler
 
@@ -9,6 +12,12 @@ handler = WandBHandler(
     project="goggles_example", reinit="create_new", group="multiple_runs"
 )
 
+# We also attach a local storage handler to keep a local copy of the logs
+local_storage_handler = gg.LocalStorageHandler(
+    path=Path("examples/logs/multiple_runs"),
+    name="multiple_runs.local",
+)
+
 # In particular, we set up multiple runs in an RL training loop, with each
 # episode being a separate W&B run and a global run tracking all episodes.
 num_episodes = 3
@@ -16,6 +25,9 @@ episode_length = 10
 scopes = [f"episode_{episode}" for episode in range(num_episodes + 1)]
 scopes.append("global")
 gg.attach(handler, scopes=scopes)
+gg.attach(local_storage_handler, scopes=scopes)
+
+dummy_image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
 
 
 def my_episode(index: int):
@@ -24,6 +36,9 @@ def my_episode(index: int):
         # Supports scopes transparently
         # and has its own step counter
         episode_logger.scalar("env/reward", index * episode_length + step, step=step)
+        # Example of image logging, which will also be stored
+        # using a namespace
+        episode_logger.image(dummy_image, name="observations/image_stepped", step=step)
 
 
 for i in range(num_episodes):

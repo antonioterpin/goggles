@@ -198,11 +198,7 @@ class LocalStorageHandler:
         if event["extra"] and "format" in event["extra"]:
             image_format = event["extra"]["format"]
 
-        image_name = str(uuid4())
-        if event["extra"] and "name" in event["extra"]:
-            image_name = event["extra"]["name"]
-
-        image_path = self._images_dir / Path(f"{image_name}.{image_format}")
+        image_path = self._make_media_name(event, self._images_dir, image_format)
         try:
             save_numpy_image(
                 event["payload"],
@@ -230,16 +226,9 @@ class LocalStorageHandler:
         if "format" in event["extra"]:
             video_format = event["extra"]["format"]
         if video_format not in {"mp4", "gif"}:
-            self._logger.warning(
-                f"Unknown video format '{video_format}'."
-                " Supported formats are: 'mp4', 'gif'."
-                " The video will not be logged."
-            )
             return None
 
-        video_name = str(uuid4())
-        if event["extra"] and "name" in event["extra"]:
-            video_name = event["extra"]["name"]
+        video_path = self._make_media_name(event, self._videos_dir, video_format)
 
         fps = 1.0
         if event["extra"] and "fps" in event["extra"]:
@@ -250,9 +239,8 @@ class LocalStorageHandler:
             loop = 0
             if event["extra"] and "loop" in event["extra"]:
                 loop = event["extra"]["loop"]
-            gif_path = self._videos_dir / Path(f"{video_name}.gif")
-            save_numpy_gif(video_data, str(gif_path), fps=int(fps), loop=loop)
-            event["payload"] = str(gif_path.relative_to(self._base_path))
+            save_numpy_gif(video_data, str(video_path), fps=int(fps), loop=loop)
+            event["payload"] = str(video_path.relative_to(self._base_path))
         elif video_format == "mp4":
             video_data: np.ndarray = event["payload"]
             video_codec = "libx264"
@@ -275,10 +263,9 @@ class LocalStorageHandler:
                 if "preset" in event["extra"]:
                     preset = event["extra"]["preset"]
 
-            mp4_path = self._videos_dir / Path(f"{video_name}.mp4")
             save_numpy_mp4(
                 video_data,
-                mp4_path,
+                video_path,
                 fps=int(fps),
                 codec=video_codec,
                 pix_fmt=pix_fmt,
@@ -287,7 +274,7 @@ class LocalStorageHandler:
                 convert_gray_to_rgb=convert_gray_to_rgb,
                 preset=preset,
             )
-            event["payload"] = str(mp4_path.relative_to(self._base_path))
+            event["payload"] = str(video_path.relative_to(self._base_path))
         return event
 
     def _save_artifact_to_file(self, event: dict) -> dict | None:
@@ -305,6 +292,10 @@ class LocalStorageHandler:
         if event["extra"] and "format" in event["extra"]:
             artifact_format = event["extra"]["format"]
 
+        artifact_path = self._make_media_name(
+            event, self._artifacts_dir, artifact_format
+        )
+
         if artifact_format not in {"txt", "csv", "json", "yaml"}:
             return None
 
@@ -313,12 +304,6 @@ class LocalStorageHandler:
 
         if artifact_format == "yaml":
             event["payload"] = yaml_dump(event["payload"])
-
-        artifact_name = str(uuid4())
-        if event["extra"] and "name" in event["extra"]:
-            artifact_name = event["extra"]["name"]
-
-        artifact_path = self._artifacts_dir / Path(f"{artifact_name}.{artifact_format}")
 
         with open(artifact_path, "w") as f:
             f.write(event["payload"])
@@ -336,9 +321,7 @@ class LocalStorageHandler:
             dict | None: Updated event with file path instead of raw data.
 
         """
-        vector_field_name = str(uuid4())
-        if event["extra"] and "name" in event["extra"]:
-            vector_field_name = event["extra"]["name"]
+        vector_field_path = self._make_media_name(event, self._vector_fields_dir, "npy")
 
         if event["extra"] and "store_visualization" in event["extra"]:
             add_colorbar = False
@@ -358,13 +341,12 @@ class LocalStorageHandler:
             else:
                 save_numpy_vector_field_visualization(
                     event["payload"],
-                    dir=self._vector_fields_dir,
-                    name=f"{vector_field_name}_visualization",
+                    dir=vector_field_path.parent / Path("visualizations"),
+                    name=vector_field_path.stem,
                     mode=mode,
                     add_colorbar=add_colorbar,
                 )
 
-        vector_field_path = self._vector_fields_dir / Path(f"{vector_field_name}.npy")
         np.save(vector_field_path, event["payload"])
 
         event["payload"] = str(vector_field_path.relative_to(self._base_path))
@@ -380,12 +362,28 @@ class LocalStorageHandler:
             dict: Updated event with file path instead of raw data.
 
         """
-        histogram_name = str(uuid4())
-        if event["extra"] and "name" in event["extra"]:
-            histogram_name = event["extra"]["name"]
-
-        histogram_path = self._histograms_dir / Path(f"{histogram_name}.npy")
+        histogram_path = self._make_media_name(event, self._histograms_dir, "npy")
         np.save(histogram_path, event["payload"])
 
         event["payload"] = str(histogram_path.relative_to(self._base_path))
         return event
+
+    def _make_media_name(self, event: dict, media_dir: Path, ext: str) -> Path:
+        """Get the name of the media from the event extra, or generate a UUID.
+
+        Args:
+            event: Event dictionary.
+            media_dir: Directory to save the media file.
+            ext: File extension for the media file.
+
+        Returns:
+            Path: Path to the media file.
+        """
+        media_name = str(uuid4())
+        if event["extra"] and "name" in event["extra"]:
+            media_name = event["extra"]["name"]
+        if "step" in event and event["step"] is not None:
+            media_name += f"_{event['step']}"
+        path = media_dir / Path(f"{media_name}.{ext}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path

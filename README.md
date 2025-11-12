@@ -28,7 +28,7 @@ A lightweight, flexible Python observability framework designed for robotics res
 
 This framework has been battle-tested across multiple research projects:
 
-[![FluidSControl](https://img.shields.io/badge/GitHub-antonioterpin%2Ffluidscontrol-2ea44f?logo=github)](https://github.com/antonioterpin/fluidscontrol)
+[![FluidsControl](https://img.shields.io/badge/GitHub-antonioterpin%2Ffluidscontrol-2ea44f?logo=github)](https://github.com/antonioterpin/fluidscontrol)
 [![FlowGym](https://img.shields.io/badge/GitHub-antonioterpin%2Fflowgym-2ea44f?logo=github)](https://github.com/antonioterpin/flowgym)
 [![SynthPix](https://img.shields.io/badge/GitHub-antonioterpin%2Fsynthpix-2ea44f?logo=github)](https://github.com/antonioterpin/synthpix)
 [![Πnet](https://img.shields.io/badge/GitHub-antonioterpin%2Fpinet-2ea44f?logo=github)](https://github.com/antonioterpin/pinet)
@@ -101,10 +101,10 @@ for step in range(100):
 
 # Log images and videos
 image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
-logger.image(image, name="sample_image")
+logger.image(image, name="sample_image", step=100)
 
 video = np.random.randint(0, 255, (30, 3, 64, 64), dtype=np.uint8)
-logger.video(video, name="sample_video", fps=10)
+logger.video(video, name="sample_video", fps=10, step=100)
 
 gg.finish()
 ```

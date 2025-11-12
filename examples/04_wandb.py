@@ -20,20 +20,20 @@ for i in range(100):
 
 # Generate and log an image
 image = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-logger.image(image, name="Random image")
+logger.image(image, name="Random image", step=100)
 
 # Generate and log an RGBA image (with alpha channel)
 rgba_image = np.random.randint(0, 255, (100, 100, 4), dtype=np.uint8)
 # Create a gradient alpha effect
 for i in range(100):
     rgba_image[i, :, 3] = int(255 * (i / 100))  # Vertical alpha gradient
-logger.image(rgba_image, name="Random RGBA image")
+logger.image(rgba_image, name="Random RGBA image", step=100)
 
 # Generate and log a video
 video = np.random.randint(
     0, 255, (30, 3, 64, 64), dtype=np.uint8
 )  # 30 frames of 64x64 RGB
-logger.video(video, name="Random Video", fps=10)
+logger.video(video, name="Random Video", fps=10, step=100)
 
 # Generate and log an RGBA video (with alpha channel)
 rgba_video = np.random.randint(0, 255, (15, 64, 64, 4), dtype=np.uint8)
@@ -41,11 +41,11 @@ rgba_video = np.random.randint(0, 255, (15, 64, 64, 4), dtype=np.uint8)
 for t in range(15):
     alpha_value = int(255 * (1 - t / 14))  # Fade out over time
     rgba_video[t, :, :, 3] = alpha_value
-logger.video(rgba_video, name="Random RGBA Video", fps=5)
+logger.video(rgba_video, name="Random RGBA Video", fps=5, step=100)
 
 # Load and log artifact
 artifact = np.random.rand(100, 100, 3)
-logger.artifact(artifact, name="Random Artifact")
+logger.artifact(artifact, name="Random Artifact", step=100)
 
 # Add extra fields to any metric logged to be used as x-axis in W&B
 for i in range(101, 151):
@@ -66,7 +66,7 @@ for i in range(101, 151):
 
 # Log a static histogram (that does not change over time)
 data = np.random.randn(1000)
-logger.histogram(data, name="Random Values Histogram", static=True)
+logger.histogram(data, name="Random Values Histogram", static=True, step=151)
 
 # Or a dynamic histogram (that changes over time)
 for i in range(10):
