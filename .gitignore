@@ -1,4 +1,5 @@
 wandb
+.DS_Store
 
 # Examples
 examples/logs/
