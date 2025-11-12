@@ -28,7 +28,7 @@ A lightweight, flexible Python observability framework designed for robotics res
 
 This framework has been battle-tested across multiple research projects:
 
-[![FluidSControl](https://img.shields.io/badge/GitHub-antonioterpin%2Ffluidscontrol-2ea44f?logo=github)](https://github.com/antonioterpin/fluidscontrol)
+[![FluidsControl](https://img.shields.io/badge/GitHub-antonioterpin%2Ffluidscontrol-2ea44f?logo=github)](https://github.com/antonioterpin/fluidscontrol)
 [![FlowGym](https://img.shields.io/badge/GitHub-antonioterpin%2Fflowgym-2ea44f?logo=github)](https://github.com/antonioterpin/flowgym)
 [![SynthPix](https://img.shields.io/badge/GitHub-antonioterpin%2Fsynthpix-2ea44f?logo=github)](https://github.com/antonioterpin/synthpix)
 [![Πnet](https://img.shields.io/badge/GitHub-antonioterpin%2Fpinet-2ea44f?logo=github)](https://github.com/antonioterpin/pinet)
@@ -51,6 +51,10 @@ uv add "robo-goggles[jax]"
 
 For the development installation, see our [How to contribute](./CONTRIBUTING.md) page.
 
+> [!WARNING]
+> **Port selection**: Goggles requires a port for communication, and works multi-process, multi-machine, multi-user. If different projects have the same port, the behavior is undefined. You can set a unique port for each projet by setting in `.env` the variable `GOGGLES_PORT`.
+
+
 ### Basic usage
 
 ```python
@@ -67,6 +71,10 @@ gg.attach(
 logger.info("Experiment started")
 logger.warning("This is a warning")
 logger.error("An error occurred")
+
+# Goggles works by default in async mode,
+# to ensure all the jobs are finished use
+gg.finish()
 ```
 
 See also [Example 1](./examples/01_basic_run.py), which you can run after cloning the repo with
@@ -93,12 +101,11 @@ for step in range(100):
 
 # Log images and videos
 image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
-logger.image(image, name="sample_image")
+logger.image(image, name="sample_image", step=100)
 
 video = np.random.randint(0, 255, (30, 3, 64, 64), dtype=np.uint8)
-logger.video(video, name="sample_video", fps=10)
+logger.video(video, name="sample_video", fps=10, step=100)
 
-# Ensure proper cleanup
 gg.finish()
 ```
 
@@ -222,6 +229,13 @@ logger_global = gg.get_logger("examples.basic.global", scope="global")
 logger_scope1.info(f"This will be logged only by {handler1.name}")
 logger_scope2.info(f"This will be logged only by {handler2.name}")
 logger_global.info("This will be logged by both handlers.")
+
+# The same result can be achieved using namespaces,
+# which are indicated by dot notation.
+logger_namespace = gg.get_logger("examples.basic.namespace", scope="namespace")
+logger_namespace.info("This will be logged by both handlers.")
+
+gg.finish()
 ```
 
 See also [examples/02_multi_scope.py](./examples/02_multi_scope.py) for a running example.
@@ -262,12 +276,11 @@ for i in range(num_episodes):
     my_episode(i)
     logger.scalar("total_reward", i, step=i)
 
-# When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
 ```
 
 ### Fully asynchronous logging
-As in the WandB example, all the handlers work in the background. By default, the logging calls are blocking, but can be made not blocking by setting the environment variable `GOGGLES_ASYNC` to `1` or `true`. When you use the async mode, remember to call `gg.finish()` at the end from your host machine!
+As in the WandB example, all the handlers work in the background. By default, the logging calls are not blocking, but can be made blocking by setting the environment variable `GOGGLES_ASYNC` to `0` or `false`. When you use the async mode, remember to call `gg.finish()` at the end from your host machine!
 >[!WARNING]
 > This functionality still needs thorough tesing, as well as a better documentation. Help is appreciated! 🤗
 
@@ -314,6 +327,7 @@ gg.attach(
 logger.info("Hello, world!")
 logger.debug("you won't see this at INFO")
 
+gg.finish()
 ```
 
 See also [examples/05_custom_handler.py](./examples/06_custom_handler.py) for a complete example.

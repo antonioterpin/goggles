@@ -130,7 +130,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
         if not GOGGLES_ASYNC:
             future.result()
@@ -165,7 +165,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -201,7 +201,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -237,7 +237,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -273,7 +273,7 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -298,8 +298,8 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     def push(
         self,
         metrics: Metrics,
+        step: int,
         *,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -307,7 +307,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         Args:
             metrics: (Name,value) pairs.
-            step: Optional global step index.
+            step: Global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata (e.g., split="train").
 
@@ -324,7 +324,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -334,17 +334,17 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         self,
         name: str,
         value: float | int,
-        *,
         step: int | None = None,
+        *,
         time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit a single scalar metric.
 
         Args:
-            name: Metric name.
             value: Metric value.
-            step: Optional global step index.
+            step: Global step index.
+            name: Metric name.
             time: Optional global timestamp.
             **extra: Additional routing metadata (e.g., split="train").
 
@@ -361,7 +361,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -370,20 +370,20 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     def image(
         self,
         image: Image,
+        step: int,
         *,
         name: str | None = None,
         format: str = "png",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit an image artifact (encoded bytes).
 
         Args:
-            name: Artifact name.
             image: Image.
+            step: Global step index.
+            name: Artifact name.
             format: Image format, e.g., "png", "jpeg".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -404,7 +404,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -413,11 +413,11 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     def video(
         self,
         video: Video,
+        step: int,
         *,
         name: str | None = None,
         fps: int = 30,
         format: str = "gif",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -425,10 +425,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         Args:
             video: Video.
+            step: Global step index.
             name: Artifact name.
             fps: Frames per second.
             format: Video format, e.g., "gif", "mp4".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -451,7 +451,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -460,20 +460,20 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     def artifact(
         self,
         data: Any,
+        step: int,
         *,
         name: str | None = None,
         format: str = "bin",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
         """Emit a generic artifact (encoded bytes).
 
         Args:
-            name: Artifact name.
             data: Artifact data.
+            step: Global step index.
+            name: Artifact name.
             format: Artifact format, e.g., "txt", "bin".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -495,7 +495,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -504,9 +504,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     def vector_field(
         self,
         vector_field: VectorField,
+        step: int,
         *,
         name: str | None = None,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -514,8 +514,8 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         Args:
             vector_field: Vector field data.
+            step: Global step index.
             name: Optional artifact name.
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
@@ -536,7 +536,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:
@@ -545,9 +545,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     def histogram(
         self,
         histogram: Vector,
+        step: int,
         *,
         name: str | None = None,
-        step: int | None = None,
         time: float | None = None,
         static: bool = False,
         **extra: Any,
@@ -555,9 +555,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a histogram artifact.
 
         Args:
-            name: Optional artifact name.
             histogram: Histogram data.
-            step: Optional global step index.
+            step: Global step index.
+            name: Optional artifact name.
             time: Optional global timestamp.
             static: If True, treat as static histogram.
             **extra: Additional routing metadata.
@@ -580,7 +580,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            ).to_dict()
+            )
         )
 
         if not GOGGLES_ASYNC:

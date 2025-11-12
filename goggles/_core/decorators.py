@@ -10,13 +10,12 @@ from collections.abc import Callable
 # TypeVar for preserving function signature
 P = ParamSpec("P")
 T = TypeVar("T")
-F = TypeVar("F", bound=Callable[P, T])
 
 
 def timeit(
     severity: int = logging.INFO, name: str | None = None, scope: str = "global"
-) -> Callable[[F], F]:
-    """Measure the execution time of a function via decorators.
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Decorator to time function execution and log the duration.
 
     Args:
         severity: Log severity level for timing message.
@@ -61,8 +60,8 @@ def timeit(
     return decorator
 
 
-def trace_on_error(scope: str = "global") -> Callable[[F], F]:
-    """Trace errors and log function parameters via decorators.
+def trace_on_error(scope: str = "global") -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Decorator to log function arguments and state on exception.
 
     Args:
         scope: Scope of the logged event (e.g., "global" or "run").

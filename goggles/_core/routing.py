@@ -10,6 +10,7 @@ Example:
 """
 
 from __future__ import annotations
+from concurrent.futures import Future
 
 import portal
 import socket
@@ -17,8 +18,66 @@ import netifaces
 
 from goggles import EventBus, Event, GOGGLES_HOST, GOGGLES_PORT
 
+
+class GogglesClient:
+    _client: portal.Client
+    futures: list[Future]
+
+    def __init__(
+        self,
+        addr: str = f"{GOGGLES_HOST}:{GOGGLES_PORT}",
+        name: str = f"EventBus-Client@{socket.gethostname()}",
+    ) -> None:
+        self.futures = []
+        self._client = portal.Client(
+            addr=addr,
+            name=name,
+        )
+
+    def emit(self, event: Event) -> Future:
+        """Emit an event via the EventBus.
+
+        Args:
+            event: The event to emit.
+
+        """
+        future = self._client.emit(event.to_dict())
+        self.futures.append(future)  # type: ignore
+        return future  # type: ignore
+
+    def shutdown(self) -> Future:
+        """Shutdown the EventBus client."""
+        for future in self.futures:
+            future.result()
+        return self._client.shutdown()  # type: ignore
+
+    def attach(self, handlers: list[dict], scopes: list[str]) -> None:
+        """Attach a handler under the given scope.
+
+        Args:
+            handlers:
+                The serialized handlers to attach to the scopes.
+            scopes: The scopes under which to attach.
+
+        """
+        self._client.attach(handlers, scopes)
+
+    def detach(self, handler_name: str, scope: str) -> None:
+        """Detach a handler from the given scope.
+
+        Args:
+            handler_name: The name of the handler to detach.
+            scope: The scope from which to detach.
+
+        Raises:
+          ValueError: If the handler was not attached under the requested scope.
+
+        """
+        self._client.detach(handler_name, scope)
+
+
 # Singleton factory ---------------------------------------------------------
-__singleton_client: portal.Client | None = None
+__singleton_client: GogglesClient | None = None
 __singleton_server: portal.Server | None = None
 
 
@@ -76,7 +135,7 @@ def __is_port_in_use(host: str, port: int) -> bool:
         return False
 
 
-def get_bus() -> portal.Client:
+def get_bus() -> GogglesClient:
     """Return the process-wide EventBus singleton.
 
     This function ensures that there is a single instance of the
@@ -115,8 +174,8 @@ def get_bus() -> portal.Client:
 
     global __singleton_client
     if __singleton_client is None:
-        __singleton_client = portal.Client(
-            f"{GOGGLES_HOST}:{GOGGLES_PORT}",
+        __singleton_client = GogglesClient(
+            addr=f"{GOGGLES_HOST}:{GOGGLES_PORT}",
             name=f"EventBus-Client@{socket.gethostname()}",
         )
 

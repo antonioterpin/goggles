@@ -234,6 +234,7 @@ class TextLogger(Protocol):
             New logger instance with persistent fields.
 
         """
+        ...
 
     def log(
         self,
@@ -289,6 +290,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def info(
         self,
@@ -309,6 +311,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def warning(
         self,
@@ -329,6 +332,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def error(
         self,
@@ -349,6 +353,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
     def critical(
         self,
@@ -369,6 +374,7 @@ class TextLogger(Protocol):
                 Additional structured key-value pairs for this record.
 
         """
+        ...
 
 
 @runtime_checkable
@@ -378,8 +384,8 @@ class DataLogger(Protocol):
     def push(
         self,
         metrics: Metrics,
+        step: int,
         *,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -387,19 +393,20 @@ class DataLogger(Protocol):
 
         Args:
             metrics: (Name,value) pairs.
-            step: Optional global step index.
+            step: Global step index.
             time: Optional global timestamp.
             **extra:
                 Additional routing metadata (e.g., split="train").
 
         """
+        ...
 
     def scalar(
         self,
         name: str,
         value: float | int,
+        step: int,
         *,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -408,20 +415,21 @@ class DataLogger(Protocol):
         Args:
             name: Metric name.
             value: Metric value.
-            step: Optional global step index.
+            step: Global step index.
             time: Optional global timestamp.
             **extra:
                 Additional routing metadata (e.g., split="train").
 
         """
+        ...
 
     def image(
         self,
         image: Image,
+        step: int,
         *,
         name: str | None = None,
         format: str = "png",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -429,22 +437,23 @@ class DataLogger(Protocol):
 
         Args:
             image: Image.
+            step: Global step index.
             name: Optional artifact name.
             format: Image format, e.g., "png", "jpeg".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def video(
         self,
         video: Video,
+        step: int,
         *,
         name: str | None = None,
         fps: int = 30,
         format: str = "gif",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -452,22 +461,23 @@ class DataLogger(Protocol):
 
         Args:
             video: Video.
+            step: Global step index.
             name: Optional artifact name.
             fps: Frames per second.
             format: Video format, e.g., "gif", "mp4".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def artifact(
         self,
         data: Any,
+        step: int,
         *,
         name: str | None = None,
         format: str = "bin",
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -475,20 +485,21 @@ class DataLogger(Protocol):
 
         Args:
             data: Artifact data.
+            step: Global step index.
             name: Optional artifact name.
             format: Artifact format, e.g., "txt", "bin".
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def vector_field(
         self,
         vector_field: VectorField,
+        step: int,
         *,
         name: str | None = None,
-        step: int | None = None,
         time: float | None = None,
         **extra: Any,
     ) -> None:
@@ -496,19 +507,20 @@ class DataLogger(Protocol):
 
         Args:
             vector_field: Vector field data.
+            step: Global step index.
             name: Optional artifact name.
-            step: Optional global step index.
             time: Optional global timestamp.
             **extra: Additional routing metadata.
 
         """
+        ...
 
     def histogram(
         self,
         histogram: Vector,
+        step: int,
         *,
         name: str | None = None,
-        step: int | None = None,
         time: float | None = None,
         static: bool = False,
         **extra: Any,
@@ -517,13 +529,14 @@ class DataLogger(Protocol):
 
         Args:
             histogram: Histogram data.
+            step: Global step index.
             name: Optional artifact name.
-            step: Optional global step index.
             time: Optional global timestamp.
             static: If True, treat as static histogram.
             **extra: Additional routing metadata.
 
         """
+        ...
 
 
 @runtime_checkable
@@ -582,9 +595,11 @@ class Handler(Protocol):
             event: The event to handle.
 
         """
+        ...
 
     def open(self) -> None:
         """Initialize the handler (called when entering a scope)."""
+        ...
 
     def close(self) -> None:
         """Flush and release resources (called when leaving a scope).
@@ -593,6 +608,7 @@ class Handler(Protocol):
             run: The active run context if any.
 
         """
+        ...
 
     def to_dict(self) -> dict:
         """Serialize the handler.
@@ -703,13 +719,30 @@ class EventBus:
         elif not isinstance(event, Event):
             raise TypeError(f"emit expects a dict or Event, got {type(event)!r}")
 
-        if event.scope not in self.scopes:
+        # collect all scopes that this event should hit:
+        scope = event.scope
+        prefix = scope + "."
+
+        # Example:
+        # event.scope == "global"
+        # matches: "global", "global.local1", "global.local2", but not "another"
+        target_scopes = [s for s in self.scopes if s == scope or s.startswith(prefix)]
+
+        if not target_scopes:
             return
 
-        for handler_name in self.scopes[event.scope]:
-            handler = self.handlers.get(handler_name)
-            if handler and handler.can_handle(event.kind):
-                handler.handle(event)
+        # Ensure we don't call the same handler twice
+        # if it's attached to multiple scopes
+        seen_handlers: set[str] = set()
+
+        for s in target_scopes:
+            for handler_name in self.scopes[s]:
+                if handler_name in seen_handlers:
+                    continue
+                handler = self.handlers.get(handler_name)
+                if handler and handler.can_handle(event.kind):
+                    handler.handle(event)
+                seen_handlers.add(handler_name)
 
 
 def get_bus() -> portal.Client:
