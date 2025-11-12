@@ -3,13 +3,12 @@
 This example shows a recommended pattern:
     - libraries declare a stable scope and obtain a logger with that scope
     - applications perform the runtime "setup", attaching handlers (console, local
-	storage, optional WandB) to the appropriate scopes
+        storage, optional WandB) to the appropriate scopes
 
 Run this script to see the effect of attaching handlers from the app side.
 """
 
 from pathlib import Path
-import time
 import goggles as gg
 
 
@@ -56,7 +55,9 @@ def setup_logging(project_root: Path | str = "examples/logs"):
         from goggles import WandBHandler
 
         gg.attach(
-            WandBHandler(project="goggles-demo", run_name="app_run", reinit="create_new"),
+            WandBHandler(
+                project="goggles-demo", run_name="app_run", reinit="create_new"
+            ),
             scopes=[LIBRARY_SCOPE],
         )
     except Exception:
@@ -67,7 +68,9 @@ def setup_logging(project_root: Path | str = "examples/logs"):
 
 if __name__ == "__main__":
     print("=== Example: library vs app logging ===")
-    print("Step 1: call library function BEFORE app.setup_logging() -- nothing should be logged")
+    print(
+        "Step 1: call library function BEFORE app.setup_logging() -- nothing should be logged"
+    )
     library_work()
 
     print()
