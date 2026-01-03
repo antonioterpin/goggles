@@ -22,16 +22,22 @@ from goggles import EventBus, Event, GOGGLES_HOST, GOGGLES_PORT
 class GogglesClient:
     _client: portal.Client
     futures: list[Future]
+    _pruning_threshold: int
 
     def __init__(
         self,
         addr: str = f"{GOGGLES_HOST}:{GOGGLES_PORT}",
         name: str = f"EventBus-Client@{socket.gethostname()}",
+        pruning_threshold: int = 100,
     ) -> None:
         self.futures = []
+        self._pruning_threshold = pruning_threshold
+        # Increase maxinflight to avoid stalling the main thread on high-throughput logging.
         self._client = portal.Client(
             addr=addr,
             name=name,
+            maxinflight=1024,
+            max_send_queue=1024,
         )
 
     def emit(self, event: Event) -> Future:
@@ -41,6 +47,10 @@ class GogglesClient:
             event: The event to emit.
 
         """
+        # Periodic cleanup of finished futures to avoid memory leak
+        if len(self.futures) > self._pruning_threshold:
+            self.futures = [f for f in self.futures if not f.done()]
+
         future = self._client.emit(event.to_dict())
         self.futures.append(future)  # type: ignore
         return future  # type: ignore
