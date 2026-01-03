@@ -17,11 +17,16 @@ def tmp_handler(tmp_path):
 
 def make_event(kind, payload=None, extra=None):
     event = MagicMock()
-    event.to_dict.return_value = {
+    event_data = {
         "kind": kind,
         "payload": payload,
-        "extra": extra or {},
+        "extra": {},  # Keep top-level empty for typing compatibility if needed
     }
+    if extra:
+        for k, v in extra.items():
+            event_data[f"extra.{k}"] = v
+
+    event.to_dict.return_value = event_data
     return event
 
 
@@ -69,7 +74,8 @@ def test_json_serializer_numpy_types(tmp_handler):
 def test_save_image_to_file_calls_helper(mock_save, tmp_handler):
     event = {
         "payload": np.zeros((4, 4, 3)),
-        "extra": {"format": "png", "name": "img_name"},
+        "extra.format": "png",
+        "extra.name": "img_name",
     }
     updated = tmp_handler._save_image_to_file(event)
     assert "images/img_name.png" in updated["payload"]
@@ -80,7 +86,10 @@ def test_save_image_to_file_calls_helper(mock_save, tmp_handler):
 def test_save_video_to_file_mp4(mock_save, tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2, 3)),
-        "extra": {"format": "mp4", "name": "vid", "fps": 5.0},
+        "payload": np.zeros((2, 2, 2, 3)),
+        "extra.format": "mp4",
+        "extra.name": "vid",
+        "extra.fps": 5.0,
     }
     updated = tmp_handler._save_video_to_file(event)
     assert "videos/vid.mp4" in updated["payload"]
@@ -91,7 +100,11 @@ def test_save_video_to_file_mp4(mock_save, tmp_handler):
 def test_save_video_to_file_gif(mock_save, tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2, 3)),
-        "extra": {"format": "gif", "name": "anim", "fps": 10.0, "loop": 1},
+        "payload": np.zeros((2, 2, 2, 3)),
+        "extra.format": "gif",
+        "extra.name": "anim",
+        "extra.fps": 10.0,
+        "extra.loop": 1,
     }
     updated = tmp_handler._save_video_to_file(event)
     assert "videos/anim.gif" in updated["payload"]
@@ -99,7 +112,7 @@ def test_save_video_to_file_gif(mock_save, tmp_handler):
 
 
 def test_save_video_to_file_unknown_format_warns(tmp_handler, caplog):
-    event = {"payload": np.zeros((2, 2)), "extra": {"format": "avi"}}
+    event = {"payload": np.zeros((2, 2)), "extra.format": "avi"}
     res = tmp_handler._save_video_to_file(event)
     assert res is None
     assert any("Unknown video format" in m for m in caplog.messages)
@@ -107,7 +120,7 @@ def test_save_video_to_file_unknown_format_warns(tmp_handler, caplog):
 
 def test_save_artifact_to_file_json(tmp_handler):
     payload = {"key": "value"}
-    event = {"payload": payload, "extra": {"format": "json", "name": "art"}}
+    event = {"payload": payload, "extra.format": "json", "extra.name": "art"}
     updated = tmp_handler._save_artifact_to_file(event)
     path = tmp_handler._base_path / updated["payload"]
     assert path.exists()
@@ -118,7 +131,7 @@ def test_save_artifact_to_file_json(tmp_handler):
 
 def test_save_artifact_to_file_yaml(tmp_handler):
     payload = {"key": "value"}
-    event = {"payload": payload, "extra": {"format": "yaml", "name": "art2"}}
+    event = {"payload": payload, "extra.format": "yaml", "extra.name": "art2"}
     updated = tmp_handler._save_artifact_to_file(event)
     path = tmp_handler._base_path / updated["payload"]
     assert path.exists()
@@ -127,7 +140,7 @@ def test_save_artifact_to_file_yaml(tmp_handler):
 
 
 def test_save_artifact_to_file_unknown_format_warns(tmp_handler, caplog):
-    event = {"payload": "data", "extra": {"format": "bin"}}
+    event = {"payload": "data", "extra.format": "bin"}
     res = tmp_handler._save_artifact_to_file(event)
     assert res is None
     assert any("Unknown artifact format" in m for m in caplog.messages)
@@ -137,7 +150,10 @@ def test_save_artifact_to_file_unknown_format_warns(tmp_handler, caplog):
 def test_save_vector_field_to_file(mock_save, tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2)),
-        "extra": {"store_visualization": True, "mode": "magnitude", "name": "vf"},
+        "payload": np.zeros((2, 2, 2)),
+        "extra.store_visualization": True,
+        "extra.mode": "magnitude",
+        "extra.name": "vf",
     }
     updated = tmp_handler._save_vector_field_to_file(event)
     path = tmp_handler._base_path / updated["payload"]
@@ -148,14 +164,16 @@ def test_save_vector_field_to_file(mock_save, tmp_handler):
 def test_save_vector_field_to_file_with_unknown_mode_warns(tmp_handler, caplog):
     event = {
         "payload": np.zeros((2, 2, 2)),
-        "extra": {"store_visualization": True, "mode": "unknown"},
+        "payload": np.zeros((2, 2, 2)),
+        "extra.store_visualization": True,
+        "extra.mode": "unknown",
     }
     tmp_handler._save_vector_field_to_file(event)
     assert any("Unknown vector field visualization mode" in m for m in caplog.messages)
 
 
 def test_save_histogram_to_file(tmp_handler):
-    event = {"payload": np.arange(10), "extra": {"name": "hist"}}
+    event = {"payload": np.arange(10), "extra.name": "hist"}
     updated = tmp_handler._save_histogram_to_file(event)
     path = tmp_handler._base_path / updated["payload"]
     assert np.load(path).shape == (10,)

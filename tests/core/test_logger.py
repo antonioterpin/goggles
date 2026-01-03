@@ -61,11 +61,12 @@ def test_log_methods_emit_event(text_logger, patch_bus, level, method):
     msg = f"message-{method}"
     getattr(text_logger, method)(msg, step=1, time=123.0, extra_field="x")
     assert patch_bus.emit.called
-    event_dict = patch_bus.emit.call_args[0][0]
-    assert event_dict["kind"] == "log"
-    assert event_dict["payload"] == msg
-    assert event_dict["level"] == level
-    assert event_dict["extra"]["extra_field"] == "x"
+    event = patch_bus.emit.call_args[0][0]
+    # Check Event object attributes (not dict keys)
+    assert event.kind == "log"
+    assert event.payload == msg
+    assert event.level == level
+    assert event.extra["extra_field"] == "x"
 
 
 def test_repr_includes_name_and_bound(text_logger):
@@ -84,17 +85,17 @@ def test_repr_includes_name_and_bound(text_logger):
 def test_push_emits_metric_event(goggles_logger, patch_bus):
     metrics = {"loss": 0.1, "acc": 0.9}
     goggles_logger.push(metrics, step=2)
-    event_dict = patch_bus.emit.call_args[0][0]
-    assert event_dict["kind"] == "metric"
-    assert event_dict["payload"] == metrics
-    assert event_dict["step"] == 2
+    event = patch_bus.emit.call_args[0][0]
+    assert event.kind == "metric"
+    assert event.payload == metrics
+    assert event.step == 2
 
 
 def test_scalar_emits_metric_event(goggles_logger, patch_bus):
     goggles_logger.scalar("loss", 0.42)
-    event_dict = patch_bus.emit.call_args[0][0]
-    assert event_dict["kind"] == "metric"
-    assert event_dict["payload"] == {"loss": 0.42}
+    event = patch_bus.emit.call_args[0][0]
+    assert event.kind == "metric"
+    assert event.payload == {"loss": 0.42}
 
 
 @pytest.mark.parametrize(
@@ -114,19 +115,20 @@ def test_artifact_like_methods_emit_event(
     kwargs = {}
     if method == "video":
         kwargs["fps"] = 60
+    kwargs["step"] = 1
     getattr(goggles_logger, method)(fake_payload, name="foo", **kwargs)
-    event_dict = patch_bus.emit.call_args[0][0]
-    assert event_dict["kind"] == kind
-    assert "name" in event_dict["extra"]
-    assert event_dict["extra"]["name"] == "foo"
+    event = patch_bus.emit.call_args[0][0]
+    assert event.kind == kind
+    assert "name" in event.extra
+    assert event.extra["name"] == "foo"
 
 
 def test_histogram_adds_name_and_payload(goggles_logger, patch_bus):
-    goggles_logger.histogram([1, 2, 3], name="hist")
-    event_dict = patch_bus.emit.call_args[0][0]
-    assert event_dict["kind"] == "histogram"
-    assert event_dict["extra"]["name"] == "hist"
-    assert event_dict["payload"] == [1, 2, 3]
+    goggles_logger.histogram([1, 2, 3], name="hist", step=1)
+    event = patch_bus.emit.call_args[0][0]
+    assert event.kind == "histogram"
+    assert event.extra["name"] == "hist"
+    assert event.payload == [1, 2, 3]
 
 
 def test_all_emitters_call_future_result(monkeypatch, patch_bus):

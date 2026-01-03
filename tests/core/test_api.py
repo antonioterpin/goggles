@@ -122,7 +122,8 @@ def test_attach_and_emit(monkeypatch):
     gg.finish()
 
     assert "closed" in DummyHandler.handled
-    assert any(hasattr(e, "msg") for e in DummyHandler.handled if e != "closed")
+    # Events are now Event objects, which have .payload (previously .msg was used in dict)
+    assert any(hasattr(e, "payload") for e in DummyHandler.handled if e != "closed")
 
 
 def test_eventbus_emit_routing_and_detach():
@@ -138,6 +139,9 @@ def test_eventbus_emit_routing_and_detach():
         "kind": "log",
         "scope": "scope",
         "msg": "msg",
+        "payload": "msg",  # Required by Event constructor/processing
+        "filepath": "test.py",
+        "lineno": 1,
         "data": {},
         "timestamp": 0.0,
     }
@@ -163,6 +167,9 @@ def test_eventbus_emit_ignores_unknown_scope():
             "kind": "log",
             "scope": "no_handlers",
             "msg": "none",
+            "payload": "none",  # Required
+            "filepath": "test.py",
+            "lineno": 1,
             "data": {},
             "timestamp": 0.0,
         }

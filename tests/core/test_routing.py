@@ -110,8 +110,9 @@ def test_get_bus_starts_server_if_host(monkeypatch):
     monkeypatch.setattr(routing, "__is_port_in_use", lambda *a, **kw: False)
 
     result = routing.get_bus()
-    assert result == "CLIENT"
-    assert routing.__singleton_client == "CLIENT"
+    assert isinstance(result, routing.GogglesClient)
+    assert result._client == "CLIENT"
+    assert routing.__singleton_client == result
     assert routing.__singleton_server == fake_server
 
 
@@ -137,4 +138,5 @@ def test_get_bus_fallback_on_server_creation_failure(monkeypatch):
     monkeypatch.setattr(routing, "__is_port_in_use", lambda *a, **kw: False)
 
     result = routing.get_bus()
-    assert result == "CLIENT"
+    assert isinstance(result, routing.GogglesClient)
+    assert result._client == "CLIENT"

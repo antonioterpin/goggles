@@ -86,10 +86,11 @@ class CoreTextLogger(TextLogger):
             >>> run_log.info("Initialized")
 
         """
-        self._bound = {**self._bound, **fields}
-        self._scope = scope
-
-        return self
+        return self.__class__(
+            scope=scope,
+            name=self.name,
+            to_bind={**self._bound, **fields},
+        )
 
     def get_bound(self) -> dict[str, Any]:
         """Get a copy of the current persistent bound context.
