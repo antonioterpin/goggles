@@ -86,7 +86,6 @@ def test_save_image_to_file_calls_helper(mock_save, tmp_handler):
 def test_save_video_to_file_mp4(mock_save, tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2, 3)),
-        "payload": np.zeros((2, 2, 2, 3)),
         "extra.format": "mp4",
         "extra.name": "vid",
         "extra.fps": 5.0,
@@ -99,7 +98,6 @@ def test_save_video_to_file_mp4(mock_save, tmp_handler):
 @patch("goggles._core.integrations.storage.save_numpy_gif")
 def test_save_video_to_file_gif(mock_save, tmp_handler):
     event = {
-        "payload": np.zeros((2, 2, 2, 3)),
         "payload": np.zeros((2, 2, 2, 3)),
         "extra.format": "gif",
         "extra.name": "anim",
@@ -150,7 +148,6 @@ def test_save_artifact_to_file_unknown_format_warns(tmp_handler, caplog):
 def test_save_vector_field_to_file(mock_save, tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2)),
-        "payload": np.zeros((2, 2, 2)),
         "extra.store_visualization": True,
         "extra.mode": "magnitude",
         "extra.name": "vf",
@@ -163,7 +160,6 @@ def test_save_vector_field_to_file(mock_save, tmp_handler):
 
 def test_save_vector_field_to_file_with_unknown_mode_warns(tmp_handler, caplog):
     event = {
-        "payload": np.zeros((2, 2, 2)),
         "payload": np.zeros((2, 2, 2)),
         "extra.store_visualization": True,
         "extra.mode": "unknown",

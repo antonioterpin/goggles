@@ -41,8 +41,9 @@ class GogglesClient:
         Args:
             addr: Address of the EventBus server.
             name: Name of this client.
-            pruning_threshold: Number of futures to keep before triggering
-                cleanup of completed ones. Defaults to 100.
+            pruning_threshold: Maximum number of futures to track before
+                triggering cleanup of completed ones; cleanup occurs when the
+                number of futures exceeds this threshold. Defaults to 100.
 
         """
         self.futures = []
