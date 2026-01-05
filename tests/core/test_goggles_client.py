@@ -16,12 +16,16 @@ class MockFuture:
 
 def test_pruning_threshold_defaults_to_100():
     client = GogglesClient()
-    assert client._pruning_threshold == 100
+    assert (
+        client._pruning_threshold == 100
+    ), f"Expected pruning threshold of 100, got {client._pruning_threshold}"
 
 
 def test_pruning_threshold_can_be_customized():
     client = GogglesClient(pruning_threshold=50)
-    assert client._pruning_threshold == 50
+    assert (
+        client._pruning_threshold == 50
+    ), f"Expected pruning threshold of 50, got {client._pruning_threshold}"
 
 
 def test_no_pruning_below_threshold():
@@ -41,7 +45,7 @@ def test_no_pruning_below_threshold():
     client.emit(event)
 
     # 10 existing + 1 new = 11
-    assert len(client.futures) == 11
+    assert len(client.futures) == 11, f"Expected 11 futures, got {len(client.futures)}"
 
 
 def test_pruning_triggered_above_threshold():
@@ -60,7 +64,7 @@ def test_pruning_triggered_above_threshold():
 
     # All 6 were done, so they result in 0.
     # Then we append the new one. Total = 1.
-    assert len(client.futures) == 1
+    assert len(client.futures) == 1, f"Expected 1 future, got {len(client.futures)}"
 
 
 def test_only_finished_futures_are_pruned():
@@ -82,6 +86,6 @@ def test_only_finished_futures_are_pruned():
     client.emit(Event("log", "scope", "msg", filepath="test.py", lineno=1))
 
     # Expect: 2 finished pruned, 4 pending kept, 1 new added = 5
-    assert len(client.futures) == 5
+    assert len(client.futures) == 5, f"Expected 5 futures, got {len(client.futures)}"
     # The new one is also pending
-    assert all(not f.done() for f in client.futures)
+    assert all(not f.done() for f in client.futures), "All futures should be pending"
