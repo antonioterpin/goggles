@@ -80,7 +80,9 @@ def test_only_finished_futures_are_pruned():
     client.futures.extend(pending)
     client.futures.extend(finished)
 
-    assert len(client.futures) == 6
+    assert (
+        len(client.futures) == 6
+    ), f"Expected 6 futures initially, got {len(client.futures)}"
 
     # Emit triggers prune
     client.emit(Event("log", "scope", "msg", filepath="test.py", lineno=1))

@@ -43,8 +43,11 @@ def goggles_logger(patch_bus):
 def test_bind_creates_new_context(text_logger):
     text_logger._bound = {"old": 1}
     bound_logger = text_logger.bind(scope="run", new=2)
-    assert bound_logger.get_bound() == {"old": 1, "new": 2}
-    assert bound_logger._scope == "run"
+    assert bound_logger.get_bound() == {
+        "old": 1,
+        "new": 2,
+    }, "Bound context mismatch after bind"
+    assert bound_logger._scope == "run", "Bound logger scope mismatch"
 
 
 @pytest.mark.parametrize(
@@ -60,21 +63,21 @@ def test_bind_creates_new_context(text_logger):
 def test_log_methods_emit_event(text_logger, patch_bus, level, method):
     msg = f"message-{method}"
     getattr(text_logger, method)(msg, step=1, time=123.0, extra_field="x")
-    assert patch_bus.emit.called
+    assert patch_bus.emit.called, "patch_bus.emit should have been called"
     event = patch_bus.emit.call_args[0][0]
     # Check Event object attributes (not dict keys)
-    assert event.kind == "log"
-    assert event.payload == msg
-    assert event.level == level
-    assert event.extra["extra_field"] == "x"
+    assert event.kind == "log", "Event kind should be 'log'"
+    assert event.payload == msg, "Event payload should match logged message"
+    assert event.level == level, "Event level mismatch"
+    assert event.extra["extra_field"] == "x", "Event extra field mismatch"
 
 
 def test_repr_includes_name_and_bound(text_logger):
     text_logger._bound = {"a": 1}
     rep = repr(text_logger)
-    assert "CoreTextLogger" in rep
-    assert "a" in rep
-    assert "test" in rep
+    assert "CoreTextLogger" in rep, "repr should include class name"
+    assert "a" in rep, "repr should include bound field names"
+    assert "test" in rep, "repr should include logger name"
 
 
 # -------------------------------------------------------------------------
@@ -86,16 +89,16 @@ def test_push_emits_metric_event(goggles_logger, patch_bus):
     metrics = {"loss": 0.1, "acc": 0.9}
     goggles_logger.push(metrics, step=2)
     event = patch_bus.emit.call_args[0][0]
-    assert event.kind == "metric"
-    assert event.payload == metrics
-    assert event.step == 2
+    assert event.kind == "metric", "Event kind should be 'metric'"
+    assert event.payload == metrics, "Event payload should match pushed metrics"
+    assert event.step == 2, "Event step mismatch"
 
 
 def test_scalar_emits_metric_event(goggles_logger, patch_bus):
     goggles_logger.scalar("loss", 0.42)
     event = patch_bus.emit.call_args[0][0]
-    assert event.kind == "metric"
-    assert event.payload == {"loss": 0.42}
+    assert event.kind == "metric", "Event kind should be 'metric' for scalar"
+    assert event.payload == {"loss": 0.42}, "Event payload should match scalar metric"
 
 
 @pytest.mark.parametrize(
@@ -118,17 +121,17 @@ def test_artifact_like_methods_emit_event(
     kwargs["step"] = 1
     getattr(goggles_logger, method)(fake_payload, name="foo", **kwargs)
     event = patch_bus.emit.call_args[0][0]
-    assert event.kind == kind
-    assert "name" in event.extra
-    assert event.extra["name"] == "foo"
+    assert event.kind == kind, f"Event kind should be '{kind}'"
+    assert "name" in event.extra, "Event extra should contain 'name' for artifacts"
+    assert event.extra["name"] == "foo", "Event extra 'name' mismatch"
 
 
 def test_histogram_adds_name_and_payload(goggles_logger, patch_bus):
     goggles_logger.histogram([1, 2, 3], name="hist", step=1)
     event = patch_bus.emit.call_args[0][0]
-    assert event.kind == "histogram"
-    assert event.extra["name"] == "hist"
-    assert event.payload == [1, 2, 3]
+    assert event.kind == "histogram", "Event kind should be 'histogram'"
+    assert event.extra["name"] == "hist", "Event extra 'name' mismatch for histogram"
+    assert event.payload == [1, 2, 3], "Event payload mismatch for histogram"
 
 
 def test_all_emitters_call_future_result(monkeypatch, patch_bus):
