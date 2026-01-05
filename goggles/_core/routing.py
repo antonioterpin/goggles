@@ -20,18 +20,40 @@ from goggles import EventBus, Event, GOGGLES_HOST, GOGGLES_PORT
 
 
 class GogglesClient:
+    """Client for the Goggles EventBus.
+
+    Wraps a portal.Client to provide event emission with automatic
+    future management to prevent memory leaks.
+    """
+
     _client: portal.Client
     futures: list[Future]
+    _pruning_threshold: int
 
     def __init__(
         self,
         addr: str = f"{GOGGLES_HOST}:{GOGGLES_PORT}",
         name: str = f"EventBus-Client@{socket.gethostname()}",
+        pruning_threshold: int = 100,
     ) -> None:
+        """Initialize the client.
+
+        Args:
+            addr: Address of the EventBus server.
+            name: Name of this client.
+            pruning_threshold: Maximum number of futures to track before
+                triggering cleanup of completed ones; cleanup occurs when the
+                number of futures exceeds this threshold. Defaults to 100.
+
+        """
         self.futures = []
+        self._pruning_threshold = pruning_threshold
+        # Increase maxinflight to avoid stalling the main thread on high-throughput logging.
         self._client = portal.Client(
             addr=addr,
             name=name,
+            maxinflight=1024,
+            max_send_queue=1024,
         )
 
     def emit(self, event: Event) -> Future:
@@ -41,6 +63,10 @@ class GogglesClient:
             event: The event to emit.
 
         """
+        # Periodic cleanup of finished futures to avoid memory leak
+        if len(self.futures) > self._pruning_threshold:
+            self.futures = [f for f in self.futures if not f.done()]
+
         future = self._client.emit(event.to_dict())
         self.futures.append(future)  # type: ignore
         return future  # type: ignore

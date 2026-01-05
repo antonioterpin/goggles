@@ -35,8 +35,8 @@ def test_create_history_jittable_and_vmappable(batch_size, length, shape, dtype,
         static_argnums=(0,),
     )
     h = jitted(batch_size)
-    assert "x" in h
-    assert h["x"].shape == (batch_size, length, *shape)
+    assert "x" in h, "'x' field missing in jitted history"
+    assert h["x"].shape == (batch_size, length, *shape), "Jitted history shape mismatch"
 
 
 @pytest.mark.parametrize("B", [1, 3])
@@ -48,7 +48,7 @@ def test_update_history_jittable_and_vmappable(B, T):
     # JIT the update_history function across its array args; spec and rng static
     jitted = jax.jit(update_history)
     out = jitted(hist, new)
-    assert out["x"].shape == (B, T, 1)
+    assert out["x"].shape == (B, T, 1), "Jitted update_history shape mismatch"
 
     # vmap over per-batch row using a wrapper that operates on single-row tensors
     def per_row(h_row, n_row):
@@ -59,7 +59,7 @@ def test_update_history_jittable_and_vmappable(B, T):
 
     vmapped = jax.vmap(per_row)
     out_rows = vmapped(hist["x"], new["x"])
-    assert out_rows.shape == (B, T, 1)
+    assert out_rows.shape == (B, T, 1), "Vmapped update_history shape mismatch"
 
 
 @pytest.mark.parametrize("B", [1, 3])
@@ -75,12 +75,12 @@ def test_slice_and_peek_jittable_and_vmappable(B, T, start, length):
     # slice_history: start/length are Python ints -> static args
     jitted_slice = jax.jit(slice_history, static_argnums=(1, 2))
     s = jitted_slice(history, start, length)
-    assert s["a"].shape == (B, length, 1)
+    assert s["a"].shape == (B, length, 1), "Jitted slice_history shape mismatch"
 
     # peek_last: k is int -> static arg
     jitted_peek = jax.jit(peek_last, static_argnums=(1,))
     p = jitted_peek(history, 2)
-    assert p["b"].shape == (B, 2, 2)
+    assert p["b"].shape == (B, 2, 2), "Jitted peek_last shape mismatch"
 
     # vmap slice_history per-field (operate on single batch rows)
     def per_row_slice(a_row, b_row):
@@ -89,4 +89,4 @@ def test_slice_and_peek_jittable_and_vmappable(B, T, start, length):
 
     vmapped = jax.vmap(per_row_slice)
     out = vmapped(history["a"], history["b"])  # should produce shape (B, 1, 1)
-    assert out.shape == (B, 1, 1)
+    assert out.shape == (B, 1, 1), "Vmapped slice_history shape mismatch"

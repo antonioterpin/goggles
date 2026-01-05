@@ -25,20 +25,21 @@ def test_from_config_basic_dict(
         },
     }
     spec = HistorySpec.from_config(config)
-
-    assert isinstance(spec, HistorySpec)
-    assert set(spec.fields.keys()) == {"images", "flow"}
+    assert isinstance(spec, HistorySpec), "spec should be an instance of HistorySpec"
+    assert set(spec.fields.keys()) == {"images", "flow"}, "Spec fields keys mismatch"
 
     img = spec.fields["images"]
-    assert isinstance(img, HistoryFieldSpec)
-    assert img.length == images_len
-    assert img.shape == images_shape
-    assert img.dtype == jnp.float32
-    assert img.init == "zeros"
+    assert isinstance(
+        img, HistoryFieldSpec
+    ), "'images' field should be a HistoryFieldSpec"
+    assert img.length == images_len, "images length mismatch"
+    assert img.shape == images_shape, "images shape mismatch"
+    assert img.dtype == jnp.float32, "images dtype mismatch"
+    assert img.init == "zeros", "images default init mismatch"
 
     flow = spec.fields["flow"]
-    assert flow.init == flow_init
-    assert flow.dtype == jnp.float32
+    assert flow.init == flow_init, "flow init mismatch"
+    assert flow.dtype == jnp.float32, "flow dtype mismatch"
 
 
 def test_from_config_with_existing_fieldspec():
@@ -47,8 +48,8 @@ def test_from_config_with_existing_fieldspec():
     )
     spec = HistorySpec.from_config({"feat": field_spec})
 
-    assert spec.fields["feat"].length == 5
-    assert spec.fields["feat"].init == "randn"
+    assert spec.fields["feat"].length == 5, "feat length mismatch"
+    assert spec.fields["feat"].init == "randn", "feat init mismatch"
 
 
 @pytest.mark.parametrize("bad_config", [None, 123, [1, 2]])
