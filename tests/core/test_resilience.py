@@ -32,6 +32,7 @@ def clean_env(monkeypatch, free_port):
 
     # Patch the module-level variable since it's already imported
     monkeypatch.setattr(goggles, "GOGGLES_PORT", port_str)
+    monkeypatch.setattr(routing, "GOGGLES_PORT", port_str)
 
     # Reset singletons to force fresh server/client creation
     routing.__singleton_client = None
@@ -94,6 +95,7 @@ def chaos_monitor():
 
 
 @pytest.mark.resilience
+@pytest.mark.xdist_group(name="goggles_singleton")
 def test_server_resilience_to_broken_pipe(chaos_monitor):
     """
     Verify that Goggles server survives multiple BrokenPipe/ConnectionReset errors
