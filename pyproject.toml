@@ -54,11 +54,13 @@ exclude = ["wandb*", "tests*", "examples*"]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
     "hypothesis>=6.0.0",
     "snowballstemmer==2.2.0",
     "pre_commit==4.0.1",
     "tomli",
     "pyupgrade>=3.19.0",
+    "psutil",
 ]
 # Optional JAX-based GPU history subsystem
 jax = [

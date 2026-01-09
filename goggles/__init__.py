@@ -30,6 +30,11 @@ See Also:
 from __future__ import annotations
 
 import portal
+from portal import packlib, client_socket
+from portal.buffers import SendBuffer, RecvBuffer
+from portal.client import Client, Future
+from portal.client_socket import ClientSocket
+from portal.server_socket import ServerSocket
 from collections import defaultdict
 from typing import (
     Any,
@@ -43,6 +48,9 @@ from typing_extensions import Self
 from typing import Literal, TypeVar, ParamSpec
 import logging
 import os
+import select
+import selectors
+import time
 
 from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
 from ._core.integrations import ConsoleHandler, LocalStorageHandler
@@ -107,6 +115,244 @@ def trace_on_error(
 
 # Goggles port for bus communication
 GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
+
+# ---------------------------------------------------------------------------
+# Portal Monkey-Patches (Resilience)
+# ---------------------------------------------------------------------------
+
+# We patch portal at import time to handle ConnectionResetError/BrokenPipeError
+# which otherwise lead to memory leaks (orphaned futures) or livelocks.
+# NOTE: this is a temporary fix until either:
+# - portal is fixed.
+# - we switch to a different bus implementation.
+# - we fork portal and fix it there.
+
+
+# 1. Patch SendBuffer.send to propagate ConnectionResetError
+_original_send = SendBuffer.send
+
+
+def _safe_send(self, sock):
+    try:
+        return _original_send(self, sock)
+    except (BrokenPipeError, ConnectionResetError) as e:
+        raise ConnectionResetError from e
+
+
+SendBuffer.send = _safe_send
+
+
+# 2. Patch ServerSocket._loop to explicitly disconnect on write errors
+def _patched_server_loop(self):
+    writing = False
+    try:
+        while self.running or self._numsending():
+            # Use 0 timeout if we have data to send to avoid artificially slow throughput
+            timeout = 0 if writing else 0.2
+            for key, mask in self.sel.select(timeout=timeout):
+                if key.data == "signal":
+                    os.read(self.get_signal, 1)
+                    writing = self._numsending() > 0
+                elif key.data is None and self.reading:
+                    self._accept(key.fileobj)
+                elif mask & selectors.EVENT_READ and self.reading:
+                    self._recv(key.data)
+
+            # Skip send processing if not actively writing
+            if not writing:
+                continue
+
+            # Process pending send buffers
+            pending = [conn for conn in self.conns.values() if conn.sendbufs]
+            for conn in pending:
+                try:
+                    conn.sendbufs[0].send(conn.sock)
+                    if conn.sendbufs[0].done():
+                        conn.sendbufs.popleft()
+                        if not any(c.sendbufs for c in self.conns.values()):
+                            writing = False
+                except BlockingIOError:
+                    # Non-blocking send would block; try again later
+                    pass
+                except ConnectionResetError as e:
+                    self._disconnect(conn, e)
+    except Exception as e:
+        self.error = e
+
+
+ServerSocket._loop = _patched_server_loop
+
+# 3. Silence "Dropping message" log spam
+_original_server_log = ServerSocket._log
+
+
+def _silent_server_log(self, *args):
+    if args and isinstance(args[0], str) and "Dropping message" in args[0]:
+        return
+    return _original_server_log(self, *args)
+
+
+ServerSocket._log = _silent_server_log
+
+
+# 5. Patch ClientSocket._loop to fix future leaks and reconnection
+def _patched_client_loop(self):
+    recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
+    sock = None
+    poll = select.poll()
+    poll.register(self.get_signal, select.POLLIN)
+    isconn = False
+    writing = False
+
+    while self.running or (self.sendq and isconn):
+        if not isconn:
+            if not self.options.autoconn and not self.wantconn.wait(timeout=0.2):
+                continue
+            sock = self._connect()
+            if not sock:
+                break
+            poll.register(sock, select.POLLIN)
+            self.isconn.set()
+            isconn = True
+            if not self.options.autoconn:
+                self.wantconn.clear()
+            for callback in self.callbacks_conn:
+                callback()
+
+        try:
+            # Poll with 0 timeout if writing to avoid delay
+            timeout = 0 if writing else 0.2
+            fds = [fd for fd, _ in poll.poll(timeout)]
+            if self.get_signal in fds:
+                os.read(self.get_signal, 1)
+                writing = bool(self.sendq)
+
+            try:
+                recvbuf.recv(sock)
+                if recvbuf.done():
+                    if self.recvq.qsize() > self.options.max_recv_queue:
+                        raise RuntimeError("Too many incoming messages enqueued")
+                    msg = recvbuf.result()
+                    self.recvq.put(msg)
+                    for callback in self.callbacks_recv:
+                        callback(msg)
+                    recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
+            except BlockingIOError:
+                # Expected with non-blocking sockets; no data yet, retry on next poll
+                pass
+
+            if self.sendq:
+                try:
+                    self.sendq[0].send(sock)
+                    if self.sendq[0].done():
+                        self.sendq.popleft()
+                        if not self.sendq:
+                            writing = False
+                except BlockingIOError:
+                    pass
+                except ConnectionResetError:
+                    raise
+
+        except OSError as e:
+            # Disconnect and trigger high-level recovery
+            detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            self._log(f"Connection to server lost ({detail})")
+            self.isconn.clear()
+            isconn = False
+            if sock:
+                try:
+                    poll.unregister(sock)
+                    sock.close()
+                except Exception:
+                    pass
+            self.sendq.clear()  # Clear low-level queue; high-level Client will resend
+            recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
+            for callback in self.callbacks_disc:
+                callback()
+            continue
+
+    if sock:
+        try:
+            poll.unregister(sock)
+            sock.close()
+        except Exception:
+            pass
+    try:
+        poll.unregister(self.get_signal)
+    except Exception:
+        pass
+    # Explicitly close poll if method exists (Python 3.4+)
+    if hasattr(poll, "close"):
+        try:
+            poll.close()
+        except Exception:
+            # Ignore any errors; we're just cleaning up
+            pass
+
+
+ClientSocket._loop = _patched_client_loop
+
+# 6. Patch Client.call to avoid infinite backpressure hang
+
+_original_client_call = Client.call
+
+
+def _safe_client_call(self, method, *data):
+    # We duplicate logic because we need to inject the timeout loop
+
+    reqnum = next(self.reqnum).to_bytes(8, "little", signed=False)
+    start = time.time()
+    # Hardcoded default 30s as requested ("always on"), overrideable for tests
+    timeout_seconds = float(os.getenv("GOGGLES_TRANSPORT_TIMEOUT", "30.0"))
+
+    with self.cond:
+        while len(self.futures) >= self.maxinflight:
+            # Check for total timeout
+            if time.time() - start > timeout_seconds:
+                raise TimeoutError(
+                    f"Goggles: Timeout after {timeout_seconds}s waiting for in-flight requests to complete. "
+                    "The server may be down or unresponsive. Consider checking server connectivity "
+                    f"or increasing GOGGLES_TRANSPORT_TIMEOUT. (inflight={len(self.futures)})"
+                )
+
+            self.cond.wait(timeout=0.2)
+            try:
+                self.socket.require_connection(timeout=0)
+            except TimeoutError:
+                # Connection not established yet; try again later
+                pass
+            except (BrokenPipeError, ConnectionResetError, ConnectionRefusedError):
+                # BrokenPipe/ConnectionReset/ConnectionRefused should behave like not connected
+                pass
+
+    with self.lock:
+        self.waitmean[1] += time.time() - start
+        self.waitmean[0] += 1
+        self.sendrate[0] += 1
+
+    if self.errors:  # Raise errors of dropped futures.
+        raise self.errors.popleft()
+
+    name = method.encode("utf-8")
+    strlen = len(name).to_bytes(8, "little", signed=False)
+    sendargs = (reqnum, strlen, name, *packlib.pack(data))
+    rai = [False]
+    future = Future(rai)
+    future.sendargs = sendargs
+    self.futures[reqnum] = future
+    # Store future before sending request because the response may come fast
+    # and the response handler runs in the socket's background thread.
+    try:
+        self.socket.send(*sendargs)
+    except client_socket.Disconnected:
+        future = self.futures.pop(reqnum)
+        future.rai[0] = True
+        raise
+    return future
+
+
+Client.call = _safe_client_call
+
 
 # Handler registry for custom handlers
 _HANDLER_REGISTRY: dict[str, type] = {}
@@ -871,6 +1117,13 @@ __all__ = [
     "ConsoleHandler",
     "LocalStorageHandler",
     "WandBHandler",
+    "Event",
+    "Kind",
+    "Metrics",
+    "Image",
+    "Video",
+    "Vector",
+    "VectorField",
     "INFO",
     "DEBUG",
     "WARNING",
