@@ -95,7 +95,7 @@ def chaos_monitor():
 
 
 @pytest.mark.resilience
-@pytest.mark.isolation_group(name="goggles_singleton")
+@pytest.mark.xdist_group(name="goggles_singleton")
 def test_server_resilience_to_broken_pipe(chaos_monitor):
     """
     Verify that Goggles server survives multiple BrokenPipe/ConnectionReset errors
