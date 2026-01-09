@@ -61,8 +61,6 @@ from .config import load_configuration, save_configuration
 
 P = ParamSpec("P")
 T = TypeVar("T")
-Json = Any
-Message = Any
 
 
 def timeit(
@@ -132,8 +130,8 @@ _original_send = SendBuffer.send
 def _safe_send(self, sock):
     try:
         return _original_send(self, sock)
-    except (BrokenPipeError, ConnectionResetError):
-        raise ConnectionResetError
+    except (BrokenPipeError, ConnectionResetError) as e:
+        raise ConnectionResetError from e
 
 
 SendBuffer.send = _safe_send
@@ -148,26 +146,28 @@ def _patched_server_loop(self):
             timeout = 0 if writing else 0.2
             for key, mask in self.sel.select(timeout=timeout):
                 if key.data == "signal":
-                    writing = True
                     os.read(self.get_signal, 1)
+                    writing = self._numsending() > 0
                 elif key.data is None and self.reading:
                     self._accept(key.fileobj)
                 elif mask & selectors.EVENT_READ and self.reading:
                     self._recv(key.data)
 
-            # Progress status
+            # Skip send processing if not actively writing
             if not writing:
                 continue
 
+            # Process pending send buffers
             pending = [conn for conn in self.conns.values() if conn.sendbufs]
             for conn in pending:
                 try:
                     conn.sendbufs[0].send(conn.sock)
                     if conn.sendbufs[0].done():
                         conn.sendbufs.popleft()
-                        if not any(conn.sendbufs for conn in pending):
+                        if not any(c.sendbufs for c in self.conns.values()):
                             writing = False
                 except BlockingIOError:
+                    # Non-blocking send would block; try again later
                     pass
                 except ConnectionResetError as e:
                     self._disconnect(conn, e)
@@ -177,7 +177,7 @@ def _patched_server_loop(self):
 
 ServerSocket._loop = _patched_server_loop
 
-# 4. Silence "Dropping message" log spam
+# 3. Silence "Dropping message" log spam
 _original_server_log = ServerSocket._log
 
 
@@ -211,15 +211,16 @@ def _patched_client_loop(self):
             isconn = True
             if not self.options.autoconn:
                 self.wantconn.clear()
-            [x() for x in self.callbacks_conn]
+            for callback in self.callbacks_conn:
+                callback()
 
         try:
             # Poll with 0 timeout if writing to avoid delay
             timeout = 0 if writing else 0.2
             fds = [fd for fd, _ in poll.poll(timeout)]
             if self.get_signal in fds:
-                writing = True
                 os.read(self.get_signal, 1)
+                writing = bool(self.sendq)
 
             try:
                 recvbuf.recv(sock)
@@ -228,9 +229,11 @@ def _patched_client_loop(self):
                         raise RuntimeError("Too many incoming messages enqueued")
                     msg = recvbuf.result()
                     self.recvq.put(msg)
-                    [x(msg) for x in self.callbacks_recv]
+                    for callback in self.callbacks_recv:
+                        callback(msg)
                     recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
             except BlockingIOError:
+                # Expected with non-blocking sockets; no data yet, retry on next poll
                 pass
 
             if self.sendq:
@@ -255,15 +258,31 @@ def _patched_client_loop(self):
                 try:
                     poll.unregister(sock)
                     sock.close()
-                except:
+                except Exception:
                     pass
             self.sendq.clear()  # Clear low-level queue; high-level Client will resend
             recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
-            [x() for x in self.callbacks_disc]
+            for callback in self.callbacks_disc:
+                callback()
             continue
 
     if sock:
-        sock.close()
+        try:
+            poll.unregister(sock)
+            sock.close()
+        except Exception:
+            pass
+    try:
+        poll.unregister(self.get_signal)
+    except Exception:
+        pass
+    # Explicitly close poll if method exists (Python 3.4+)
+    if hasattr(poll, "close"):
+        try:
+            poll.close()
+        except Exception:
+            # Ignore any errors; we're just cleaning up
+            pass
 
 
 ClientSocket._loop = _patched_client_loop
@@ -281,22 +300,25 @@ def _safe_client_call(self, method, *data):
     # Hardcoded default 30s as requested ("always on"), overrideable for tests
     timeout_seconds = float(os.getenv("GOGGLES_TRANSPORT_TIMEOUT", "30.0"))
 
-    while len(self.futures) >= self.maxinflight:
-        # Check for total timeout
-        if time.time() - start > timeout_seconds:
-            raise TimeoutError(
-                f"Goggles: Timeout waiting for transport backpressure (inflight={len(self.futures)})"
-            )
+    with self.cond:
+        while len(self.futures) >= self.maxinflight:
+            # Check for total timeout
+            if time.time() - start > timeout_seconds:
+                raise TimeoutError(
+                    f"Goggles: Timeout after {timeout_seconds}s waiting for in-flight requests to complete. "
+                    "The server may be down or unresponsive. Consider checking server connectivity "
+                    f"or increasing GOGGLES_TRANSPORT_TIMEOUT. (inflight={len(self.futures)})"
+                )
 
-        with self.cond:
             self.cond.wait(timeout=0.2)
-        try:
-            self.socket.require_connection(timeout=0)
-        except TimeoutError:
-            pass
-        except Exception:
-            # BrokenPipe/ConnectionReset should behave like not connected
-            pass
+            try:
+                self.socket.require_connection(timeout=0)
+            except TimeoutError:
+                # Connection not established yet; try again later
+                pass
+            except (BrokenPipeError, ConnectionResetError, ConnectionRefusedError):
+                # BrokenPipe/ConnectionReset/ConnectionRefused should behave like not connected
+                pass
 
     with self.lock:
         self.waitmean[1] += time.time() - start
@@ -1097,8 +1119,6 @@ __all__ = [
     "Video",
     "Vector",
     "VectorField",
-    "Json",
-    "Message",
     "INFO",
     "DEBUG",
     "WARNING",

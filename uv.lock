@@ -1779,6 +1779,7 @@ dependencies = [
 dev = [
     { name = "hypothesis" },
     { name = "pre-commit" },
+    { name = "psutil" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pyupgrade" },
@@ -1804,6 +1805,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.23" },
     { name = "portal", specifier = ">=3.7.3" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.0.1" },
+    { name = "psutil", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pyupgrade", marker = "extra == 'dev'", specifier = ">=3.19.0" },

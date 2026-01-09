@@ -11,29 +11,27 @@ from unittest import mock
 import goggles
 import goggles._core.routing as routing
 
-PORT = 2345
+
+@pytest.fixture
+def free_port():
+    """Get a free random port."""
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 
 @pytest.fixture(autouse=True)
-def clean_env(monkeypatch):
+def clean_env(monkeypatch, free_port):
     """Ensure a clean environment and specific port for each test."""
-    monkeypatch.setenv("GOGGLES_PORT", str(PORT))
+    port_str = str(free_port)
+    monkeypatch.setenv("GOGGLES_PORT", port_str)
     monkeypatch.setenv("GOGGLES_ASYNC", "1")
     monkeypatch.setenv("GOGGLES_ENABLE_EVENT_BUS", "1")
 
-    # Forcefully kill anything holding the port to avoid "Port In Use" / Zombie servers
-    try:
-        for proc in psutil.process_iter(["pid", "name"]):
-            try:
-                for con in proc.connections(kind="inet"):
-                    if con.laddr.port == PORT:
-                        print(f"Killing zombie process {proc.pid} holding port {PORT}")
-                        proc.kill()
-                        proc.wait(timeout=2)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    except Exception as e:
-        print(f"Warning: Failed to cleanup port {PORT}: {e}")
+    # Patch the module-level variable since it's already imported
+    monkeypatch.setattr(goggles, "GOGGLES_PORT", port_str)
 
     # Reset singletons to force fresh server/client creation
     routing.__singleton_client = None
@@ -44,7 +42,8 @@ def clean_env(monkeypatch):
     # Cleanup
     try:
         goggles.finish()
-    except:
+    except Exception as e:
+        print(f"Warning: Failed to cleanup goggles: {e}")
         pass
     routing.__singleton_client = None
     routing.__singleton_server = None
@@ -82,6 +81,7 @@ def chaos_monitor():
                         if self.worker_counts[i] % 100 == 0:
                             time.sleep(0.01)
                     except Exception:
+                        # Intentionally ignore all exceptions to keep workers running
                         pass
 
             workers = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
@@ -159,7 +159,8 @@ def test_server_resilience_to_broken_pipe(chaos_monitor):
                 )
 
     chaos_monitor.stop_event.set()
-    [w.join(timeout=2) for w in workers]
+    for w in workers:
+        w.join(timeout=2)
 
     # 6. Final verification
     assert server.loop.running, "Server should still be alive after chaos"
@@ -196,13 +197,3 @@ def test_server_resilience_to_broken_pipe(chaos_monitor):
         mem_growth_mb = (final_rss - initial_rss) / 1024 / 1024
         if mem_growth_mb > 50:
             print(f"WARNING: Significant memory growth: {mem_growth_mb:.2f} MB")
-
-
-@pytest.mark.resilience
-def test_crash_protection_disabled(chaos_monitor, monkeypatch):
-    """
-    Verify that disabling crash protection is respected.
-    """
-    monkeypatch.setenv("GOGGLES_ENABLE_CRASH_PROTECTION", "0")
-    # We just trust the monkeypatch logic doesn't run.
-    pass
