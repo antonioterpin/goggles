@@ -1817,11 +1817,6 @@ wandb = [
     { name = "wandb", extra = ["media"] },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "pytest-xdist" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
@@ -1847,9 +1842,6 @@ requires-dist = [
     { name = "wandb", extras = ["media"], marker = "extra == 'wandb'" },
 ]
 provides-extras = ["dev", "jax", "wandb"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest-xdist", specifier = ">=3.8.0" }]
 
 [[package]]
 name = "ruamel-yaml"

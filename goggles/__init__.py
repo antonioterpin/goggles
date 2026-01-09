@@ -122,6 +122,11 @@ GOGGLES_PORT = os.getenv("GOGGLES_PORT", "2304")
 
 # We patch portal at import time to handle ConnectionResetError/BrokenPipeError
 # which otherwise lead to memory leaks (orphaned futures) or livelocks.
+# NOTE: this is a temporary fix until either:
+# - portal is fixed.
+# - we switch to a different bus implementation.
+# - we fork portal and fix it there.
+
 
 # 1. Patch SendBuffer.send to propagate ConnectionResetError
 _original_send = SendBuffer.send

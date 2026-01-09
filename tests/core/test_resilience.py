@@ -95,7 +95,7 @@ def chaos_monitor():
 
 
 @pytest.mark.resilience
-@pytest.mark.xdist_group(name="goggles_singleton")
+@pytest.mark.isolation_group(name="goggles_singleton")
 def test_server_resilience_to_broken_pipe(chaos_monitor):
     """
     Verify that Goggles server survives multiple BrokenPipe/ConnectionReset errors
@@ -188,8 +188,8 @@ def test_server_resilience_to_broken_pipe(chaos_monitor):
 
     # Heuristics for leaks (only enforce on longer runs to avoid noise)
     if duration >= 10:
-        # FDs shouldn't grow unbounded.
-        # Baseline FDs + some constant overhead for threads/sockets.
+        # File descriptors shouldn't grow unbounded.
+        # Baseline file descriptors + some constant overhead for threads/sockets.
         # If it grew by > 50, we likely have a socket leak.
         fd_growth = final_fds - initial_fds
         if fd_growth > 50:
