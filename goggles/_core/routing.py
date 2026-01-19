@@ -16,7 +16,13 @@ import portal
 import socket
 import netifaces
 
-from goggles import EventBus, Event, GOGGLES_HOST, GOGGLES_PORT
+from goggles import (
+    EventBus,
+    Event,
+    GOGGLES_HOST,
+    GOGGLES_PORT,
+    GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
+)
 
 
 class GogglesClient:
@@ -35,6 +41,7 @@ class GogglesClient:
         addr: str = f"{GOGGLES_HOST}:{GOGGLES_PORT}",
         name: str = f"EventBus-Client@{socket.gethostname()}",
         pruning_threshold: int = 100,
+        suppress_connectivity_logs: bool = GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
     ) -> None:
         """Initialize the client.
 
@@ -44,6 +51,7 @@ class GogglesClient:
             pruning_threshold: Maximum number of futures to track before
                 triggering cleanup of completed ones; cleanup occurs when the
                 number of futures exceeds this threshold. Defaults to 100.
+            suppress_connectivity_logs: If True, suppress connectivity logs.
 
         """
         self.futures = []
@@ -54,6 +62,7 @@ class GogglesClient:
             name=name,
             maxinflight=1024,
             max_send_queue=1024,
+            logging=not suppress_connectivity_logs,
         )
 
     def emit(self, event: Event) -> Future:
@@ -185,7 +194,9 @@ def get_bus() -> GogglesClient:
         try:
             event_bus = EventBus()
             server = portal.Server(
-                GOGGLES_PORT, name=f"EventBus-Server@{socket.gethostname()}"
+                GOGGLES_PORT,
+                name=f"EventBus-Server@{socket.gethostname()}",
+                logging=not GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
             )
             server.bind("attach", event_bus.attach)
             server.bind("detach", event_bus.detach)
@@ -203,6 +214,7 @@ def get_bus() -> GogglesClient:
         __singleton_client = GogglesClient(
             addr=f"{GOGGLES_HOST}:{GOGGLES_PORT}",
             name=f"EventBus-Client@{socket.gethostname()}",
+            suppress_connectivity_logs=GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
         )
 
     return __singleton_client
