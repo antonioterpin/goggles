@@ -502,6 +502,7 @@ class TextLogger(Protocol):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log message at the given severity with optional structured extras.
@@ -511,20 +512,21 @@ class TextLogger(Protocol):
             msg: The log message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional structured key-value pairs for this record.
 
         """
         if severity >= logging.CRITICAL:
-            self.critical(msg, step=step, time=time, **extra)
+            self.critical(msg, step=step, time=time, async_mode=async_mode, **extra)
         elif severity >= logging.ERROR:
-            self.error(msg, step=step, time=time, **extra)
+            self.error(msg, step=step, time=time, async_mode=async_mode, **extra)
         elif severity >= logging.WARNING:
-            self.warning(msg, step=step, time=time, **extra)
+            self.warning(msg, step=step, time=time, async_mode=async_mode, **extra)
         elif severity >= logging.INFO:
-            self.info(msg, step=step, time=time, **extra)
+            self.info(msg, step=step, time=time, async_mode=async_mode, **extra)
         elif severity >= logging.DEBUG:
-            self.debug(msg, step=step, time=time, **extra)
+            self.debug(msg, step=step, time=time, async_mode=async_mode, **extra)
         else:
             # Below DEBUG level; no-op by default.
             pass
@@ -536,6 +538,7 @@ class TextLogger(Protocol):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log a DEBUG message with optional structured extras.
@@ -544,6 +547,7 @@ class TextLogger(Protocol):
             msg: The log message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional structured key-value pairs for this record.
 
@@ -557,6 +561,7 @@ class TextLogger(Protocol):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log an INFO message with optional structured extras.
@@ -565,6 +570,7 @@ class TextLogger(Protocol):
             msg: The log message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional structured key-value pairs for this record.
 
@@ -578,6 +584,7 @@ class TextLogger(Protocol):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log a WARNING message with optional structured extras.
@@ -586,6 +593,7 @@ class TextLogger(Protocol):
             msg: The log message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional structured key-value pairs for this record.
 
@@ -599,6 +607,7 @@ class TextLogger(Protocol):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log an ERROR message with optional structured extras.
@@ -607,6 +616,7 @@ class TextLogger(Protocol):
             msg: The log message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional structured key-value pairs for this record.
 
@@ -620,6 +630,7 @@ class TextLogger(Protocol):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log a CRITICAL message with current exception info attached.
@@ -628,6 +639,7 @@ class TextLogger(Protocol):
             msg: The log message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional structured key-value pairs for this record.
 
@@ -645,6 +657,7 @@ class DataLogger(Protocol):
         step: int,
         *,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a batch of scalar metrics.
@@ -653,6 +666,7 @@ class DataLogger(Protocol):
             metrics: (Name,value) pairs.
             step: Global step index.
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional routing metadata (e.g., split="train").
 
@@ -666,6 +680,7 @@ class DataLogger(Protocol):
         step: int,
         *,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a single scalar metric.
@@ -675,6 +690,7 @@ class DataLogger(Protocol):
             value: Metric value.
             step: Global step index.
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra:
                 Additional routing metadata (e.g., split="train").
 
@@ -689,6 +705,7 @@ class DataLogger(Protocol):
         name: str | None = None,
         format: str = "png",
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit an image artifact (encoded bytes).
@@ -699,6 +716,7 @@ class DataLogger(Protocol):
             name: Optional artifact name.
             format: Image format, e.g., "png", "jpeg".
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -713,6 +731,7 @@ class DataLogger(Protocol):
         fps: int = 30,
         format: str = "gif",
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a video artifact (encoded bytes).
@@ -724,6 +743,7 @@ class DataLogger(Protocol):
             fps: Frames per second.
             format: Video format, e.g., "gif", "mp4".
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -737,6 +757,7 @@ class DataLogger(Protocol):
         name: str | None = None,
         format: str = "bin",
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a generic artifact (encoded bytes).
@@ -747,6 +768,7 @@ class DataLogger(Protocol):
             name: Optional artifact name.
             format: Artifact format, e.g., "txt", "bin".
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -759,6 +781,7 @@ class DataLogger(Protocol):
         *,
         name: str | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a vector field artifact.
@@ -768,6 +791,7 @@ class DataLogger(Protocol):
             step: Global step index.
             name: Optional artifact name.
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -781,6 +805,7 @@ class DataLogger(Protocol):
         name: str | None = None,
         time: float | None = None,
         static: bool = False,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a histogram artifact.
@@ -791,6 +816,7 @@ class DataLogger(Protocol):
             name: Optional artifact name.
             time: Optional global timestamp.
             static: If True, treat as static histogram.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """

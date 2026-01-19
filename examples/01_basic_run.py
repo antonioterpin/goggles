@@ -24,4 +24,13 @@ gg.attach(
 
 logger.debug("Now you will see this debug message!")
 
+# The default is async mode, but one can change the environment variable
+# GOGGLES_ASYNC to "0" to disable it globally.
+# Alternatively, one can disable it per-call:
+logger.debug("This is a synchronous debug message.", async_mode=False)
+
+# Note that having attached two handlers will result in duplicated outputs
+# if both are eligible.
+logger.info("This message will be logged by both handlers.")
+
 gg.finish()
