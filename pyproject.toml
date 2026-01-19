@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "robo-goggles"
-version = "0.1.8"
+version = "0.1.9"
 authors = [
     { name = "Antonio Terpin", email = "aterpin@ethz.ch" },
     { name = "Francesco Banelli", email = "fbanelli@ethz.ch" },
