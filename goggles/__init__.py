@@ -358,6 +358,13 @@ Client.call = _safe_client_call
 _HANDLER_REGISTRY: dict[str, type] = {}
 GOGGLES_HOST = os.getenv("GOGGLES_HOST", "localhost")
 GOGGLES_ASYNC = os.getenv("GOGGLES_ASYNC", "1").lower() in ("1", "true", "yes")
+GOGGLES_SUPPRESS_CONNECTIVITY_LOGS = os.getenv(
+    "GOGGLES_SUPPRESS_CONNECTIVITY_LOGS", "1"
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 # Cache the implementation after first use to avoid repeated imports
 __impl_get_bus: Callable[[], EventBus] | None = None
