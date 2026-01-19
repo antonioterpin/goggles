@@ -320,6 +320,13 @@ def _represent_numpy_scalar(dumper, value):
         return dumper.represent_int(int(value))
     if isinstance(value, np.floating):
         return dumper.represent_float(float(value))
+    # Handle Python built-in types that come from .item()
+    if isinstance(value, bool):
+        return dumper.represent_bool(value)
+    if isinstance(value, int):
+        return dumper.represent_int(value)
+    if isinstance(value, float):
+        return dumper.represent_float(value)
     # Fallback: just stringify
     return dumper.represent_str(str(value))
 
