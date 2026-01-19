@@ -16,22 +16,53 @@ import portal
 import socket
 import netifaces
 
-from goggles import EventBus, Event, GOGGLES_HOST, GOGGLES_PORT
+from goggles import (
+    EventBus,
+    Event,
+    GOGGLES_HOST,
+    GOGGLES_PORT,
+    GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
+)
 
 
 class GogglesClient:
+    """Client for the Goggles EventBus.
+
+    Wraps a portal.Client to provide event emission with automatic
+    future management to prevent memory leaks.
+    """
+
     _client: portal.Client
     futures: list[Future]
+    _pruning_threshold: int
 
     def __init__(
         self,
         addr: str = f"{GOGGLES_HOST}:{GOGGLES_PORT}",
         name: str = f"EventBus-Client@{socket.gethostname()}",
+        pruning_threshold: int = 100,
+        suppress_connectivity_logs: bool = GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
     ) -> None:
+        """Initialize the client.
+
+        Args:
+            addr: Address of the EventBus server.
+            name: Name of this client.
+            pruning_threshold: Maximum number of futures to track before
+                triggering cleanup of completed ones; cleanup occurs when the
+                number of futures exceeds this threshold. Defaults to 100.
+            suppress_connectivity_logs: If True, suppress connectivity logs.
+
+        """
         self.futures = []
+        self._pruning_threshold = pruning_threshold
+        # Increase maxinflight to avoid stalling the main thread on high-throughput logging.
         self._client = portal.Client(
             addr=addr,
             name=name,
+            maxinflight=1024,
+            max_send_queue=1024,
+            logging=not suppress_connectivity_logs,
         )
 
     def emit(self, event: Event) -> Future:
@@ -41,6 +72,10 @@ class GogglesClient:
             event: The event to emit.
 
         """
+        # Periodic cleanup of finished futures to avoid memory leak
+        if len(self.futures) > self._pruning_threshold:
+            self.futures = [f for f in self.futures if not f.done()]
+
         future = self._client.emit(event.to_dict())
         self.futures.append(future)  # type: ignore
         return future  # type: ignore
@@ -159,7 +194,9 @@ def get_bus() -> GogglesClient:
         try:
             event_bus = EventBus()
             server = portal.Server(
-                GOGGLES_PORT, name=f"EventBus-Server@{socket.gethostname()}"
+                GOGGLES_PORT,
+                name=f"EventBus-Server@{socket.gethostname()}",
+                logging=not GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
             )
             server.bind("attach", event_bus.attach)
             server.bind("detach", event_bus.detach)
@@ -177,6 +214,7 @@ def get_bus() -> GogglesClient:
         __singleton_client = GogglesClient(
             addr=f"{GOGGLES_HOST}:{GOGGLES_PORT}",
             name=f"EventBus-Client@{socket.gethostname()}",
+            suppress_connectivity_logs=GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
         )
 
     return __singleton_client

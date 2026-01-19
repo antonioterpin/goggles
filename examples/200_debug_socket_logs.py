@@ -1,6 +1,14 @@
+"""Example of debugging utils: enabling socket logging."""
+
+# Disable suppression of connectivity logs via environment variable
+import os
+
+os.environ["GOGGLES_SUPPRESS_CONNECTIVITY_LOGS"] = "0"
+
 import goggles as gg
 
-# In this basic example, we set up a logger that outputs to the console.
+# All that follows is as in 01_basic_run.py,
+# but now with socket connectivity logs enabled.
 logger = gg.get_logger("examples.basic")
 gg.attach(
     gg.ConsoleHandler(name="examples.basic.console", level=gg.INFO),
@@ -23,14 +31,5 @@ gg.attach(
 )
 
 logger.debug("Now you will see this debug message!")
-
-# The default is async mode, but one can change the environment variable
-# GOGGLES_ASYNC to "0" to disable it globally.
-# Alternatively, one can disable it per-call:
-logger.debug("This is a synchronous debug message.", async_mode=False)
-
-# Note that having attached two handlers will result in duplicated outputs
-# if both are eligible.
-logger.info("This message will be logged by both handlers.")
 
 gg.finish()

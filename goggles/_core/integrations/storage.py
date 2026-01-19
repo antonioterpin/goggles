@@ -178,7 +178,7 @@ class LocalStorageHandler:
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         elif isinstance(obj, (np.integer, np.floating)):
-            return str(obj.item())
+            return obj.item()
 
         # For other non-serializable objects, convert to string
         return str(obj)
@@ -226,6 +226,10 @@ class LocalStorageHandler:
         if "extra.format" in event:
             video_format = event["extra.format"]
         if video_format not in {"mp4", "gif"}:
+            self._logger.warning(
+                f"Unknown video format '{video_format}'. Supported formats are: 'mp4', 'gif'."
+                " The video will not be saved."
+            )
             return None
 
         video_path = self._make_media_name(event, self._videos_dir, video_format)
@@ -296,6 +300,11 @@ class LocalStorageHandler:
         )
 
         if artifact_format not in {"txt", "csv", "json", "yaml"}:
+            self._logger.warning(
+                f"Unknown artifact format '{artifact_format}'."
+                " Supported formats are: 'txt', 'csv', 'json', 'yaml'."
+                " The artifact will not be saved."
+            )
             return None
 
         if artifact_format == "json":

@@ -57,7 +57,11 @@ def test_slice_history_dict_and_field_shapes(B, T, shapes, start, length):
     field_name, field_shape = shapes[0]
     sliced_one = slice_history(history, start=start, length=length, fields=field_name)
     sliced_one = sliced_one[field_name]
-    assert sliced_one.shape == (B, length, *field_shape)
+    assert sliced_one.shape == (
+        B,
+        length,
+        *field_shape,
+    ), "Single field sliced shape mismatch"
     np.testing.assert_array_equal(
         np.asarray(sliced_one),
         np.asarray(history[field_name][:, start : start + length, ...]),
@@ -185,22 +189,22 @@ def test_to_device_and_to_host_roundtrip(sample_history):
     # Assert arrays live on device initially
     for v in jax.tree_util.tree_leaves(device_hist):
         if isinstance(v, jax.Array):
-            assert v.device in jax.devices()
+            assert v.device in jax.devices(), f"Array {v} should be on a JAX device"
 
     # Assert round-trip preserves numerical values
     np.testing.assert_array_equal(np.array(host_hist["a"]), np.ones((2, 2)))
     np.testing.assert_array_equal(
         np.array(host_hist["b"]["x"]), np.arange(4).reshape(2, 2)
     )
-    assert host_hist["b"]["y"] == 42
+    assert host_hist["b"]["y"] == 42, "Subset key 'y' value mismatch"
 
 
 def test_to_device_subset_keys(sample_history):
     # Only move key 'a'
     dev_hist = to_device(sample_history, keys=("a",))
-    assert isinstance(dev_hist["a"], jax.Array)
+    assert isinstance(dev_hist["a"], jax.Array), "Key 'a' should be a JAX array"
     # 'b' remains identical
-    assert dev_hist["b"] is sample_history["b"]
+    assert dev_hist["b"] is sample_history["b"], "Key 'b' should be identical to input"
 
 
 def test_to_host_subset_keys(sample_history):
@@ -209,9 +213,11 @@ def test_to_host_subset_keys(sample_history):
     # Then copy only key 'b'
     host_hist = to_host(dev_hist, keys=("b",))
     # 'b' should now be numpy arrays on host
-    assert isinstance(host_hist["b"]["x"], np.ndarray)
+    assert isinstance(
+        host_hist["b"]["x"], np.ndarray
+    ), "Nested key 'x' should be a numpy array"
     # 'a' remains jax array
-    assert isinstance(host_hist["a"], jax.Array)
+    assert isinstance(host_hist["a"], jax.Array), "Key 'a' should remain a JAX array"
 
 
 def test_to_device_multiple_devices(monkeypatch, sample_history):
@@ -223,7 +229,9 @@ def test_to_device_multiple_devices(monkeypatch, sample_history):
     # Check that elements were placed round-robin across devices
     a_dev = list(moved["a"].sharding.device_set)[0]
     b_dev = list(jax.tree_util.tree_leaves(moved["b"])[0].sharding.device_set)[0]
-    assert a_dev != b_dev
+    assert (
+        a_dev != b_dev
+    ), "Elements should be on different devices for multi-device test"
 
 
 def test_to_device_and_to_host_jittable(sample_history):
@@ -243,5 +251,5 @@ def test_functions_are_pure(sample_history, func):
     # Act
     out = func(sample_history)
     # Assert input not mutated
-    assert sample_history["a"].shape == (2, 2)
-    assert "x" in sample_history["b"]
+    assert sample_history["a"].shape == (2, 2), "Input 'a' shape mutated"
+    assert "x" in sample_history["b"], "Input 'b' content mutated"

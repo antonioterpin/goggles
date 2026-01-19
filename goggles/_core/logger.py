@@ -86,10 +86,11 @@ class CoreTextLogger(TextLogger):
             >>> run_log.info("Initialized")
 
         """
-        self._bound = {**self._bound, **fields}
-        self._scope = scope
-
-        return self
+        return self.__class__(
+            scope=scope,
+            name=self.name,
+            to_bind={**self._bound, **fields},
+        )
 
     def get_bound(self) -> dict[str, Any]:
         """Get a copy of the current persistent bound context.
@@ -107,6 +108,7 @@ class CoreTextLogger(TextLogger):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log a DEBUG message with optional per-call structured fields.
@@ -115,6 +117,7 @@ class CoreTextLogger(TextLogger):
             msg: Human-readable message.
             step: Step number associated with the event.
             time: Timestamp of the event in seconds since epoch.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Per-call structured fields merged with the bound context.
 
         """
@@ -132,7 +135,7 @@ class CoreTextLogger(TextLogger):
                 extra={**self._bound, **extra},
             )
         )
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def info(
@@ -142,6 +145,7 @@ class CoreTextLogger(TextLogger):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log an INFO message with optional structured extras.
@@ -150,6 +154,7 @@ class CoreTextLogger(TextLogger):
             msg: The log message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional structured key-value pairs for this record.
 
         """
@@ -168,7 +173,7 @@ class CoreTextLogger(TextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def warning(
@@ -178,6 +183,7 @@ class CoreTextLogger(TextLogger):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log a WARNING message with optional structured extras.
@@ -186,6 +192,7 @@ class CoreTextLogger(TextLogger):
             msg: Human-readable message.
             step: (int | None): The step number.
             time: (float | None): The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Per-call structured fields merged with the bound context.
 
         """
@@ -204,7 +211,7 @@ class CoreTextLogger(TextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def error(
@@ -214,6 +221,7 @@ class CoreTextLogger(TextLogger):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log an ERROR message with optional per-call structured fields.
@@ -222,6 +230,7 @@ class CoreTextLogger(TextLogger):
             msg: Human-readable message.
             step: The step number.
             time: The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Per-call structured fields merged with the bound context.
 
         """
@@ -240,7 +249,7 @@ class CoreTextLogger(TextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def critical(
@@ -250,6 +259,7 @@ class CoreTextLogger(TextLogger):
         *,
         step: int | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Log a CRITICAL message with optional per-call structured fields.
@@ -258,6 +268,7 @@ class CoreTextLogger(TextLogger):
             msg: Human-readable message.
             step: (int | None): The step number.
             time: (float | None): The timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Per-call structured fields merged with the bound context.
 
         """
@@ -276,7 +287,7 @@ class CoreTextLogger(TextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def __repr__(self) -> str:
@@ -301,6 +312,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         step: int,
         *,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a batch of scalar metrics.
@@ -309,6 +321,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             metrics: (Name,value) pairs.
             step: Global step index.
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata (e.g., split="train").
 
         """
@@ -327,7 +340,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def scalar(
@@ -337,6 +350,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         step: int | None = None,
         *,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a single scalar metric.
@@ -346,6 +360,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             step: Global step index.
             name: Metric name.
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata (e.g., split="train").
 
         """
@@ -364,7 +379,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def image(
@@ -375,6 +390,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         name: str | None = None,
         format: str = "png",
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit an image artifact (encoded bytes).
@@ -385,6 +401,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             name: Artifact name.
             format: Image format, e.g., "png", "jpeg".
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -407,7 +424,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def video(
@@ -419,6 +436,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         fps: int = 30,
         format: str = "gif",
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a video artifact (encoded bytes).
@@ -430,6 +448,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             fps: Frames per second.
             format: Video format, e.g., "gif", "mp4".
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -454,7 +473,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def artifact(
@@ -465,6 +484,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         name: str | None = None,
         format: str = "bin",
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a generic artifact (encoded bytes).
@@ -475,6 +495,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             name: Artifact name.
             format: Artifact format, e.g., "txt", "bin".
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -498,7 +519,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def vector_field(
@@ -508,6 +529,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         *,
         name: str | None = None,
         time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a vector field artifact.
@@ -517,6 +539,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             step: Global step index.
             name: Optional artifact name.
             time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -539,7 +562,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
     def histogram(
@@ -550,6 +573,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         name: str | None = None,
         time: float | None = None,
         static: bool = False,
+        async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
         """Emit a histogram artifact.
@@ -560,6 +584,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             name: Optional artifact name.
             time: Optional global timestamp.
             static: If True, treat as static histogram.
+            async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
         """
@@ -583,7 +608,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             )
         )
 
-        if not GOGGLES_ASYNC:
+        if not async_mode:
             future.result()
 
 
