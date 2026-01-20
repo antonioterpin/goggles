@@ -58,6 +58,7 @@ class WandBHandler:
 
         """
         self._logger = logging.getLogger(self.name)
+        # Ensure that Goggles logs are not propagated to the root logger to avoid duplicates
         self._logger.propagate = False
         valid_reinit = {"finish_previous", "return_previous", "create_new", "default"}
         if reinit not in valid_reinit:
