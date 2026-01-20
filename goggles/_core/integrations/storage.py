@@ -79,6 +79,8 @@ class LocalStorageHandler:
 
         # Open logger for diagnostics
         self._logger = logging.getLogger(self.name)
+        # Ensure that Goggles logs are not propagated to the root logger to avoid duplicates
+        self._logger.propagate = False
 
     def close(self) -> None:
         """Flush and close the JSONL file."""
