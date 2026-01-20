@@ -96,6 +96,8 @@ class ConsoleHandler:
     def open(self) -> None:
         """Initialize the handler (create logger and formatter)."""
         self._logger = logging.getLogger(self.name)
+        # Ensure that Goggles logs are not propagated to the root logger to avoid duplicates
+        self._logger.propagate = False
         if not self._logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(

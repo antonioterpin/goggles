@@ -58,7 +58,7 @@ class WandBHandler:
 
         """
         self._logger = logging.getLogger(self.name)
-        self._logger.propagate = True
+        self._logger.propagate = False
         valid_reinit = {"finish_previous", "return_previous", "create_new", "default"}
         if reinit not in valid_reinit:
             raise ValueError(
