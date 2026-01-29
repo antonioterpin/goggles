@@ -64,8 +64,8 @@ dev = [
 ]
 # Optional JAX-based GPU history subsystem
 jax = [
-    "jax>=0.4.0",
-    "jaxlib>=0.4.0",
+    "jax>=0.4.3",
+    "jaxlib>=0.4.3",
 ]
 # Optional W&B integration
 wandb = [
