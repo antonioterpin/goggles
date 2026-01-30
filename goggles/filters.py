@@ -431,6 +431,7 @@ AVAILABLE_FILTERS = {
     "MedianFilter": MedianFilter,
     "QuantizationFilter": QuantizationFilter,
     "ConcatFilter": ConcatFilter,
+    "ScaleFilter": ScaleFilter,
 }
 
 
