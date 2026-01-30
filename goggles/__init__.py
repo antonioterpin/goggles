@@ -57,7 +57,7 @@ from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
 from ._core.integrations import ConsoleHandler, LocalStorageHandler
 from ._core.decorators import timeit as _timeit, trace_on_error as _trace_on_error
 from .shutdown import GracefulShutdown
-from .config import load_configuration, save_configuration
+from .config import load_configuration, save_configuration, PrettyConfig
 from . import filters
 
 
@@ -1150,6 +1150,7 @@ __all__ = [
     "register_handler",
     "load_configuration",
     "save_configuration",
+    "PrettyConfig",
     "timeit",
     "trace_on_error",
     "GracefulShutdown",
