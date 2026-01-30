@@ -58,6 +58,7 @@ from ._core.integrations import ConsoleHandler, LocalStorageHandler
 from ._core.decorators import timeit as _timeit, trace_on_error as _trace_on_error
 from .shutdown import GracefulShutdown
 from .config import load_configuration, save_configuration
+from . import filters
 
 
 P = ParamSpec("P")
@@ -1167,6 +1168,7 @@ __all__ = [
     "WARNING",
     "ERROR",
     "CRITICAL",
+    "filters",
 ]
 
 # ---------------------------------------------------------------------------
