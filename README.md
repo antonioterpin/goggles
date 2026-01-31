@@ -91,7 +91,7 @@ import numpy as np
 # Enable metrics logging
 logger = gg.get_logger("experiment", with_metrics=True)
 gg.attach(
-    gg.WandBHandler(project="my_project", name="run_1"),
+    gg.WandBHandler(project="my_project", run_name="run_1"),
 )
 
 # Log metrics, images, and videos
