@@ -106,6 +106,26 @@ class FilterConfig:
     type: str
     parameters: Mapping[str, Any]
 
+    @classmethod
+    def from_config(cls, cfg: Mapping[str, Any]) -> FilterConfig:
+        """Create a FilterConfig from a config dict.
+
+        Args:
+            cfg: Configuration dict with keys "type" and optional "parameters".
+
+        Returns:
+            FilterConfig instance.
+        """
+        return cls(type=str(cfg["type"]), parameters=dict(cfg.get("parameters", {})))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a plain Python dict.
+
+        Returns:
+            Dictionary representation of the FilterConfig.
+        """
+        return {"type": self.type, "parameters": dict(self.parameters)}
+
 
 class Filter(ABC):
     """Abstract base class for array filters.
@@ -343,7 +363,7 @@ class _WindowBufferFilter(_BackendAware):
             self.buffer = xp.zeros((self.window_size,) + data.shape, dtype=data.dtype)
 
         # buffer is guaranteed to be non-None here
-        assert self.buffer is not None
+        assert self.buffer is not None, "Buffer should be initialized"
         self.buffer = _buffer_set(self.buffer, self.index, data)
         self.index = (self.index + 1) % self.window_size
         self.n_seen += 1
@@ -372,7 +392,7 @@ class AverageFilter(_WindowBufferFilter):
         """
         xp, valid_len = self._push(data)
         buf = self.buffer
-        assert buf is not None
+        assert buf is not None, "Buffer should be initialized"
         return xp.mean(buf[:valid_len], axis=0)
 
     def _name(self) -> str:
@@ -394,7 +414,7 @@ class MedianFilter(_WindowBufferFilter):
         """
         xp, valid_len = self._push(data)
         buf = self.buffer
-        assert buf is not None
+        assert buf is not None, "Buffer should be initialized"
         return xp.median(buf[:valid_len], axis=0)
 
     def _name(self) -> str:
@@ -509,7 +529,7 @@ class QuantizationFilter(_BackendAware):
             self.levels = base.reshape((-1,) + (1,) * data.ndim)
 
         levels = self.levels
-        assert levels is not None
+        assert levels is not None, "Quantization levels should be initialized"
 
         idx = xp.argmin(xp.abs(levels - clipped), axis=0)
         gathered = xp.take_along_axis(levels, idx[None, ...], axis=0)
@@ -582,13 +602,19 @@ Note:
 """
 
 
-def create_concat_filter(filter_configs: list[FilterConfig]) -> ConcatFilter:
+def create_concat_filter(
+    filter_configs: list[FilterConfig],
+    *,
+    available_filters: dict[str, type[Filter]] = AVAILABLE_FILTERS,
+) -> ConcatFilter:
     """Create a `ConcatFilter` from a list of declarative filter configs.
 
     Args:
         filter_configs: Ordered list of filter configurations. Each config's
-            `type` must exist in `AVAILABLE_FILTERS`, and its `parameters` must
+            `type` must exist in `available_filters`, and its `parameters` must
             match the target constructor signature.
+        available_filters: Optional custom filter registry to use instead of
+            the default `AVAILABLE_FILTERS`.
 
     Returns:
         A `ConcatFilter` that applies the configured filters in sequence.
@@ -598,10 +624,10 @@ def create_concat_filter(filter_configs: list[FilterConfig]) -> ConcatFilter:
     """
     filters: list[Filter] = []
     for idx, cfg in enumerate(filter_configs):
-        if cfg.type not in AVAILABLE_FILTERS:
+        if cfg.type not in available_filters:
             raise ValueError(f"Unknown filter type: {cfg.type}")
 
-        cls = AVAILABLE_FILTERS[cfg.type]
+        cls = available_filters[cfg.type]
         try:
             filters.append(cls(**cfg.parameters, prefix=f"[{idx}] "))  # type: ignore[arg-type]
         except Exception as e:
