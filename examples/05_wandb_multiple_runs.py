@@ -7,7 +7,9 @@ from goggles import WandBHandler
 # In this example, we set up multiple runs in Weights & Biases (W&B).
 # All runs created by the handler will be grouped under
 # the same project and group.
-logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)
+logger: gg.GogglesLogger = gg.get_logger(
+    "examples.basic", scope="training", with_metrics=True
+)
 handler = WandBHandler(
     project="goggles_example", reinit="create_new", group="multiple_runs"
 )
@@ -22,16 +24,14 @@ local_storage_handler = gg.LocalStorageHandler(
 # episode being a separate W&B run and a global run tracking all episodes.
 num_episodes = 3
 episode_length = 10
-scopes = [f"episode_{episode}" for episode in range(num_episodes + 1)]
-scopes.append("global")
-gg.attach(handler, scopes=scopes)
-gg.attach(local_storage_handler, scopes=scopes)
+gg.attach(handler, scopes=["training"])
+gg.attach(local_storage_handler, scopes=["training"])
 
 dummy_image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
 
 
 def my_episode(index: int):
-    episode_logger = gg.get_logger(scope=f"episode_{index}", with_metrics=True)
+    episode_logger = gg.get_logger(scope=f"training.episode_{index}", with_metrics=True)
     for step in range(episode_length):
         # Supports scopes transparently
         # and has its own step counter

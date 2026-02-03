@@ -24,7 +24,9 @@ logger_global.info("This will be logged by both handlers.")
 
 # The same result can be achieved using namespaces,
 # which are indicated by dot notation.
-logger_namespace = gg.get_logger("examples.basic.namespace", scope="namespace")
-logger_namespace.info("This will be logged by both handlers.")
+handler3 = gg.ConsoleHandler(name="examples.basic.console.3", level=gg.INFO)
+gg.attach(handler3, scopes=["namespace"])
+logger_scope1.info(f"This will be logged by {handler1.name} and {handler3.name}")
+logger_scope2.info(f"This will be logged by {handler2.name} and {handler3.name}")
 
 gg.finish()

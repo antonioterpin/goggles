@@ -90,19 +90,7 @@ class WandBHandler:
         return kind in self.capabilities
 
     def open(self) -> None:
-        """Initialize the global W&B run."""
-        if self._wandb_run is not None:
-            return
-        self._wandb_run = wandb.init(
-            project=self._project,
-            entity=self._entity,
-            name=self._base_run_name,
-            config=self._config,
-            reinit=self._reinit,  # type: ignore
-            group=self._group,
-        )
-        self._runs[self.GLOBAL_SCOPE] = self._wandb_run
-        self._current_scope = self.GLOBAL_SCOPE
+        """Do nothing. Run is initialized on handle."""
 
     def handle(self, event: Any) -> None:
         """Process a Goggles event and forward it to W&B.
@@ -117,6 +105,7 @@ class WandBHandler:
         payload = getattr(event, "payload", None)
         extra = getattr(event, "extra", {}) or {}
 
+        # Get or create the W&B run for the given scope
         run = self._get_or_create_run(scope)
 
         if kind == "metric":

@@ -1006,12 +1006,13 @@ class EventBus:
 
         # collect all scopes that this event should hit:
         scope = event.scope
-        prefix = scope + "."
 
         # Example:
         # event.scope == "global"
         # matches: "global", "global.local1", "global.local2", but not "another"
-        target_scopes = [s for s in self.scopes if s == scope or s.startswith(prefix)]
+        target_scopes = [
+            s for s in self.scopes if s == scope or scope.startswith(s + ".")
+        ]
 
         if not target_scopes:
             return
