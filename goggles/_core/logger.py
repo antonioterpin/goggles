@@ -11,7 +11,6 @@ External code should not import from this module. Instead, depend on:
 import logging
 import inspect
 from typing import Any
-from collections.abc import Mapping
 from typing_extensions import Self
 
 from goggles import TextLogger, GogglesLogger, Event, GOGGLES_ASYNC
@@ -44,7 +43,7 @@ class CoreTextLogger(TextLogger):
         self,
         scope: str,
         name: str | None = None,
-        to_bind: Mapping[str, Any] | None = None,
+        **to_bind: Any,
     ):
         """Initialize the CoreTextLogger.
 
@@ -59,7 +58,7 @@ class CoreTextLogger(TextLogger):
 
         self.name = name
         self._scope = scope
-        self._bound: dict[str, Any] = dict(to_bind or {})
+        self._bound: dict[str, Any] = dict(**to_bind or {})
         self._client = get_bus()
 
     def bind(self, /, *, scope: str = "global", **fields: Any) -> Self:
@@ -89,7 +88,7 @@ class CoreTextLogger(TextLogger):
         return self.__class__(
             scope=scope,
             name=self.name,
-            to_bind={**self._bound, **fields},
+            **{**self._bound, **fields},
         )
 
     def get_bound(self) -> dict[str, Any]:
