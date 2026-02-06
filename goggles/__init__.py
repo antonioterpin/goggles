@@ -459,9 +459,9 @@ def get_logger(
 
     """
     if with_metrics:
-        return _make_goggles_logger(name, scope, to_bind)
+        return _make_goggles_logger(name, scope, **to_bind)
     else:
-        return _make_text_logger(name, scope, to_bind)
+        return _make_text_logger(name, scope, **to_bind)
 
 
 @runtime_checkable
