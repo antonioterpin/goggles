@@ -379,21 +379,21 @@ __impl_get_bus: Callable[[], EventBus] | None = None
 def _make_text_logger(
     name: str | None,
     scope: str,
-    to_bind: dict[str, Any],
+    **to_bind: Any,
 ) -> TextLogger:
     from ._core.logger import CoreTextLogger
 
-    return CoreTextLogger(name=name, scope=scope, to_bind=to_bind)
+    return CoreTextLogger(name=name, scope=scope, **to_bind)
 
 
 def _make_goggles_logger(
     name: str | None,
     scope: str,
-    to_bind: dict[str, Any],
+    **to_bind: Any,
 ) -> GogglesLogger:
     from ._core.logger import CoreGogglesLogger
 
-    return CoreGogglesLogger(name=name, scope=scope, to_bind=to_bind)
+    return CoreGogglesLogger(name=name, scope=scope, **to_bind)
 
 
 # ---------------------------------------------------------------------------
