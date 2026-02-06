@@ -104,9 +104,10 @@ class WandBHandler:
         step = getattr(event, "step", None)
         payload = getattr(event, "payload", None)
         extra = getattr(event, "extra", {}) or {}
+        extra_config = extra.pop("config_wandb", {})
 
         # Get or create the W&B run for the given scope
-        run = self._get_or_create_run(scope)
+        run = self._get_or_create_run(scope, extra_config)
 
         if kind == "metric":
             if not isinstance(payload, Mapping):
@@ -284,11 +285,12 @@ class WandBHandler:
             group=serialized.get("group"),
         )
 
-    def _get_or_create_run(self, scope: str) -> Run:
+    def _get_or_create_run(self, scope: str, extra_config: dict) -> Run:
         """Get or create a W&B run for the given scope.
 
         Args:
             scope: The scope for which to get or create the W&B run.
+            extra_config: Additional config to pass when creating a new run.
 
         Returns:
             The W&B run associated with the given scope.
@@ -306,7 +308,7 @@ class WandBHandler:
             project=self._project,
             entity=self._entity,
             name=name,
-            config={**self._config, "scope": scope},
+            config={**self._config, "scope": scope, **extra_config},
             group=self._group,
             reinit=self._reinit,  # type: ignore
         )
