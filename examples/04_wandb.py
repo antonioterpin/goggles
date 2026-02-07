@@ -29,6 +29,30 @@ for i in range(100):
     rgba_image[i, :, 3] = int(255 * (i / 100))  # Vertical alpha gradient
 logger.image(rgba_image, name="Random RGBA image", step=100)
 
+# Grayscale GIF video
+gray_video_gif = np.random.randint(
+    0, 255, (30, 64, 64), dtype=np.uint8
+)  # (F, H, W), also accepted as (F, 1, H, W)
+logger.video(
+    gray_video_gif,
+    name="Grayscale GIF Video",
+    fps=15,
+    format="gif",
+    step=100,
+)
+
+# Grayscale MP4 video
+gray_video_mp4 = np.random.randint(
+    0, 255, (30, 64, 64), dtype=np.uint8
+)  # (F, H, W), also accepted as (F, 1, H, W)
+logger.video(
+    gray_video_mp4,
+    name="Grayscale MP4 Video",
+    fps=10,
+    format="mp4",
+    step=100,
+)
+
 # Generate and log a video
 video = np.random.randint(
     0, 255, (30, 3, 64, 64), dtype=np.uint8
@@ -36,7 +60,7 @@ video = np.random.randint(
 logger.video(video, name="Random Video", fps=10, step=100)
 
 # Generate and log an RGBA video (with alpha channel)
-rgba_video = np.random.randint(0, 255, (15, 64, 64, 4), dtype=np.uint8)
+rgba_video = np.random.randint(0, 255, (15, 4, 64, 64), dtype=np.uint8)
 # Create a fading effect over time
 for t in range(15):
     alpha_value = int(255 * (1 - t / 14))  # Fade out over time
