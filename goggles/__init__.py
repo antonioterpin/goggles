@@ -737,6 +737,10 @@ class DataLogger(Protocol):
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
+        Notes:
+            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1) or (B, F, 1, H, W).
+            With F the number of frames, and B the batch size.
+
         Args:
             video: Video.
             step: Global step index.

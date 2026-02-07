@@ -441,6 +441,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
+        Notes:
+            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1) or (B, F, 1, H, W).
+            With F the number of frames, and B the batch size.
+
         Args:
             video: Video.
             step: Global step index.
@@ -630,7 +634,8 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 - Scalars (int, float) are emitted as single metrics.
                 - 1D arrays are emitted as multiple metrics with indexed names (e.g., `name/key_0`, `name/key_1`, ...).
                 - 2D arrays are emitted as images.
-                - 3D arrays are emitted as images if the last dimension has 1 or 3 channels, or as vector fields if the last dimension has 2 channels.
+                - 3D arrays are emitted as images if the last dimension has 1, 3, or 4 channels;
+                     if the last dimension has 2 channels, they are emitted as vector fields.
              * Unsupported types are logged as errors.
 
         Args:
@@ -698,7 +703,29 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                     continue
 
                 elif value.ndim == 3:
-                    if value.shape[2] in (1, 3):
+                    if value.shape[2] in (1, 3, 4):
+                        self.image(
+                            value,
+                            step=step,
+                            name=name_log,
+                            time=time,
+                            async_mode=async_mode,
+                            **extra,
+                        )
+                        continue
+                    elif value.shape[2] == 2:
+                        self.vector_field(
+                            value,
+                            step=step,
+                            name=name_log,
+                            time=time,
+                            async_mode=async_mode,
+                            **extra,
+                        )
+                        continue
+
+                elif value.ndim == 4:
+                    if value.shape[2] in (1, 3, 4):
                         self.image(
                             value,
                             step=step,
