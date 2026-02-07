@@ -127,8 +127,7 @@ class WandBHandler:
 
         if kind in {"image", "video"}:
             # Preferred key name comes from event.extra["name"], else "image"/"video"
-            default_key = "image" if kind == "image" else "video"
-            key_name = extra.pop("name", default_key)
+            key_name = extra.pop("name", kind)
 
             # Allow payload to be either a mapping {name: data} or a single datum
             items = (
@@ -158,7 +157,8 @@ class WandBHandler:
                             name,
                         )
                         fmt = "mp4"
-                    logs[name] = wandb.Video(value, fps=fps, format=fmt)  # type: ignore
+                    new_value = self._prepare_video_for_wandb(value)
+                    logs[name] = wandb.Video(new_value, fps=fps, format=fmt)  # type: ignore
             # Add the extra fields to the logged object
             for k, v in extra.items():
                 logs[k] = v
@@ -314,3 +314,35 @@ class WandBHandler:
         )
         self._runs[scope] = run
         return run
+
+    def _prepare_video_for_wandb(self, value: np.ndarray) -> np.ndarray:
+        """Normalize video tensors to (F, 3, H, W) for W&B.
+
+        Accepted shapes:
+        - (F, H, W)
+        - (F, C, H, W)
+        - (F, T, C, H, W)
+
+        Args:
+            value: The input video tensor, which can be in shape (F, H, W), (F, C, H, W), or (F, T, C, H, W).
+
+        Returns:
+            The processed video tensor in shape (F, 3, H, W) or (F, T, 3, H, W).
+        """
+        if value.ndim == 3:
+            # (F, H, W) → (F, 1, H, W)
+            value = value[:, None, :, :]
+        elif value.ndim not in (4, 5):
+            self._logger.error(
+                f"Video has invalid shape {value.shape}; expected (F,H,W), (F,C,H,W), or (F,T,C,H,W)."
+            )
+
+        if value.shape[1] == 1 and value.ndim == 4:
+            # Grayscale → RGB
+            value = np.repeat(value, 3, axis=1)
+
+        if value.shape[2] == 1 and value.ndim == 5:
+            # Grayscale → RGB
+            value = np.repeat(value, 3, axis=2)
+
+        return value
