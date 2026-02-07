@@ -823,6 +823,39 @@ class DataLogger(Protocol):
         """
         ...
 
+    def dictionary(
+        self,
+        name: str,
+        data: dict,
+        step: int,
+        *,
+        time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
+        **extra: Any,
+    ) -> None:
+        """Emit all key-value pairs in a dictionary as separate metrics.
+
+        Notes:
+             * The `name` parameter serves as a base name for the emitted metrics.
+             * Each key in the `data` dictionary is appended to the base name to form the full metric name (e.g., `name/key`).
+             * Values in the dictionary are emitted according to their type:
+                - Scalars (int, float) are emitted as single metrics.
+                - 1D arrays are emitted as multiple metrics with indexed names (e.g., `name/key_0`, `name/key_1`, ...).
+                - 2D arrays are emitted as images.
+                - 3D arrays are emitted as images if the last dimension has 1 or 3 channels, or as vector fields if the last dimension has 2 channels.
+             * Unsupported types are logged as errors.
+
+        Args:
+            name: Base name for the metrics.
+            data: Dictionary data.
+            step: Global step index.
+            time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
+            **extra: Additional routing metadata.
+
+        """
+        ...
+
 
 @runtime_checkable
 class GogglesLogger(TextLogger, DataLogger, Protocol):
