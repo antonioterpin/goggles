@@ -2,6 +2,7 @@
 
 import signal
 import types
+
 from typing_extensions import Self
 
 
@@ -57,8 +58,8 @@ class GracefulShutdown:
 
     def __exit__(
         self,
-        exc_type: type | None,
-        exc_value: Exception | None,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
         traceback: types.TracebackType | None,
     ) -> None:
         """Unregister the signal handlers, restoring originals.
