@@ -37,6 +37,8 @@ dependencies = [
     "numpy>=1.23",
     "imageio>=2.37.0",
     "matplotlib>=3.10.7",
+    "basedpyright",
+    "pydoclint>=0.8.3",
 ]
 
 [project.urls]
@@ -143,7 +145,6 @@ allow-init-docstring = true
 arg-type-hints-in-docstring = false
 check-return-types = false
 skip-checking-raises = false
-baseline = ".pydoclint-baseline"
 
 # Pyright configuration for type checking
 # We use basedpyright but in this way pylance also
@@ -151,7 +152,7 @@ baseline = ".pydoclint-baseline"
 [tool.pyright]
 typeCheckingMode = "basic"
 pythonVersion = "3.10"
-include = ["src"]
+include = ["goggles"]
 
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
@@ -164,4 +165,3 @@ reportUnusedVariable = false
 enableTypeIgnoreComments = false
 reportIgnoreCommentWithoutRule = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
-
