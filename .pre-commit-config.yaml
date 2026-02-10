@@ -1,3 +1,5 @@
+exclude: ^pyproject\.toml$
+
 repos:
   # Ruff: lint + autofix
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -27,7 +29,6 @@ repos:
         name: basedpyright
         entry: uv run basedpyright
         language: system
-        pass_filenames: false
         stages: [pre-commit, pre-push]
 
   # Generic hygiene

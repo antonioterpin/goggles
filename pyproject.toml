@@ -132,6 +132,7 @@ ignore = [
     "N806",    # Variable in function should be lowercase (CV standard Ix, Iy, ecc.)
     "PLR0912", # Too many branches
     "PLR0915", # Too many statements
+    "PLR0911", # Too many return statements
 ]
 
 # Pydoclint configuration
