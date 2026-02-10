@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
-from collections.abc import Mapping
 
 import jax.numpy as jnp
 
@@ -46,8 +46,8 @@ class HistorySpec:
 
         Args:
             config: Dict mapping field name to kwargs for
-                `HistoryFieldSpec` or to an already-built `HistoryFieldSpec`. Each
-                kwargs dict must include:
+                `HistoryFieldSpec` or to an already-built `HistoryFieldSpec`.
+                Each kwargs dict must include:
                 - "length" (int): Number of timesteps (T >= 1).
                 - "shape" (Sequence[int] | tuple[int, ...]): Per-timestep shape.
                 Optional keys:
@@ -75,7 +75,8 @@ class HistorySpec:
                 # Validate basic invariants even if user provided an instance.
                 if not isinstance(spec.length, int) or spec.length < 1:
                     raise ValueError(
-                        f"{name!r}.length must be an int >= 1, got {spec.length}."
+                        f"{name!r}.length must be an int >= 1, "
+                        f"got {spec.length}."
                     )
                 if any((not isinstance(d, int) or d < 0) for d in spec.shape):
                     raise ValueError(
@@ -84,7 +85,8 @@ class HistorySpec:
                     )
                 if spec.init not in allowed_inits:
                     raise ValueError(
-                        f"{name!r}.init must be one of {allowed_inits}, got {spec.init}."
+                        f"{name!r}.init must be one of {allowed_inits}, "
+                        f"got {spec.init}."
                     )
                 out[name] = spec
                 continue
@@ -98,14 +100,16 @@ class HistorySpec:
             # Required keys
             if "length" not in spec or "shape" not in spec:
                 raise ValueError(
-                    f"Field {name!r} must define 'length' and 'shape'. Got keys: "
-                    f"{list(spec.keys())}"
+                    f"Field {name!r} must define 'length' and 'shape'. "
+                    f"Got keys: {list(spec.keys())}."
                 )
 
             # Validate length
             length = spec["length"]
             if not isinstance(length, int) or length < 1:
-                raise ValueError(f"{name!r}.length must be an int >= 1, got {length}.")
+                raise ValueError(
+                    f"{name!r}.length must be an int >= 1, got {length}."
+                )
 
             # Validate shape
             shape_val = spec["shape"]
@@ -117,7 +121,8 @@ class HistorySpec:
             shape_tuple = tuple(int(d) for d in shape_val)
             if any(d < 0 for d in shape_tuple):
                 raise ValueError(
-                    f"{name!r}.shape must contain non-negative ints, got {shape_tuple}."
+                    f"{name!r}.shape must contain non-negative ints, "
+                    f"got {shape_tuple}."
                 )
 
             # Optional keys: dtype/init
@@ -127,14 +132,16 @@ class HistorySpec:
                 dtype = jnp.dtype(spec.get("dtype", jnp.float32))
             except Exception as e:
                 raise TypeError(
-                    f"{name!r}.dtype is not a valid JAX dtype: {spec.get('dtype')!r}."
+                    f"{name!r}.dtype is not a valid JAX dtype: "
+                    f"{spec.get('dtype')!r}."
                 ) from e
 
             # Validate init
             init = spec.get("init", "zeros")
             if init not in allowed_inits:
                 raise ValueError(
-                    f"{name!r}.init must be one of {allowed_inits}, got {init!r}."
+                    f"{name!r}.init must be one of {allowed_inits}, "
+                    f"got {init!r}."
                 )
 
             out[name] = HistoryFieldSpec(
