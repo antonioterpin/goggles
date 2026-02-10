@@ -25,41 +25,46 @@ See Also:
     - API docs for full reference of public interfaces.
     - Internal implementations live under `goggles/_core/`
 
-"""  # noqa: D205
+"""
+
+__version__ = "0.1.9"
 
 from __future__ import annotations
 
-import portal
-from portal import packlib, client_socket
-from portal.buffers import SendBuffer, RecvBuffer
-from portal.client import Client, Future
-from portal.client_socket import ClientSocket
-from portal.server_socket import ServerSocket
-from collections import defaultdict
-from typing import (
-    Any,
-    ClassVar,
-    Final,
-    Protocol,
-    runtime_checkable,
-    overload,
-)
-from collections.abc import Callable
-from typing_extensions import Self
-from typing import Literal, TypeVar, ParamSpec
 import logging
 import os
 import select
 import selectors
 import time
+from collections import defaultdict
+from collections.abc import Callable
+from typing import (
+    Any,
+    ClassVar,
+    Final,
+    Literal,
+    ParamSpec,
+    Protocol,
+    TypeVar,
+    overload,
+    runtime_checkable,
+)
 
-from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
-from ._core.integrations import ConsoleHandler, LocalStorageHandler
-from ._core.decorators import timeit as _timeit, trace_on_error as _trace_on_error
-from .shutdown import GracefulShutdown
-from .config import load_configuration, save_configuration, PrettyConfig
+import portal
+from portal import client_socket, packlib
+from portal.buffers import RecvBuffer, SendBuffer
+from portal.client import Client, Future
+from portal.client_socket import ClientSocket
+from portal.server_socket import ServerSocket
+from typing_extensions import Self
+
 from . import filters
-
+from ._core.decorators import timeit as _timeit
+from ._core.decorators import trace_on_error as _trace_on_error
+from ._core.integrations import ConsoleHandler, LocalStorageHandler
+from .config import PrettyConfig, load_configuration, save_configuration
+from .shutdown import GracefulShutdown
+from .types import Event, Image, Kind, Metrics, Vector, VectorField, Video
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -208,7 +213,9 @@ def _patched_client_loop(self):
 
     while self.running or (self.sendq and isconn):
         if not isconn:
-            if not self.options.autoconn and not self.wantconn.wait(timeout=0.2):
+            if not self.options.autoconn and not self.wantconn.wait(
+                timeout=0.2
+            ):
                 continue
             sock = self._connect()
             if not sock:
@@ -233,7 +240,9 @@ def _patched_client_loop(self):
                 recvbuf.recv(sock)
                 if recvbuf.done():
                     if self.recvq.qsize() > self.options.max_recv_queue:
-                        raise RuntimeError("Too many incoming messages enqueued")
+                        raise RuntimeError(
+                            "Too many incoming messages enqueued"
+                        )
                     msg = recvbuf.result()
                     self.recvq.put(msg)
                     for callback in self.callbacks_recv:
@@ -257,7 +266,9 @@ def _patched_client_loop(self):
 
         except OSError as e:
             # Disconnect and trigger high-level recovery
-            detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            detail = (
+                f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            )
             self._log(f"Connection to server lost ({detail})")
             self.isconn.clear()
             isconn = False
@@ -323,7 +334,11 @@ def _safe_client_call(self, method, *data):
             except TimeoutError:
                 # Connection not established yet; try again later
                 pass
-            except (BrokenPipeError, ConnectionResetError, ConnectionRefusedError):
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionRefusedError,
+            ):
                 # BrokenPipe/ConnectionReset/ConnectionRefused should behave like not connected
                 pass
 
@@ -519,15 +534,23 @@ class TextLogger(Protocol):
 
         """
         if severity >= logging.CRITICAL:
-            self.critical(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.critical(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.ERROR:
-            self.error(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.error(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.WARNING:
-            self.warning(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.warning(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.INFO:
             self.info(msg, step=step, time=time, async_mode=async_mode, **extra)
         elif severity >= logging.DEBUG:
-            self.debug(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.debug(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         else:
             # Below DEBUG level; no-op by default.
             pass
@@ -1039,7 +1062,9 @@ class EventBus:
         if isinstance(event, dict):
             event = Event.from_dict(event)
         elif not isinstance(event, Event):
-            raise TypeError(f"emit expects a dict or Event, got {type(event)!r}")
+            raise TypeError(
+                f"emit expects a dict or Event, got {type(event)!r}"
+            )
 
         # collect all scopes that this event should hit:
         scope = event.scope
@@ -1180,34 +1205,34 @@ except Exception:
     WandBHandler = None
 
 __all__ = [
-    "TextLogger",
-    "GogglesLogger",
-    "get_logger",
-    "attach",
-    "detach",
-    "register_handler",
-    "load_configuration",
-    "save_configuration",
-    "PrettyConfig",
-    "timeit",
-    "trace_on_error",
-    "GracefulShutdown",
+    "CRITICAL",
+    "DEBUG",
+    "ERROR",
+    "INFO",
+    "WARNING",
     "ConsoleHandler",
-    "LocalStorageHandler",
-    "WandBHandler",
     "Event",
-    "Kind",
-    "Metrics",
+    "GogglesLogger",
+    "GracefulShutdown",
     "Image",
-    "Video",
+    "Kind",
+    "LocalStorageHandler",
+    "Metrics",
+    "PrettyConfig",
+    "TextLogger",
     "Vector",
     "VectorField",
-    "INFO",
-    "DEBUG",
-    "WARNING",
-    "ERROR",
-    "CRITICAL",
+    "Video",
+    "WandBHandler",
+    "attach",
+    "detach",
     "filters",
+    "get_logger",
+    "load_configuration",
+    "register_handler",
+    "save_configuration",
+    "timeit",
+    "trace_on_error",
 ]
 
 # ---------------------------------------------------------------------------
