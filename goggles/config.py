@@ -1,13 +1,15 @@
 """Utilities for loading and pretty-printing configuration files."""
 
 from __future__ import annotations
+
 import json
-from ruamel.yaml import YAML
+from dataclasses import fields, is_dataclass
+from typing import Any, TypeVar
+
 from rich.console import Console
 from rich.pretty import Pretty
+from ruamel.yaml import YAML
 from yaml.representer import SafeRepresenter
-from typing import Any, TypeVar
-from dataclasses import fields, is_dataclass
 
 Cfg = TypeVar("Cfg", bound="PrettyConfig")
 
@@ -16,18 +18,24 @@ class PrettyConfig(dict):
     """Dictionary subclass with pretty-printing and serialization methods."""
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Automatically wrap __post_init__ in subclasses to sync dict."""
+        """Automatically wrap `__post_init__` in subclasses to sync dict.
+
+        Args:
+            **kwargs: Additional subclass initialization options.
+
+        """
         super().__init_subclass__(**kwargs)
 
         orig_post_init = cls.__dict__.get("__post_init__")
         if orig_post_init is None:
             return
 
-        # If subclass defines __post_init__, wrap it so we always sync dict after it.
+        # If subclass defines __post_init__,
+        # wrap it so we always sync dict after it.
         if orig_post_init is PrettyConfig.__post_init__:
             return
 
-        def __post_init__(self, *a: Any, **k: Any) -> None:
+        def __post_init__(self, *a: Any, **k: Any) -> None:  # noqa: N807
             orig_post_init(self, *a, **k)
             PrettyConfig.__post_init__(self)
 
@@ -46,8 +54,13 @@ class PrettyConfig(dict):
 
         dict.__init__(self, data)
 
-    def __str__(self):
-        """Return a pretty-printed string of the configuration."""
+    def __str__(self) -> str:
+        """Return a pretty-printed string of the configuration.
+
+        Returns:
+            Pretty-printed configuration text.
+
+        """
         console = Console()
         plain = dict(self)
         with console.capture() as capture:
@@ -57,7 +70,12 @@ class PrettyConfig(dict):
     __repr__ = __str__
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a plain Python dict."""
+        """Return a plain Python dict.
+
+        Returns:
+            A shallow dictionary view of this configuration.
+
+        """
         return dict(self)
 
     @classmethod
@@ -72,6 +90,13 @@ class PrettyConfig(dict):
 
         For non-dataclass usage:
             - Behaves like `cls(config)`.
+
+        Args:
+            config: Source configuration mapping.
+
+        Returns:
+            A configuration instance of `cls`.
+
         """
         if not is_dataclass(cls):
             return cls(config)
@@ -85,13 +110,24 @@ class PrettyConfig(dict):
         return cls(**filtered)  # type: ignore[misc]
 
     def to_yaml(self, file_path: str) -> None:
-        """Save configuration to a YAML file."""
+        """Save configuration to a YAML file.
+
+        Args:
+            file_path: Destination YAML file path.
+
+        """
         yaml = YAML(typ="safe", pure=True)
         with open(file_path, "w", encoding="utf-8") as f:
             yaml.dump(dict(self), f)
 
     def to_json(self, file_path: str, *, indent: int = 2) -> None:
-        """Save configuration to a JSON file."""
+        """Save configuration to a JSON file.
+
+        Args:
+            file_path: Destination JSON file path.
+            indent: JSON indentation level.
+
+        """
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(dict(self), f, indent=indent)
 
@@ -105,9 +141,6 @@ def load_configuration(file_path: str) -> PrettyConfig:
     Returns:
         PrettyConfig: A PrettyConfig object containing the loaded configuration.
 
-    Raises:
-        FileNotFoundError: If the specified file does not exist.
-
     """
     yaml = YAML(typ="safe", pure=True)
 
@@ -117,12 +150,18 @@ def load_configuration(file_path: str) -> PrettyConfig:
         return PrettyConfig(data)
 
 
-def represent_prettyconfig(dumper, data):
+def represent_prettyconfig(
+    dumper: SafeRepresenter,
+    data: PrettyConfig,
+) -> Any:
     """Represent PrettyConfig as a YAML mapping.
 
     Args:
         dumper: The YAML dumper.
         data: The PrettyConfig instance.
+
+    Returns:
+        YAML mapping representation of the provided config.
 
     """
     return dumper.represent_mapping("tag:yaml.org,2002:map", dict(data))
@@ -131,7 +170,7 @@ def represent_prettyconfig(dumper, data):
 SafeRepresenter.add_representer(PrettyConfig, represent_prettyconfig)
 
 
-def save_configuration(config: PrettyConfig, file_path: str):
+def save_configuration(config: PrettyConfig, file_path: str) -> None:
     """Dump PrettyConfig to a YAML file.
 
     Args:

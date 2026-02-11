@@ -25,14 +25,14 @@ import numpy as np
 if TYPE_CHECKING:
     # For static type checkers (pyright/mypy). Requires jax available in the
     # type-checking environment, or configure your checker accordingly.
-    from jax import Array as JaxArray
     import jax.numpy as jnp
+    from jax import Array as JaxArray
 
     HAS_JAX = True
 else:
     try:
-        from jax import Array as JaxArray
         import jax.numpy as jnp
+        from jax import Array as JaxArray
 
         HAS_JAX = True
     except ImportError:  # pragma: no cover
@@ -89,7 +89,7 @@ def _buffer_set(buf: Array, idx: int, value: Array) -> Array:
         Updated buffer (same object for NumPy, new object for JAX).
     """
     if is_jax_array(buf):
-        return buf.at[idx].set(value)  # type: ignore[attr-defined]
+        return buf.at[idx].set(value)  # pyright: ignore[reportAttributeAccessIssue]
     buf[idx] = value  # type: ignore[index]
     return buf
 
@@ -116,7 +116,9 @@ class FilterConfig:
         Returns:
             FilterConfig instance.
         """
-        return cls(type=str(cfg["type"]), parameters=dict(cfg.get("parameters", {})))
+        return cls(
+            type=str(cfg["type"]), parameters=dict(cfg.get("parameters", {}))
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Return a plain Python dict.
@@ -220,14 +222,14 @@ class _BackendAware(Filter):
             `numpy` or `jax.numpy` matching `data`.
 
         Raises:
-            TypeError: If the filter instance previously saw a different backend.
+            TypeError: If the filter previously saw a different backend.
         """
         cur_is_jax = is_jax_array(data)
         if self._is_jax is None:
             self._is_jax = cur_is_jax
         elif self._is_jax != cur_is_jax:
             raise TypeError(
-                "Cannot mix NumPy and JAX inputs within the same filter instance. "
+                "Cannot mix NumPy and JAX inputs within the same filter. "
                 "Create separate filter objects per backend."
             )
         return jnp if cur_is_jax else np  # type: ignore[return-value]
@@ -271,14 +273,20 @@ class ScaleFilter(Filter):
         return
 
     def _name(self) -> str:
-        """Return a short descriptive name."""
+        """Return a short descriptive name.
+
+        Returns:
+            Name string including the scale factor.
+        """
         return f"ScaleFilter(scale={self.scale})"
 
 
 class MinMaxFilter(Filter):
     """Affinely map values from [min_val, max_val] to [0, 1] and clip."""
 
-    def __init__(self, min_val: float, max_val: float, prefix: str = "") -> None:
+    def __init__(
+        self, min_val: float, max_val: float, prefix: str = ""
+    ) -> None:
         """Initialize the MinMax filter.
 
         Args:
@@ -305,14 +313,20 @@ class MinMaxFilter(Filter):
             Array scaled to [0, 1] and clipped.
         """
         xp = get_backend(data)
-        return xp.clip((data - self.min_val) / (self.max_val - self.min_val), 0.0, 1.0)
+        return xp.clip(
+            (data - self.min_val) / (self.max_val - self.min_val), 0.0, 1.0
+        )
 
     def reset(self) -> None:
         """Reset filter state (no-op; this filter is stateless)."""
         return
 
     def _name(self) -> str:
-        """Return a short descriptive name."""
+        """Return a short descriptive name.
+
+        Returns:
+            Name string including the min and max values.
+        """
         return f"MinMaxFilter({self.min_val},{self.max_val})"
 
 
@@ -347,7 +361,7 @@ class _WindowBufferFilter(_BackendAware):
         self.n_seen: int = 0
 
     def _push(self, data: Array) -> tuple[ModuleType, int]:
-        """Insert `data` into the ring buffer and return backend and valid length.
+        """Insert `data` in the ring buffer and return backend and valid length.
 
         Args:
             data: Input array to store.
@@ -360,7 +374,9 @@ class _WindowBufferFilter(_BackendAware):
         """
         xp = self._xp(data)
         if self.buffer is None:
-            self.buffer = xp.zeros((self.window_size,) + data.shape, dtype=data.dtype)
+            self.buffer = xp.zeros(
+                (self.window_size, *data.shape), dtype=data.dtype
+            )
 
         # buffer is guaranteed to be non-None here
         assert self.buffer is not None, "Buffer should be initialized"
@@ -396,7 +412,11 @@ class AverageFilter(_WindowBufferFilter):
         return xp.mean(buf[:valid_len], axis=0)
 
     def _name(self) -> str:
-        """Return a short descriptive name."""
+        """Return a short descriptive name.
+
+        Returns:
+            Name string including the window size.
+        """
         return f"AverageFilter({self.window_size})"
 
 
@@ -418,7 +438,11 @@ class MedianFilter(_WindowBufferFilter):
         return xp.median(buf[:valid_len], axis=0)
 
     def _name(self) -> str:
-        """Return a short descriptive name."""
+        """Return a short descriptive name.
+
+        Returns:
+            Name string including the window size.
+        """
         return f"MedianFilter({self.window_size})"
 
 
@@ -467,7 +491,11 @@ class ExpAverageFilter(_BackendAware):
         self.value = None
 
     def _name(self) -> str:
-        """Return a short descriptive name."""
+        """Return a short descriptive name.
+
+        Returns:
+            Name string including the alpha value.
+        """
         return f"ExpAverageFilter({self.alpha})"
 
 
@@ -541,7 +569,11 @@ class QuantizationFilter(_BackendAware):
         self.levels = None
 
     def _name(self) -> str:
-        """Return a short descriptive name."""
+        """Return a short descriptive name.
+
+        Returns:
+            Name string including the quantization parameters.
+        """
         return (
             "QuantizationFilter("
             f"min={self.min_value}, max={self.max_value}, step={self.step_size}"
@@ -582,7 +614,11 @@ class ConcatFilter(Filter):
             f.reset()
 
     def _name(self) -> str:
-        """Return a short descriptive name."""
+        """Return a short descriptive name.
+
+        Returns:
+            Name string listing the names of the concatenated filters.
+        """
         return f"ConcatFilter({[f.name for f in self.filters]})"
 
 
@@ -620,7 +656,8 @@ def create_concat_filter(
         A `ConcatFilter` that applies the configured filters in sequence.
 
     Raises:
-        ValueError: If an unknown filter type is encountered or parameters are invalid.
+        ValueError:
+            If an unknown filter type is encountered or parameters are invalid.
     """
     filters: list[Filter] = []
     for idx, cfg in enumerate(filter_configs):
