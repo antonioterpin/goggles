@@ -1,8 +1,11 @@
 """Unit tests for goggles.history.spec module."""
 
-import pytest
+from typing import Any, cast
+
 import jax.numpy as jnp
-from goggles.history.spec import HistorySpec, HistoryFieldSpec
+import pytest
+
+from goggles.history.spec import HistoryFieldSpec, HistorySpec
 
 
 @pytest.mark.parametrize(
@@ -25,13 +28,17 @@ def test_from_config_basic_dict(
         },
     }
     spec = HistorySpec.from_config(config)
-    assert isinstance(spec, HistorySpec), "spec should be an instance of HistorySpec"
-    assert set(spec.fields.keys()) == {"images", "flow"}, "Spec fields keys mismatch"
+    assert isinstance(spec, HistorySpec), (
+        "spec should be an instance of HistorySpec"
+    )
+    assert set(spec.fields.keys()) == {"images", "flow"}, (
+        "Spec fields keys mismatch"
+    )
 
     img = spec.fields["images"]
-    assert isinstance(
-        img, HistoryFieldSpec
-    ), "'images' field should be a HistoryFieldSpec"
+    assert isinstance(img, HistoryFieldSpec), (
+        "'images' field should be a HistoryFieldSpec"
+    )
     assert img.length == images_len, "images length mismatch"
     assert img.shape == images_shape, "images shape mismatch"
     assert img.dtype == jnp.float32, "images dtype mismatch"
@@ -107,13 +114,17 @@ def test_invalid_init(bad_init):
 
 def test_invalid_field_type_in_config():
     config = {"a": 123}
-    with pytest.raises(TypeError, match="must be a Mapping or HistoryFieldSpec"):
+    with pytest.raises(
+        TypeError, match="must be a Mapping or HistoryFieldSpec"
+    ):
         HistorySpec.from_config(config)
 
 
 def test_from_config_with_invalid_fieldspec_instances():
     # length invalid
-    bad_len = HistoryFieldSpec(length=0, shape=(2,), dtype=jnp.float32, init="zeros")
+    bad_len = HistoryFieldSpec(
+        length=0, shape=(2,), dtype=jnp.float32, init="zeros"
+    )
     with pytest.raises(ValueError, match="length must be an int >= 1"):
         HistorySpec.from_config({"a": bad_len})
 
@@ -121,10 +132,17 @@ def test_from_config_with_invalid_fieldspec_instances():
     bad_shape = HistoryFieldSpec(
         length=2, shape=(4, -1), dtype=jnp.float32, init="zeros"
     )
-    with pytest.raises(ValueError, match="shape must be a tuple of non-negative ints"):
+    with pytest.raises(
+        ValueError, match="shape must be a tuple of non-negative ints"
+    ):
         HistorySpec.from_config({"a": bad_shape})
 
     # invalid init
-    bad_init = HistoryFieldSpec(length=2, shape=(2,), dtype=jnp.float32, init="bad")
+    bad_init = HistoryFieldSpec(
+        length=2,
+        shape=(2,),
+        dtype=jnp.float32,
+        init=cast(Any, "bad"),
+    )
     with pytest.raises(ValueError, match="init must be one of"):
         HistorySpec.from_config({"a": bad_init})

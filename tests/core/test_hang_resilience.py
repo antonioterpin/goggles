@@ -1,15 +1,19 @@
 """Tests for hang resilience of Goggles server and client."""
 
-import time
 import os
-import sys
+import socket
 import subprocess
+import sys
+import time
 from collections.abc import Iterator
 from typing import Any
+
+import portal
 import pytest
+
 import goggles
 from goggles._core import routing
-import portal
+from goggles._core.integrations.wandb import WandBHandler
 
 # Helper to start server
 SERVER_CODE = """
@@ -53,8 +57,6 @@ def free_port() -> int:
     Returns:
         int: Free TCP port for test server startup.
     """
-    import socket
-
     with socket.socket() as s:
         s.bind(("", 0))
         return s.getsockname()[1]
@@ -137,8 +139,6 @@ def test_consumer_death_does_not_hang_producer(
         goggles_client: Fixture that patches client internals for the test.
     """
     # 1. Setup handler
-    from goggles._core.integrations.wandb import WandBHandler
-
     handler = WandBHandler(project="test-project")
     goggles.attach(handler, scopes=["global"])
     log = goggles.get_logger("test")
@@ -165,7 +165,9 @@ def test_consumer_death_does_not_hang_producer(
             time.sleep(0.01)
 
             if time.time() - start > 10:
-                pytest.fail("Did not raise TimeoutError within 10s (hang detected?)")
+                pytest.fail(
+                    "Did not raise TimeoutError within 10s (hang detected?)"
+                )
     except Exception as e:
         print(f"Successfully caught exception: {type(e).__name__}: {e}")
     else:

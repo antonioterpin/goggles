@@ -1,17 +1,20 @@
 """Tests for resilience of Goggles server and client."""
 
+import gc
 import os
-import time
-import threading
 import random
+import socket
+import threading
+import time
 from collections.abc import Iterator
 from typing import Any
-import pytest
-import psutil
 from unittest import mock
 
+import psutil
+import pytest
+
 import goggles
-import goggles._core.routing as routing
+from goggles._core import routing
 
 
 @pytest.fixture
@@ -21,15 +24,15 @@ def free_port() -> int:
     Returns:
         int: Available TCP port on localhost.
     """
-    import socket
-
     with socket.socket() as s:
         s.bind(("", 0))
         return s.getsockname()[1]
 
 
 @pytest.fixture(autouse=True)
-def clean_env(monkeypatch: pytest.MonkeyPatch, free_port: int) -> Iterator[None]:
+def clean_env(
+    monkeypatch: pytest.MonkeyPatch, free_port: int
+) -> Iterator[None]:
     """Ensure a clean environment and specific port for each test.
 
     Args:
@@ -95,15 +98,19 @@ def chaos_monitor() -> Any:
             def worker(i):
                 while not self.stop_event.is_set():
                     try:
-                        log.info(f"worker {i} event", iter=self.worker_counts[i])
+                        log.info(
+                            f"worker {i} event", iter=self.worker_counts[i]
+                        )
                         self.worker_counts[i] += 1
                         if self.worker_counts[i] % 100 == 0:
                             time.sleep(0.01)
                     except Exception:
-                        # Intentionally ignore all exceptions to keep workers running
+                        # Ignore all exceptions to keep workers running.
                         pass
 
-            workers = [threading.Thread(target=worker, args=(i,)) for i in range(4)]
+            workers = [
+                threading.Thread(target=worker, args=(i,)) for i in range(4)
+            ]
             for w in workers:
                 w.daemon = True
                 w.start()
@@ -116,7 +123,8 @@ def chaos_monitor() -> Any:
 @pytest.mark.xdist_group(name="goggles_singleton")
 def test_server_resilience_to_broken_pipe(chaos_monitor: Any) -> None:
     """
-    Verify that Goggles server survives multiple BrokenPipe/ConnectionReset errors
+    Verify that Goggles server survives multiple
+    BrokenPipe/ConnectionReset errors
     and stays responsive without entering a livelock (busy-loop).
 
     Supports long-running verification via GOGGLES_RESILIENCE_DURATION env var.
@@ -133,7 +141,8 @@ def test_server_resilience_to_broken_pipe(chaos_monitor: Any) -> None:
     while routing.__singleton_server is None:
         if time.time() - start_wait > 5:
             pytest.fail(
-                "Timeout waiting for Goggles server to start. Check network/port binding."
+                "Timeout waiting for Goggles server to start. "
+                "Check network/port binding."
             )
         time.sleep(0.1)
 
@@ -147,7 +156,10 @@ def test_server_resilience_to_broken_pipe(chaos_monitor: Any) -> None:
     proc = psutil.Process()
     initial_rss = proc.memory_info().rss
     initial_fds = proc.num_fds()
-    print(f"\n[Baseline] RSS: {initial_rss/1024/1024:.2f} MB | FDs: {initial_fds}")
+    print(
+        f"\n[Baseline] RSS: {initial_rss / 1024 / 1024:.2f} MB "
+        f"| FDs: {initial_fds}"
+    )
 
     # 4. Start workers
     workers = chaos_monitor.start_workers(log)
@@ -173,12 +185,15 @@ def test_server_resilience_to_broken_pipe(chaos_monitor: Any) -> None:
             client = routing.__singleton_client
             inflight = len(client.futures) if client else 0
             print(
-                f" [Debug] RSS: {current_rss/1024/1024:.1f}MB | Client Futures: {inflight} | Successful: {chaos_monitor.stats['successful']}"
+                f" [Debug] RSS: {current_rss / 1024 / 1024:.1f}MB "
+                f"| Client Futures: {inflight} "
+                f"| Successful: {chaos_monitor.stats['successful']}"
             )
             if current_rss > initial_rss + 100 * 1024 * 1024:
                 # 100MB growth is alarming (though python GC is lazy)
                 print(
-                    f"WARNING: High memory growth! RSS: {current_rss/1024/1024:.2f} MB"
+                    "WARNING: High memory growth! "
+                    f"RSS: {current_rss / 1024 / 1024:.2f} MB"
                 )
 
     chaos_monitor.stop_event.set()
@@ -194,23 +209,25 @@ def test_server_resilience_to_broken_pipe(chaos_monitor: Any) -> None:
     print(f"[Result] Injected Errors: {injected}")
     print(f"[Result] Successful Writes: {successful}")
 
-    assert injected > 0, "Test failed to inject any errors (is probability too low?)"
-    assert successful > 100, "Too few successful writes - server might be deadlocked"
+    assert injected > 0, (
+        "Test failed to inject any errors (is probability too low?)"
+    )
+    assert successful > 100, (
+        "Too few successful writes - server might be deadlocked"
+    )
 
-    # Resource Checks
-    # GC to get a fair reading
-    import gc
-
+    # Resource checks.
+    # Collect GC to get a fair reading.
     gc.collect()
 
     final_rss = proc.memory_info().rss
     final_fds = proc.num_fds()
-    print(f"[Final] RSS: {final_rss/1024/1024:.2f} MB | FDs: {final_fds}")
+    print(f"[Final] RSS: {final_rss / 1024 / 1024:.2f} MB | FDs: {final_fds}")
 
     # Heuristics for leaks (only enforce on longer runs to avoid noise)
     if duration >= 10:
         # File descriptors shouldn't grow unbounded.
-        # Baseline file descriptors + some constant overhead for threads/sockets.
+        # Baseline file descriptors plus overhead for threads/sockets.
         # If it grew by > 50, we likely have a socket leak.
         fd_growth = final_fds - initial_fds
         if fd_growth > 50:

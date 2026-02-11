@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
 
 from goggles.config import PrettyConfig, load_configuration
 
@@ -36,14 +35,18 @@ class DummyTypedConfig(PrettyConfig):
 
 
 def test_typed_config_defaults_and_post_init_dict_shape() -> None:
-    """You can build the typed class, defaults apply, and __post_init__ syncs dict."""
+    """Build typed config and validate defaults + post-init dict sync."""
     cfg = DummyTypedConfig()
 
     assert cfg.name == "goggles.dummy", "Default name should apply."
     assert cfg.port == "/dev/ttyUSB0", "Default port should apply."
     assert cfg.baud_rate == 115200, "Default baud_rate should apply."
-    assert cfg._secret == "dont-serialize", "Private field default should apply."
-    assert "_secret" not in dict(cfg), "Private field should not be in the dict."
+    assert cfg._secret == "dont-serialize", (
+        "Private field default should apply."
+    )
+    assert "_secret" not in dict(cfg), (
+        "Private field should not be in the dict."
+    )
 
     # Dict payload is exactly the fields (post-init mirrored)
     assert dict(cfg) == {
@@ -68,7 +71,9 @@ def test_from_config_ignores_unknown_keys() -> None:
     assert cfg.name == "custom.name", "Name should be set from config."
     assert cfg.port == "/dev/ttyUSB9", "Port should be set from config."
     assert cfg.baud_rate == 115200, "Baud rate should be set from config."
-    assert cfg._secret == "dont-serialize", "Private field should keep default value."
+    assert cfg._secret == "dont-serialize", (
+        "Private field should keep default value."
+    )
 
     # Unknown keys are NOT stored in the dict
     assert "extra_key" not in cfg, "Extra keys should not be in the dict."
@@ -88,20 +93,29 @@ def test_to_dict_and_from_config_roundtrip_same() -> None:
     d = cfg1.to_dict()
     cfg2 = DummyTypedConfig.from_config(d)
 
-    assert cfg2.to_dict() == cfg1.to_dict(), "to_dict should produce equivalent dicts."
-    assert dict(cfg2) == dict(
-        cfg1
-    ), "dict() conversion should produce equivalent dicts."
+    assert cfg2.to_dict() == cfg1.to_dict(), (
+        "to_dict should produce equivalent dicts."
+    )
+    assert dict(cfg2) == dict(cfg1), (
+        "dict() conversion should produce equivalent dicts."
+    )
 
 
-def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(tmp_path: Path) -> None:
+def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(
+    tmp_path: Path,
+) -> None:
     """Save to YAML/JSON and reconstruct the typed config back.
 
     Args:
         tmp_path: Temporary directory for serialized config artifacts.
     """
     cfg = DummyTypedConfig.from_config(
-        {"name": "n", "port": "/dev/ttyUSB0", "baud_rate": 115200, "junk": "nope"}
+        {
+            "name": "n",
+            "port": "/dev/ttyUSB0",
+            "baud_rate": 115200,
+            "junk": "nope",
+        }
     )
 
     # --- YAML roundtrip (save via method, load via load_configuration) ---
@@ -111,9 +125,9 @@ def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(tmp_path: Path) -> Non
     loaded_yaml = load_configuration(str(yaml_path))  # returns PrettyConfig
     cfg_from_yaml = DummyTypedConfig.from_config(dict(loaded_yaml))
 
-    assert (
-        cfg_from_yaml.to_dict() == cfg.to_dict()
-    ), "YAML roundtrip should preserve config."
+    assert cfg_from_yaml.to_dict() == cfg.to_dict(), (
+        "YAML roundtrip should preserve config."
+    )
 
     # --- JSON roundtrip (save via method, load via json.load) ---
     json_path = tmp_path / "cfg.json"
@@ -123,9 +137,9 @@ def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(tmp_path: Path) -> Non
         loaded_json = json.load(f)
 
     cfg_from_json = DummyTypedConfig.from_config(loaded_json)
-    assert (
-        cfg_from_json.to_dict() == cfg.to_dict()
-    ), "JSON roundtrip should preserve config."
+    assert cfg_from_json.to_dict() == cfg.to_dict(), (
+        "JSON roundtrip should preserve config."
+    )
 
 
 def test_private_fields_are_not_overwritten_by_from_config() -> None:
@@ -140,12 +154,18 @@ def test_private_fields_are_not_overwritten_by_from_config() -> None:
 
     assert cfg.name == "x", "Public field must be set from config."
     assert cfg.port == "y", "Public field must be set from config."
-    assert cfg._secret == "dont-serialize", "Private field must keep default value."
-    assert "_secret" not in cfg, "Private field must not appear in dict payload."
+    assert cfg._secret == "dont-serialize", (
+        "Private field must keep default value."
+    )
+    assert "_secret" not in cfg, (
+        "Private field must not appear in dict payload."
+    )
 
 
-def test_private_fields_not_serialized_yaml_json_roundtrip(tmp_path: Path) -> None:
-    """Private fields are excluded from YAML/JSON output and remain default after reload.
+def test_private_fields_not_serialized_yaml_json_roundtrip(
+    tmp_path: Path,
+) -> None:
+    """Private fields stay excluded from YAML/JSON after reload.
 
     Args:
         tmp_path: Temporary directory for serialized config artifacts.
@@ -156,21 +176,21 @@ def test_private_fields_not_serialized_yaml_json_roundtrip(tmp_path: Path) -> No
     cfg.to_yaml(str(yaml_path))
     loaded_yaml = load_configuration(str(yaml_path))
     cfg_from_yaml = DummyTypedConfig.from_config(dict(loaded_yaml))
-    assert (
-        cfg_from_yaml._secret == "dont-serialize"
-    ), "YAML output should not contain private fields."
-    assert (
-        "_secret" not in loaded_yaml
-    ), "YAML output should not contain private fields."
+    assert cfg_from_yaml._secret == "dont-serialize", (
+        "YAML output should not contain private fields."
+    )
+    assert "_secret" not in loaded_yaml, (
+        "YAML output should not contain private fields."
+    )
 
     json_path = tmp_path / "cfg.json"
     cfg.to_json(str(json_path))
     with open(json_path, encoding="utf-8") as f:
         loaded_json = json.load(f)
     cfg_from_json = DummyTypedConfig.from_config(loaded_json)
-    assert (
-        cfg_from_json._secret == "dont-serialize"
-    ), "JSON output should not contain private fields."
-    assert (
-        "_secret" not in loaded_json
-    ), "JSON output should not contain private fields."
+    assert cfg_from_json._secret == "dont-serialize", (
+        "JSON output should not contain private fields."
+    )
+    assert "_secret" not in loaded_json, (
+        "JSON output should not contain private fields."
+    )

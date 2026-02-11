@@ -1,10 +1,11 @@
 import logging
-import pytest
-from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from goggles._core.logger import CoreTextLogger, CoreGogglesLogger
+import pytest
+
+import goggles._core.logger as core_logger
+from goggles._core.logger import CoreGogglesLogger, CoreTextLogger
 
 
 @pytest.fixture
@@ -127,7 +128,9 @@ def test_scalar_emits_metric_event(goggles_logger, patch_bus):
     goggles_logger.scalar("loss", 0.42)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "metric", "Event kind should be 'metric' for scalar"
-    assert event.payload == {"loss": 0.42}, "Event payload should match scalar metric"
+    assert event.payload == {"loss": 0.42}, (
+        "Event payload should match scalar metric"
+    )
 
 
 @pytest.mark.parametrize(
@@ -151,7 +154,9 @@ def test_artifact_like_methods_emit_event(
     getattr(goggles_logger, method)(fake_payload, name="foo", **kwargs)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == kind, f"Event kind should be '{kind}'"
-    assert "name" in event.extra, "Event extra should contain 'name' for artifacts"
+    assert "name" in event.extra, (
+        "Event extra should contain 'name' for artifacts"
+    )
     assert event.extra["name"] == "foo", "Event extra 'name' mismatch"
 
 
@@ -159,7 +164,9 @@ def test_histogram_adds_name_and_payload(goggles_logger, patch_bus):
     goggles_logger.histogram([1, 2, 3], name="hist", step=1)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "histogram", "Event kind should be 'histogram'"
-    assert event.extra["name"] == "hist", "Event extra 'name' mismatch for histogram"
+    assert event.extra["name"] == "hist", (
+        "Event extra 'name' mismatch for histogram"
+    )
     assert event.payload == [1, 2, 3], "Event payload mismatch for histogram"
 
 
@@ -172,8 +179,6 @@ def test_all_emitters_call_future_result(
         monkeypatch: Fixture used to override sync mode.
         patch_bus: Patched mock client fixture.
     """
-    import goggles._core.logger as core_logger
-
     monkeypatch.setattr(core_logger, "GOGGLES_ASYNC", False)
     g = CoreGogglesLogger(name="sync", scope="run")
     g._client = patch_bus

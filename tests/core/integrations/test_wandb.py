@@ -1,7 +1,8 @@
 import logging
-import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
 
 import goggles._core.integrations.wandb as wandb_module
 from goggles._core.integrations.wandb import WandBHandler
@@ -22,7 +23,9 @@ def make_event(kind="metric", scope="global", payload=None, step=0):
     "reinit", ["finish_previous", "return_previous", "create_new", "default"]
 )
 def test_open_initializes_run(mock_wandb, reinit):
-    handler = WandBHandler(project="proj", entity="ent", run_name="name", reinit=reinit)
+    handler = WandBHandler(
+        project="proj", entity="ent", run_name="name", reinit=reinit
+    )
     handler.open()
     mock_wandb.init.assert_called_once()
     kwargs = mock_wandb.init.call_args.kwargs
@@ -43,9 +46,9 @@ def test_can_handle_supported_kinds():
     h = WandBHandler()
     for kind in ["metric", "image", "video", "artifact"]:
         assert h.can_handle(kind), f"WandBHandler should handle '{kind}' events"
-    assert not h.can_handle(
-        "log"
-    ), "WandBHandler should not handle 'log' events by default"
+    assert not h.can_handle("log"), (
+        "WandBHandler should not handle 'log' events by default"
+    )
 
 
 def test_handle_metric_raises_if_not_mapping(mock_wandb):
@@ -65,13 +68,15 @@ def test_handle_unsupported_kind_warns(mock_wandb, caplog):
     with caplog.at_level(logging.WARNING, logger=h.name):
         h.handle(event)
 
-    assert any(
-        "unsupported" in msg.lower() for msg in caplog.messages
-    ), "Should log a warning for unsupported event kind"
+    assert any("unsupported" in msg.lower() for msg in caplog.messages), (
+        "Should log a warning for unsupported event kind"
+    )
 
 
 def test_get_or_create_run_creates_new(mock_wandb):
     h = WandBHandler(project="proj", entity="ent", run_name="base")
-    run = h._get_or_create_run("scope1")
+    run = h._get_or_create_run("scope1", extra_config={})
     mock_wandb.init.assert_called_once()
-    assert h._runs["scope1"] == run, "Run should be cached under the given scope"
+    assert h._runs["scope1"] == run, (
+        "Run should be cached under the given scope"
+    )
