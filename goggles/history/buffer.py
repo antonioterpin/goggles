@@ -44,7 +44,7 @@ def _apply_reset(
         if init_mode == "randn":
             if key is None:
                 raise ValueError("init_mode 'randn' requires a PRNG key")
-            return jax.random.normal(key, hist_row.shape, hist_row.dtype)  # type: ignore
+            return jax.random.normal(key, hist_row.shape, hist_row.dtype)
         raise ValueError(f"Unknown init mode {init_mode!r}")
 
     return jax.lax.cond(reset, do_reset, lambda _: shifted_row, operand=None)

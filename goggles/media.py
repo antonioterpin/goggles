@@ -1,7 +1,7 @@
 """Media utilities for saving images and videos from numpy arrays."""
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, cast
 
 import imageio
 import matplotlib
@@ -9,6 +9,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+
+class _FrameWriter(Protocol):
+    """Subset of imageio writer API used by this module."""
+
+    def append_data(self, image: np.ndarray) -> None:
+        """Append a single frame to the output stream.
+
+        Args:
+            image: Frame to append.
+        """
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:
@@ -174,13 +185,10 @@ def save_numpy_mp4(
     if ffmpeg_params:
         writer_kwargs["ffmpeg_params"] = ffmpeg_params
 
-    with imageio.get_writer(out_path, **writer_kwargs) as writer:
-        if arr_u8.ndim == 3:
-            for i in range(arr_u8.shape[0]):
-                writer.append_data(arr_u8[i])  # pyright: ignore[reportAttributeAccessIssue]
-        else:
-            for i in range(arr_u8.shape[0]):
-                writer.append_data(arr_u8[i])  # pyright: ignore[reportAttributeAccessIssue]
+    with imageio.get_writer(out_path, **writer_kwargs) as writer_raw:
+        writer = cast(_FrameWriter, writer_raw)
+        for i in range(arr_u8.shape[0]):
+            writer.append_data(arr_u8[i])
 
 
 def save_numpy_image(image: np.ndarray, out_path: str, format: str) -> None:

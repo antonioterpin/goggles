@@ -226,6 +226,14 @@ if not getattr(ServerSocket._log, "__goggles_patched__", False):
     ServerSocket._log = _silent_server_log
 
 
+@runtime_checkable
+class _PollWithClose(Protocol):
+    """Protocol for poll objects that support explicit close()."""
+
+    def close(self) -> None:
+        """Close underlying polling resources."""
+
+
 # 5. Patch ClientSocket._loop to fix future leaks and reconnection
 def _patched_client_loop(self):
     recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
@@ -320,10 +328,9 @@ def _patched_client_loop(self):
         poll.unregister(self.get_signal)
     except Exception:
         pass
-    # Explicitly close poll if method exists (Python 3.4+)
-    if hasattr(poll, "close"):
+    if isinstance(poll, _PollWithClose):
         try:
-            poll.close()  # pyright: ignore[reportAttributeAccessIssue]
+            poll.close()
         except Exception:
             # Ignore any errors; we're just cleaning up
             pass
@@ -334,6 +341,18 @@ ClientSocket._loop = _patched_client_loop
 # 6. Patch Client.call to avoid infinite backpressure hang
 
 _original_client_call = Client.call
+
+
+class _FutureWithSendArgs(Protocol):
+    """Portal future with internal fields used by Client.call.
+
+    Attributes:
+        sendargs: Serialized request payload chunks for socket send.
+        rai: Mutable flag used by portal to signal disconnected sends.
+    """
+
+    sendargs: tuple[Any, ...]
+    rai: list[bool]
 
 
 def _safe_client_call(self, method, *data):
@@ -385,15 +404,16 @@ def _safe_client_call(self, method, *data):
     sendargs = (reqnum, strlen, name, *packlib.pack(data))
     rai = [False]
     future = Future(rai)
-    future.sendargs = sendargs  # pyright: ignore[reportAttributeAccessIssue]
+    future_with_sendargs = cast(_FutureWithSendArgs, future)
+    future_with_sendargs.sendargs = sendargs
     self.futures[reqnum] = future
     # Store future before sending request because the response may come fast
     # and the response handler runs in the socket's background thread.
     try:
         self.socket.send(*sendargs)
     except client_socket.Disconnected:
-        future = self.futures.pop(reqnum)
-        future.rai[0] = True
+        dropped_future = cast(_FutureWithSendArgs, self.futures.pop(reqnum))
+        dropped_future.rai[0] = True
         raise
     return future
 
@@ -426,6 +446,7 @@ def _make_text_logger(
     scope: str,
     **to_bind: Any,
 ) -> TextLogger:
+    # Importing here to avoid circular imports
     from ._core.logger import CoreTextLogger  # noqa: PLC0415
 
     return CoreTextLogger(name=name, scope=scope, **to_bind)

@@ -1,13 +1,14 @@
 exclude: ^pyproject\.toml$
 
 repos:
-  # Ruff: lint + autofix
+  # Ruff: lint (will fail on violations like unused/incorrect noqa, similar to pyright)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.1
     hooks:
       - id: ruff
         stages: [pre-commit, pre-push]
-        args: ["--fix"]
+        # Removed --fix to make it fail on violations (including RUF100)
+        # Run 'uv run ruff check --fix .' manually to auto-fix if needed
 
       - id: ruff-format
         stages: [pre-commit, pre-push]

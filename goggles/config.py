@@ -35,7 +35,7 @@ class PrettyConfig(dict):
         if orig_post_init is PrettyConfig.__post_init__:
             return
 
-        def __post_init__(self, *a: Any, **k: Any) -> None:  # noqa: N807
+        def __post_init__(self, *a: Any, **k: Any) -> None:
             orig_post_init(self, *a, **k)
             PrettyConfig.__post_init__(self)
 

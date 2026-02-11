@@ -14,6 +14,7 @@ from __future__ import annotations
 import socket
 import time
 from concurrent.futures import Future
+from typing import Any, cast
 
 import netifaces
 import portal
@@ -38,7 +39,7 @@ class GogglesClient:
     """
 
     _client: portal.Client
-    futures: list[Future]
+    futures: list[Future[Any]]
     _pruning_threshold: int
 
     def __init__(
@@ -71,7 +72,7 @@ class GogglesClient:
             logging=not suppress_connectivity_logs,
         )
 
-    def emit(self, event: Event) -> Future:
+    def emit(self, event: Event) -> Future[Any]:
         """Emit an event via the EventBus.
 
         Args:
@@ -84,12 +85,12 @@ class GogglesClient:
         if len(self.futures) > self._pruning_threshold:
             self.futures = [f for f in self.futures if not f.done()]
 
-        future = self._client.emit(event.to_dict())
-        self.futures.append(future)  # pyright: ignore[reportArgumentType]
-        # - Future type is not fully specified in portal.Client
-        return future  # pyright: ignore[reportReturnType]
+        future = cast(Future[Any], self._client.emit(event.to_dict()))
+        self.futures.append(future)
+        # Future type is not fully specified in portal.Client.
+        return future
 
-    def shutdown(self, timeout: float | None = None) -> Future:
+    def shutdown(self, timeout: float | None = None) -> Future[Any]:
         """Shutdown the EventBus client.
 
         Args:
@@ -126,7 +127,7 @@ class GogglesClient:
             for future in self.futures
             if not getattr(future, "done", lambda: False)()
         ]
-        return self._client.shutdown()  # pyright: ignore[reportReturnType]
+        return cast(Future[Any], self._client.shutdown())
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
         """Attach a handler under the given scope.

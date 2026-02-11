@@ -4,7 +4,7 @@ import json
 import logging
 import threading
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar, TypeAlias, cast
 from uuid import uuid4
 
 import numpy as np
@@ -18,6 +18,9 @@ from goggles.media import (
     yaml_dump,
 )
 from goggles.types import Event, Kind
+
+JSONScalar: TypeAlias = str | int | float | bool | None
+JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
 
 class LocalStorageHandler:
@@ -186,7 +189,7 @@ class LocalStorageHandler:
             name=data["name"],
         )
 
-    def _json_serializer(self, obj: Any) -> str:
+    def _json_serializer(self, obj: object) -> JSONValue:
         """Serialize object to JSON-compatible format.
 
         Args:
@@ -196,11 +199,11 @@ class LocalStorageHandler:
             JSON-serializable representation of the object.
         """
         if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.integer, np.floating)):
-            return obj.item()  # pyright: ignore[reportReturnType]
+            return cast(JSONValue, obj.tolist())
+        if isinstance(obj, (np.integer, np.floating)):
+            return cast(JSONValue, obj.item())
 
-        # For other non-serializable objects, convert to string
+        # For other non-serializable objects, convert to string.
         return str(obj)
 
     def _save_image_to_file(self, event: dict) -> dict | None:

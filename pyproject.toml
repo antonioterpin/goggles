@@ -116,7 +116,8 @@ select = [
     "N",     # pep8-naming (naming conventions)
     "B",     # flake8-bugbear (potential bugs)
     "PL",    # pylint (code quality)
-    "RUF",   # ruff-specific rules
+    "PGH003",# blanket type: ignore
+    "RUF",   # ruff-specific rules (includes RUF100 for unused noqa)
 ]
 
 # NOTE: issue #229 proposes to remove ignore
@@ -133,6 +134,12 @@ ignore = [
     "PLR0915", # Too many statements
     "PLR0911", # Too many return statements
 ]
+
+# Ensure unused/incorrect noqa comments are detected (similar to pyright's strictness)
+# RUF100 is already included via "RUF" above, but we want to ensure it's not accidentally ignored
+
+[tool.ruff.lint.pep8-naming]
+extend-ignore-names = ["__post_init__"]
 
 # Pydoclint configuration
 # Pydoclint is used together with Ruff because

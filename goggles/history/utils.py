@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TypeAlias
+from typing import Protocol
 
 import jax
-import jaxlib.xla_client as xc
 
 from .types import History
 
-Device: TypeAlias = type[xc.Device]  # pyright: ignore[reportInvalidTypeForm]
+
+class Device(Protocol):
+    """Minimal protocol for objects accepted as JAX target devices.
+
+    Attributes:
+        id: Device identifier.
+        process_index: Process index owning the device.
+        platform: Backend name (for example, "cpu" or "gpu").
+    """
+
+    id: int
+    process_index: int
+    platform: str
 
 
 def slice_history(
@@ -114,7 +125,7 @@ def peek_last(history: History, k: int = 1) -> History:
 
 def to_device(
     history: History,
-    devices: Sequence[Device] | None = None,  # type: ignore[type-arg]
+    devices: Sequence[Device] | None = None,
     keys: tuple[str, ...] | None = None,
 ) -> History:
     """Move selected history arrays to one or more JAX devices.

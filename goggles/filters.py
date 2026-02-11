@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeGuard
 
 import numpy as np
 
@@ -48,7 +48,7 @@ else:
 Array: TypeAlias = np.ndarray | JaxArray
 
 
-def is_jax_array(x: Array) -> bool:
+def is_jax_array(x: Array) -> TypeGuard[JaxArray]:
     """Return True iff `x` is a JAX array and JAX is installed.
 
     Args:
@@ -70,7 +70,8 @@ def get_backend(x: Array) -> ModuleType:
         `jax.numpy` if `x` is a JAX array, otherwise `numpy`.
     """
     if is_jax_array(x):
-        return jnp  # type: ignore[return-value]
+        assert jnp is not None
+        return jnp
     return np
 
 
@@ -89,9 +90,13 @@ def _buffer_set(buf: Array, idx: int, value: Array) -> Array:
         Updated buffer (same object for NumPy, new object for JAX).
     """
     if is_jax_array(buf):
-        return buf.at[idx].set(value)  # pyright: ignore[reportAttributeAccessIssue]
-    buf[idx] = value  # type: ignore[index]
-    return buf
+        return buf.at[idx].set(value)
+
+    # In the NumPy branch, normalize values to ndarrays so indexing and
+    # assignment are well-typed without ignore pragmas.
+    np_buf = np.asarray(buf)
+    np_buf[idx] = np.asarray(value)
+    return np_buf
 
 
 @dataclass(frozen=True)
