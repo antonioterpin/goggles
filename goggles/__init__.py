@@ -1160,7 +1160,7 @@ def get_bus() -> GogglesClient:
     """
     global __impl_get_bus  # noqa: PLW0603
     if __impl_get_bus is None:
-        # We import the implementation lazily here to avoid circular imports
+        # Importing here to avoid circular imports
         from ._core.routing import get_bus as _impl_get_bus  # noqa: PLC0415
 
         __impl_get_bus = cast(Callable[[], Any], _impl_get_bus)

@@ -232,6 +232,9 @@ def get_bus() -> GogglesClient:
         global __singleton_server  # noqa: PLW0603
         try:
             event_bus = EventBus()
+            # TODO(issue #116): Introduce GogglesServer wrapper and remove
+            # direct portal.Server construction.
+            # https://github.com/antonioterpin/goggles/issues/116
             server = portal.Server(
                 GOGGLES_PORT,
                 name=f"EventBus-Server@{socket.gethostname()}",
