@@ -30,8 +30,16 @@ from goggles.filters import (
     ],
 )
 @pytest.mark.parametrize("shape", [(1,), (3,), (2, 3)])
-def test_minmaxfilter_step(scalar_input, expected_scalar, shape):
-    """Test MinMaxFilter with batched array inputs."""
+def test_minmaxfilter_step(
+    scalar_input: float, expected_scalar: float, shape: tuple[int, ...]
+) -> None:
+    """Test MinMaxFilter with batched array inputs.
+
+    Args:
+        scalar_input: Scalar used to fill the input array.
+        expected_scalar: Expected normalized scalar value.
+        shape: Shape of the generated test arrays.
+    """
     f = MinMaxFilter(min_val=-10.0, max_val=10.0)
 
     input_array = np.full(shape, scalar_input)
@@ -63,8 +71,16 @@ def test_minmaxfilter_step(scalar_input, expected_scalar, shape):
     ],
 )
 @pytest.mark.parametrize("shape", [(1,), (3,), (2, 3)])
-def test_minmaxfilter_reset(scalar_input, expected_scalar, shape):
-    """Test MinMaxFilter reset does not affect stateless behavior for array inputs."""
+def test_minmaxfilter_reset(
+    scalar_input: float, expected_scalar: float, shape: tuple[int, ...]
+) -> None:
+    """Test MinMaxFilter reset does not affect stateless behavior for array inputs.
+
+    Args:
+        scalar_input: Scalar used to fill the input array.
+        expected_scalar: Expected normalized scalar value.
+        shape: Shape of the generated test arrays.
+    """
     f = MinMaxFilter(min_val=-10.0, max_val=10.0)
 
     input_array = np.full(shape, scalar_input)
@@ -188,7 +204,12 @@ def test_expaveragefilter_invalid_init(alpha: float) -> None:
     ],
 )
 def test_expaveragefilter_step(alpha: float, inputs: np.ndarray) -> None:
-    """Test the step method of ExpAverageFilter with batched input vectors."""
+    """Test the step method of ExpAverageFilter with batched input vectors.
+
+    Args:
+        alpha: Smoothing factor for exponential averaging.
+        inputs: Sequence of batched vectors passed through the filter.
+    """
     f = ExpAverageFilter(alpha=alpha)
     outputs = [f.step(x) for x in inputs]
 
@@ -232,7 +253,13 @@ def test_expaveragefilter_step(alpha: float, inputs: np.ndarray) -> None:
 def test_expaveragefilter_step_edge_cases(
     alpha: float, inputs: np.ndarray, expected: np.ndarray
 ) -> None:
-    """Test ExpAverageFilter with edge cases for alpha (0 and 1), using batched input."""
+    """Test ExpAverageFilter with edge cases for alpha (0 and 1), using batched input.
+
+    Args:
+        alpha: Smoothing factor for exponential averaging.
+        inputs: Sequence of batched vectors passed through the filter.
+        expected: Expected output vectors for each input step.
+    """
     f = ExpAverageFilter(alpha=alpha)
     outputs = [f.step(x) for x in inputs]
     for out, exp in zip(outputs, expected, strict=False):
@@ -282,7 +309,7 @@ def test_medianfilter_step(inputs_float: list[list[float]]) -> None:
     """Test the step method of MedianFilter with batched inputs.
 
     Args:
-        inputs: A list of batched input vectors.
+        inputs_float: A list of batched input vectors.
     """
     inputs = [np.array(x) for x in inputs_float]
     f = MedianFilter(window_size=len(inputs))
@@ -630,7 +657,7 @@ def test_scalefilter_step(
     "scale",
     ["a", None, object()],
 )
-def test_scalefilter_invalid_init(scale) -> None:
+def test_scalefilter_invalid_init(scale: object) -> None:
     """Test ScaleFilter initialization with invalid scale types.
 
     Args:

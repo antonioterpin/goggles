@@ -4,12 +4,24 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from typing import Any
 
 from goggles.history.utils import peek_last, slice_history, to_device, to_host
 
 
-def _make_history(B, T, shapes):
-    """Build a toy HistoryDict with deterministic contents."""
+def _make_history(
+    B: int, T: int, shapes: tuple[tuple[str, tuple[int, ...]], ...]
+) -> dict[str, jax.Array]:
+    """Build a toy HistoryDict with deterministic contents.
+
+    Args:
+        B: Batch dimension size.
+        T: Time dimension size.
+        shapes: Field names and per-timestep payload shapes.
+
+    Returns:
+        dict[str, jax.Array]: History mapping from field to shaped JAX arrays.
+    """
     history = {}
     for i, (name, shape) in enumerate(shapes):
         size = B * T * int(np.prod(shape) if shape else 1)

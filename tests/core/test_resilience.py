@@ -4,6 +4,8 @@ import os
 import time
 import threading
 import random
+from collections.abc import Iterator
+from typing import Any
 import pytest
 import psutil
 from unittest import mock
@@ -13,8 +15,12 @@ import goggles._core.routing as routing
 
 
 @pytest.fixture
-def free_port():
-    """Get a free random port."""
+def free_port() -> int:
+    """Get a free random port.
+
+    Returns:
+        int: Available TCP port on localhost.
+    """
     import socket
 
     with socket.socket() as s:
@@ -23,8 +29,16 @@ def free_port():
 
 
 @pytest.fixture(autouse=True)
-def clean_env(monkeypatch, free_port):
-    """Ensure a clean environment and specific port for each test."""
+def clean_env(monkeypatch: pytest.MonkeyPatch, free_port: int) -> Iterator[None]:
+    """Ensure a clean environment and specific port for each test.
+
+    Args:
+        monkeypatch: Fixture used to override environment and globals.
+        free_port: Available TCP port for this test process.
+
+    Yields:
+        None: Test executes with patched environment.
+    """
     port_str = str(free_port)
     monkeypatch.setenv("GOGGLES_PORT", port_str)
     monkeypatch.setenv("GOGGLES_ASYNC", "1")
@@ -51,8 +65,12 @@ def clean_env(monkeypatch, free_port):
 
 
 @pytest.fixture
-def chaos_monitor():
-    """Context manager style monitor for chaos testing."""
+def chaos_monitor() -> Any:
+    """Context manager style monitor for chaos testing.
+
+    Returns:
+        Any: Monitor object with injection stats and worker controls.
+    """
 
     class Monitor:
         def __init__(self):
@@ -96,12 +114,15 @@ def chaos_monitor():
 
 @pytest.mark.resilience
 @pytest.mark.xdist_group(name="goggles_singleton")
-def test_server_resilience_to_broken_pipe(chaos_monitor):
+def test_server_resilience_to_broken_pipe(chaos_monitor: Any) -> None:
     """
     Verify that Goggles server survives multiple BrokenPipe/ConnectionReset errors
     and stays responsive without entering a livelock (busy-loop).
 
     Supports long-running verification via GOGGLES_RESILIENCE_DURATION env var.
+
+    Args:
+        chaos_monitor: Fixture exposing injected-fault monitor helpers.
     """
     # 1. Start Goggles
     log = goggles.get_logger("resilience_test", with_metrics=True)

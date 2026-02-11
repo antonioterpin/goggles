@@ -41,7 +41,7 @@ def test_logger_bind_creates_new_instance():
 # ---------------------------------------------------------------------
 
 
-def test_timeit_measures_execution_time(monkeypatch):
+def test_timeit_measures_execution_time() -> None:
     """Check that @timeit executes and returns the wrapped result."""
     called = {}
 
@@ -121,7 +121,7 @@ class DummyHandler:
         return cls()
 
 
-def test_attach_and_emit(monkeypatch):
+def test_attach_and_emit() -> None:
     """Attach dummy handler and ensure events are received."""
     gg.register_handler(DummyHandler)
     handler = DummyHandler()
@@ -260,7 +260,7 @@ def test_goggles_logger_scalar_and_push(tmp_path):
     assert "loss" in data and "accuracy" in data, "Logged metrics missing from file"
 
 
-def test_logger_levels_mapping(monkeypatch):
+def test_logger_levels_mapping() -> None:
     """Ensure TextLogger.log dispatches correctly by severity."""
     log = gg.get_logger("severity")
 
@@ -280,7 +280,7 @@ def test_finish_multiple_times_is_safe():
     gg.finish()  # second call should not crash
 
 
-def test_import_adds_nullhandler(monkeypatch):
+def test_import_adds_nullhandler() -> None:
     """Ensure module attaches a NullHandler at import time."""
     import importlib
     import goggles as gg1

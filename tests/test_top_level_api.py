@@ -11,11 +11,20 @@ import goggles.__init__ as gg
 
 
 class DummyHandler:
-    """Minimal handler implementation for testing EventBus attach/detach/emit."""
+    """Minimal handler implementation for testing EventBus attach/detach/emit.
+
+    Attributes:
+        capabilities: Supported event kinds for this test handler.
+    """
 
     capabilities = frozenset({"metric", "log"})
 
-    def __init__(self, name="dummy"):
+    def __init__(self, name: str = "dummy") -> None:
+        """Initialize a dummy handler instance.
+
+        Args:
+            name: Handler name used as registry key.
+        """
         self.name = name
         self.opened = False
         self.closed = False
@@ -195,8 +204,12 @@ def test_attach_detach_finish_call_bus(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_get_bus_caches_implementation(monkeypatch):
-    """Ensure get_bus imports once, caches the callable, and returns its value."""
+def test_get_bus_caches_implementation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure get_bus imports once, caches the callable, and returns its value.
+
+    Args:
+        monkeypatch: Fixture used to patch module state and imports.
+    """
     # Reset cache
     monkeypatch.setattr(gg, "__impl_get_bus", None, raising=True)
 

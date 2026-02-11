@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,7 +12,13 @@ from goggles.config import PrettyConfig, load_configuration
 
 @dataclass(frozen=True)
 class DummyTypedConfig(PrettyConfig):
-    """Example typed config that inherits PrettyConfig."""
+    """Example typed config that inherits PrettyConfig.
+
+    Attributes:
+        name: Logical config name.
+        port: Serial port path.
+        baud_rate: Supported serial speed.
+    """
 
     name: str = "goggles.dummy"
     port: str = "/dev/ttyUSB0"
@@ -19,7 +26,11 @@ class DummyTypedConfig(PrettyConfig):
     _secret: str = "dont-serialize"
 
     def __post_init__(self) -> None:
-        """Validate baud_rate after initialization."""
+        """Validate baud_rate after initialization.
+
+        Raises:
+            ValueError: If `baud_rate` is not the supported value.
+        """
         if self.baud_rate != 115200:
             raise ValueError("baud_rate must be 115200.")
 
@@ -83,8 +94,12 @@ def test_to_dict_and_from_config_roundtrip_same() -> None:
     ), "dict() conversion should produce equivalent dicts."
 
 
-def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(tmp_path: Any) -> None:
-    """Save to YAML/JSON and reconstruct the typed config back."""
+def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(tmp_path: Path) -> None:
+    """Save to YAML/JSON and reconstruct the typed config back.
+
+    Args:
+        tmp_path: Temporary directory for serialized config artifacts.
+    """
     cfg = DummyTypedConfig.from_config(
         {"name": "n", "port": "/dev/ttyUSB0", "baud_rate": 115200, "junk": "nope"}
     )
@@ -129,8 +144,12 @@ def test_private_fields_are_not_overwritten_by_from_config() -> None:
     assert "_secret" not in cfg, "Private field must not appear in dict payload."
 
 
-def test_private_fields_not_serialized_yaml_json_roundtrip(tmp_path: Any) -> None:
-    """Private fields are excluded from YAML/JSON output and remain default after reload."""
+def test_private_fields_not_serialized_yaml_json_roundtrip(tmp_path: Path) -> None:
+    """Private fields are excluded from YAML/JSON output and remain default after reload.
+
+    Args:
+        tmp_path: Temporary directory for serialized config artifacts.
+    """
     cfg = DummyTypedConfig()
 
     yaml_path = tmp_path / "cfg.yaml"

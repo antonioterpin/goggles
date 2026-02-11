@@ -4,6 +4,8 @@ import time
 import os
 import sys
 import subprocess
+from collections.abc import Iterator
+from typing import Any
 import pytest
 import goggles
 from goggles._core import routing
@@ -45,7 +47,12 @@ if __name__ == "__main__":
 
 
 @pytest.fixture
-def free_port():
+def free_port() -> int:
+    """Allocate and return a free local TCP port.
+
+    Returns:
+        int: Free TCP port for test server startup.
+    """
     import socket
 
     with socket.socket() as s:
@@ -54,7 +61,15 @@ def free_port():
 
 
 @pytest.fixture
-def server_process(free_port):
+def server_process(free_port: int) -> Iterator[subprocess.Popen[Any]]:
+    """Start and yield a mock server process bound to `free_port`.
+
+    Args:
+        free_port: Port chosen for this test run.
+
+    Yields:
+        subprocess.Popen[Any]: Running mock server process.
+    """
     env = os.environ.copy()
     env["GOGGLES_PORT"] = str(free_port)
     p = subprocess.Popen([sys.executable, "-c", SERVER_CODE], env=env)
@@ -65,7 +80,15 @@ def server_process(free_port):
 
 
 @pytest.fixture
-def goggles_client(free_port):
+def goggles_client(free_port: int) -> Iterator[None]:
+    """Configure a client singleton connected to the mock server.
+
+    Args:
+        free_port: Port where the server process listens.
+
+    Yields:
+        None: Control returns to the test with patched client initialization.
+    """
     # We must patch the singleton client or create a fresh one
     routing.__singleton_client = None
 
@@ -102,10 +125,16 @@ def goggles_client(free_port):
 # Skip this test because it causes deadlocks in portal.ClientSocket teardown
 # when using a mock server that is killed abruptly.
 @pytest.mark.skip(reason="Teardown hangs due to portal deadlock on connect")
-def test_consumer_death_does_not_hang_producer(server_process, goggles_client):
+def test_consumer_death_does_not_hang_producer(
+    server_process: subprocess.Popen[Any], goggles_client: None
+) -> None:
     """
     Simulates consumer death and asserts that producer throws TimeoutError
     instead of hanging forever.
+
+    Args:
+        server_process: Running mock server process fixture.
+        goggles_client: Fixture that patches client internals for the test.
     """
     # 1. Setup handler
     from goggles._core.integrations.wandb import WandBHandler
