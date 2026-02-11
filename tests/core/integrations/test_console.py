@@ -1,5 +1,6 @@
 import logging
 import pytest
+from collections.abc import Iterator
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -11,8 +12,15 @@ class DummyEvent(SimpleNamespace):
 
 
 @pytest.fixture
-def handler(tmp_path):
-    """Return a ConsoleHandler with open/close lifecycle."""
+def handler(tmp_path: Path) -> Iterator[ConsoleHandler]:
+    """Return a ConsoleHandler with open/close lifecycle.
+
+    Args:
+        tmp_path: Temporary project root used by the handler.
+
+    Yields:
+        ConsoleHandler: Open console handler instance.
+    """
     h = ConsoleHandler(project_root=tmp_path)
     h.open()
     yield h
@@ -108,8 +116,16 @@ def test_multiple_initializations_do_not_duplicate_handlers():
 
 
 @pytest.mark.parametrize("style", ["absolute", "relative"])
-def test_path_style_affects_output(tmp_path, caplog, style):
-    """Ensure path_style option changes displayed prefix."""
+def test_path_style_affects_output(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, style: str
+) -> None:
+    """Ensure path_style option changes displayed prefix.
+
+    Args:
+        tmp_path: Temporary root used to compute relative paths.
+        caplog: Pytest log capture fixture.
+        style: Configured path display style.
+    """
     project_root = tmp_path
     fake_file = project_root / "src" / "main.py"
     event = DummyEvent(
