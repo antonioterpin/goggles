@@ -16,6 +16,20 @@ class DummyEvent(SimpleNamespace):
     """Lightweight event for testing without importing full Event class."""
 
 
+def _capture_logger_messages(
+    logger: logging.Logger,
+) -> tuple[list[str], logging.Handler]:
+    messages: list[str] = []
+
+    class _MessageCollector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    collector = _MessageCollector()
+    logger.addHandler(collector)
+    return messages, collector
+
+
 @pytest.fixture
 def handler(tmp_path: Path) -> Iterator[ConsoleHandler]:
     """Return a ConsoleHandler with open/close lifecycle.
@@ -42,7 +56,7 @@ def test_can_handle_only_log(handler):
         )
 
 
-def test_handle_logs_to_console(handler, caplog):
+def test_handle_logs_to_console(handler):
     event = DummyEvent(
         kind="log",
         payload="Hello world",
@@ -53,18 +67,22 @@ def test_handle_logs_to_console(handler, caplog):
         time=0.0,
         scope="run",
     )
-    with caplog.at_level(logging.DEBUG):
+    messages, collector = _capture_logger_messages(handler._logger)
+    try:
         handler.handle(event)
-    assert any("Hello world" in msg for msg in caplog.messages), (
+    finally:
+        handler._logger.removeHandler(collector)
+    output = " ".join(messages)
+    assert "Hello world" in output, (
         "Log message 'Hello world' not found in console output"
     )
     # Ensure that filepath and line number are in the log prefix
-    assert any(
-        f"{Path(__file__).name}:123" in msg for msg in caplog.messages
-    ), "Source file:line prefix not found in console output"
+    assert f"{Path(__file__).name}:123" in output, (
+        "Source file:line prefix not found in console output"
+    )
 
 
-def test_handle_respects_event_level(handler, caplog):
+def test_handle_respects_event_level(handler):
     event = DummyEvent(
         kind="log",
         payload="debug message",
@@ -75,10 +93,14 @@ def test_handle_respects_event_level(handler, caplog):
         time=0.0,
         scope="run",
     )
-    handler._logger.setLevel(logging.NOTSET)
-    with caplog.at_level(logging.DEBUG):
+    handler._logger.setLevel(logging.DEBUG)
+    messages, collector = _capture_logger_messages(handler._logger)
+    try:
         handler.handle(event)
-    assert any("debug message" in msg for msg in caplog.messages), (
+    finally:
+        handler._logger.removeHandler(collector)
+    output = " ".join(messages)
+    assert "debug message" in output, (
         "Debug message not found after setting proper log level"
     )
 
@@ -126,14 +148,12 @@ def test_multiple_initializations_do_not_duplicate_handlers():
 @pytest.mark.parametrize("style", ["absolute", "relative"])
 def test_path_style_affects_output(
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
     style: Literal["absolute", "relative"],
 ) -> None:
     """Ensure path_style option changes displayed prefix.
 
     Args:
         tmp_path: Temporary root used to compute relative paths.
-        caplog: Pytest log capture fixture.
         style: Configured path display style.
     """
     project_root = tmp_path
@@ -153,9 +173,12 @@ def test_path_style_affects_output(
     )
     handler = ConsoleHandler(path_style=style, project_root=project_root)
     handler.open()
-    with caplog.at_level(logging.INFO):
+    messages, collector = _capture_logger_messages(handler._logger)
+    try:
         handler.handle(event)
-    message = " ".join(caplog.messages)
+    finally:
+        handler._logger.removeHandler(collector)
+    message = " ".join(messages)
     if style == "relative":
         assert "src/main.py:99" in message, (
             "Relative path prefix missing from output"

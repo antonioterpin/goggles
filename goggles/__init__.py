@@ -141,7 +141,14 @@ GOGGLES_PORT: Final[str] = os.getenv("GOGGLES_PORT", "2304")
 
 
 # 1. Patch SendBuffer.send to propagate ConnectionResetError
-_original_send = SendBuffer.send
+# Keep a stable reference to the unpatched method across module reloads.
+_send_buffer_cls = cast(Any, SendBuffer)
+if not hasattr(_send_buffer_cls, "_goggles_original_send"):
+    _send_buffer_cls._goggles_original_send = _send_buffer_cls.send
+_original_send = cast(
+    "Callable[[Any, Any], Any]",
+    _send_buffer_cls._goggles_original_send,
+)
 
 
 def _safe_send(self, sock):
@@ -151,7 +158,9 @@ def _safe_send(self, sock):
         raise ConnectionResetError from e
 
 
-SendBuffer.send = _safe_send
+_safe_send.__goggles_patched__ = True  # type: ignore[attr-defined]
+if not getattr(SendBuffer.send, "__goggles_patched__", False):
+    SendBuffer.send = _safe_send
 
 
 # 2. Patch ServerSocket._loop to explicitly disconnect on write errors
@@ -196,7 +205,14 @@ def _patched_server_loop(self):
 ServerSocket._loop = _patched_server_loop
 
 # 3. Silence "Dropping message" log spam
-_original_server_log = ServerSocket._log
+# Keep a stable reference to the unpatched method across module reloads.
+_server_socket_cls = cast(Any, ServerSocket)
+if not hasattr(_server_socket_cls, "_goggles_original_log"):
+    _server_socket_cls._goggles_original_log = _server_socket_cls._log
+_original_server_log = cast(
+    "Callable[..., Any]",
+    _server_socket_cls._goggles_original_log,
+)
 
 
 def _silent_server_log(self, *args):
@@ -205,7 +221,9 @@ def _silent_server_log(self, *args):
     return _original_server_log(self, *args)
 
 
-ServerSocket._log = _silent_server_log
+_silent_server_log.__goggles_patched__ = True  # type: ignore[attr-defined]
+if not getattr(ServerSocket._log, "__goggles_patched__", False):
+    ServerSocket._log = _silent_server_log
 
 
 # 5. Patch ClientSocket._loop to fix future leaks and reconnection
@@ -1124,7 +1142,7 @@ def get_bus() -> GogglesClient:
         # We import the implementation lazily here to avoid circular imports
         from ._core.routing import get_bus as _impl_get_bus  # noqa: PLC0415
 
-        __impl_get_bus = cast(Callable[[], GogglesClient], _impl_get_bus)
+        __impl_get_bus = cast(Callable[[], Any], _impl_get_bus)
     return __impl_get_bus()
 
 
@@ -1154,10 +1172,30 @@ def detach(handler_name: str, scope: str) -> None:
     bus.detach(handler_name, scope)
 
 
-def finish() -> None:
-    """Shutdown the global EventBus and close all handlers."""
+def finish(timeout: float | None = None) -> None:
+    """Shutdown the global EventBus and close all handlers.
+
+    Args:
+        timeout: Optional timeout in seconds for shutdown completion.
+            If None, uses ``GOGGLES_SHUTDOWN_TIMEOUT`` (default: 5.0s).
+            Set to 0 or a negative value to wait indefinitely.
+    """
     bus = get_bus()
-    bus.shutdown().result()
+    if timeout is None:
+        timeout = float(os.getenv("GOGGLES_SHUTDOWN_TIMEOUT", "5.0"))
+    if timeout <= 0:
+        timeout = None
+    try:
+        shutdown_future = bus.shutdown(timeout=timeout)
+        if timeout is None:
+            shutdown_future.result()
+        else:
+            shutdown_future.result(timeout=timeout)
+    except TimeoutError:
+        logging.getLogger(__name__).warning(
+            "Timed out while shutting down EventBus after %.2fs.",
+            timeout,
+        )
 
 
 def register_handler(handler_class: type) -> None:

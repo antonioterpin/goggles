@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import goggles._core.logger as core_logger
 from goggles._core.logger import CoreGogglesLogger, CoreTextLogger
 
 
@@ -170,19 +169,15 @@ def test_histogram_adds_name_and_payload(goggles_logger, patch_bus):
     assert event.payload == [1, 2, 3], "Event payload mismatch for histogram"
 
 
-def test_all_emitters_call_future_result(
-    monkeypatch: pytest.MonkeyPatch, patch_bus: MagicMock
-) -> None:
+def test_all_emitters_call_future_result(patch_bus: MagicMock) -> None:
     """Ensure synchronous mode calls future.result().
 
     Args:
-        monkeypatch: Fixture used to override sync mode.
         patch_bus: Patched mock client fixture.
     """
-    monkeypatch.setattr(core_logger, "GOGGLES_ASYNC", False)
     g = CoreGogglesLogger(name="sync", scope="run")
     g._client = patch_bus
 
-    g.scalar("metric", 1.0)
+    g.scalar("metric", 1.0, async_mode=False)
     future = patch_bus.emit.return_value
     future.result.assert_called_once()

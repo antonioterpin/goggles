@@ -12,6 +12,7 @@ Example:
 from __future__ import annotations
 
 import socket
+import time
 from concurrent.futures import Future
 
 import netifaces
@@ -88,14 +89,43 @@ class GogglesClient:
         # - Future type is not fully specified in portal.Client
         return future  # pyright: ignore[reportReturnType]
 
-    def shutdown(self) -> Future:
+    def shutdown(self, timeout: float | None = None) -> Future:
         """Shutdown the EventBus client.
+
+        Args:
+            timeout: Optional timeout in seconds to wait for pending futures
+                before issuing client shutdown. If None or <= 0, waits
+                indefinitely.
 
         Returns:
             A Future that will complete when the client is fully shut down.
         """
+        deadline: float | None = None
+        if timeout is not None and timeout > 0:
+            deadline = time.monotonic() + timeout
+
         for future in self.futures:
-            future.result()
+            try:
+                if deadline is None:
+                    future.result()
+                else:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    future.result(timeout=remaining)
+            except TimeoutError:
+                break
+            except Exception:
+                # Ignore failed/dropped futures during shutdown.
+                pass
+
+        # Keep only unfinished futures (if any) for introspection after
+        # shutdown.
+        self.futures = [
+            future
+            for future in self.futures
+            if not getattr(future, "done", lambda: False)()
+        ]
         return self._client.shutdown()  # pyright: ignore[reportReturnType]
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:

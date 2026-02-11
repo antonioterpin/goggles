@@ -68,9 +68,9 @@ def clean_registry(monkeypatch):
 def test_get_logger_returns_text_and_goggles(monkeypatch):
     dummy_text = object()
     dummy_metrics = object()
-    monkeypatch.setattr(gg, "_make_text_logger", lambda n, s, t: dummy_text)
+    monkeypatch.setattr(gg, "_make_text_logger", lambda n, s, **t: dummy_text)
     monkeypatch.setattr(
-        gg, "_make_goggles_logger", lambda n, s, t: dummy_metrics
+        gg, "_make_goggles_logger", lambda n, s, **t: dummy_metrics
     )
 
     assert gg.get_logger("x") is dummy_text, (
@@ -134,6 +134,7 @@ def test_eventbus_attach_and_emit(monkeypatch):
 
 
 def test_eventbus_emit_ignores_scope_and_invalid_type(monkeypatch):
+    gg.register_handler(DummyHandler)
     bus = gg.EventBus()
     dummy = DummyHandler(name="dummy")
     bus.attach([dummy.to_dict()], scopes=["train"])
@@ -183,10 +184,12 @@ def test_eventbus_detach_and_shutdown():
 
 def test_attach_detach_finish_call_bus(monkeypatch):
     mock_bus = types.SimpleNamespace(
-        attach=lambda h, s: setattr(mock_bus, "attached", (h, s)),
+        attach=lambda *, handlers, scopes: setattr(
+            mock_bus, "attached", (handlers, scopes)
+        ),
         detach=lambda n, s: setattr(mock_bus, "detached", (n, s)),
-        shutdown=lambda: types.SimpleNamespace(
-            result=lambda: setattr(mock_bus, "shut", True)
+        shutdown=lambda timeout=None: types.SimpleNamespace(
+            result=lambda timeout=None: setattr(mock_bus, "shut", True)
         ),
     )
     monkeypatch.setattr(cast(Any, gg), "get_bus", lambda: mock_bus)

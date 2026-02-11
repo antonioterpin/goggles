@@ -1,10 +1,25 @@
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from goggles._core.integrations.storage import LocalStorageHandler
+
+
+def _capture_logger_messages(
+    logger: logging.Logger,
+) -> tuple[list[str], logging.Handler]:
+    messages: list[str] = []
+
+    class _MessageCollector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    collector = _MessageCollector()
+    logger.addHandler(collector)
+    return messages, collector
 
 
 @pytest.fixture
@@ -132,11 +147,15 @@ def test_save_video_to_file_gif(mock_save, tmp_handler):
     mock_save.assert_called_once()
 
 
-def test_save_video_to_file_unknown_format_warns(tmp_handler, caplog):
+def test_save_video_to_file_unknown_format_warns(tmp_handler):
     event = {"payload": np.zeros((2, 2)), "extra.format": "avi"}
-    res = tmp_handler._save_video_to_file(event)
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        res = tmp_handler._save_video_to_file(event)
+    finally:
+        tmp_handler._logger.removeHandler(collector)
     assert res is None, "Should return None for unknown video format"
-    assert any("Unknown video format" in m for m in caplog.messages), (
+    assert any("Unknown video format" in m for m in messages), (
         "Should log a warning for unknown video format"
     )
 
@@ -162,11 +181,15 @@ def test_save_artifact_to_file_yaml(tmp_handler):
     assert "key" in text, "YAML content missing expected key"
 
 
-def test_save_artifact_to_file_unknown_format_warns(tmp_handler, caplog):
+def test_save_artifact_to_file_unknown_format_warns(tmp_handler):
     event = {"payload": "data", "extra.format": "bin"}
-    res = tmp_handler._save_artifact_to_file(event)
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        res = tmp_handler._save_artifact_to_file(event)
+    finally:
+        tmp_handler._logger.removeHandler(collector)
     assert res is None, "Should return None for unknown artifact format"
-    assert any("Unknown artifact format" in m for m in caplog.messages), (
+    assert any("Unknown artifact format" in m for m in messages), (
         "Should log a warning for unknown artifact format"
     )
 
@@ -189,15 +212,19 @@ def test_save_vector_field_to_file(mock_save, tmp_handler):
     mock_save.assert_called_once()
 
 
-def test_save_vector_field_to_file_with_unknown_mode_warns(tmp_handler, caplog):
+def test_save_vector_field_to_file_with_unknown_mode_warns(tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2)),
         "extra.store_visualization": True,
         "extra.mode": "unknown",
     }
-    tmp_handler._save_vector_field_to_file(event)
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        tmp_handler._save_vector_field_to_file(event)
+    finally:
+        tmp_handler._logger.removeHandler(collector)
     assert any(
-        "Unknown vector field visualization mode" in m for m in caplog.messages
+        "Unknown vector field visualization mode" in m for m in messages
     ), "Should log a warning for unknown vector field visualization mode"
 
 
@@ -239,12 +266,16 @@ def test_handle_image_event_uses_helper(mock_save, tmp_handler):
     mock_save.assert_called_once()
 
 
-def test_handle_invalid_media_warns(tmp_handler, caplog):
+def test_handle_invalid_media_warns(tmp_handler):
     with patch.object(
         LocalStorageHandler, "_save_video_to_file", return_value=None
     ):
         event = make_event("video", np.zeros((2, 2, 2, 3)))
-        tmp_handler.handle(event)
-        assert any("Skipping event logging" in m for m in caplog.messages), (
+        messages, collector = _capture_logger_messages(tmp_handler._logger)
+        try:
+            tmp_handler.handle(event)
+        finally:
+            tmp_handler._logger.removeHandler(collector)
+        assert any("Skipping event logging" in m for m in messages), (
             "Should log a warning when skipping event logging due to failure"
         )

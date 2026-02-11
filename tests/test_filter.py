@@ -697,7 +697,7 @@ def test_scalefilter_invalid_init(scale: object) -> None:
     Args:
         scale: The invalid scale value to test.
     """
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         ScaleFilter(scale=cast(Any, scale))
 
 
