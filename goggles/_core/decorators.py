@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import ParamSpec, TypeVar
+import os
+import time
 from collections.abc import Callable
+from typing import ParamSpec, TypeVar
 
 # TypeVar for preserving function signature
 P = ParamSpec("P")
@@ -35,9 +37,8 @@ def timeit(
     DEBUG: my_function_timing took 0.123456s
 
     """
-    import time
-    import os
-    from goggles import get_logger, GogglesLogger
+    # Importing here to avoid circular imports
+    from goggles import GogglesLogger, get_logger  # noqa: PLC0415
 
     logger: GogglesLogger = get_logger(
         "goggles.decorators.timeit", with_metrics=True, scope=scope
@@ -52,7 +53,6 @@ def timeit(
             filename = os.path.basename(func.__code__.co_filename)
             fname = name or f"{filename}:{func.__name__}"
             logger.log(severity, f"{fname} took {duration:.6f}s")
-            logger.scalar(f"timings/{fname}", duration)
             return result
 
         return wrapper
@@ -60,11 +60,17 @@ def timeit(
     return decorator
 
 
-def trace_on_error(scope: str = "global") -> Callable[[Callable[P, T]], Callable[P, T]]:
+def trace_on_error(
+    scope: str = "global",
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
     """Decorator to log function arguments and state on exception.
 
     Args:
         scope: Scope of the logged event (e.g., "global" or "run").
+
+    Returns:
+        Decorated function with same signature as input.
+
 
     Example:
     >>> @trace_on_error()
@@ -75,7 +81,8 @@ def trace_on_error(scope: str = "global") -> Callable[[Callable[P, T]], Callable
     {'args': (10, 0), 'kwargs': {}}
 
     """
-    from goggles import get_logger
+    # Importing here to avoid circular imports
+    from goggles import get_logger  # noqa: PLC0415
 
     logger = get_logger(
         "goggles.decorators.trace_on_error",
@@ -83,7 +90,6 @@ def trace_on_error(scope: str = "global") -> Callable[[Callable[P, T]], Callable
     )
 
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
-
         @functools.wraps(func)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
             try:
@@ -94,7 +100,9 @@ def trace_on_error(scope: str = "global") -> Callable[[Callable[P, T]], Callable
                 # if method, collect self attributes
                 if args and hasattr(args[0], "__dict__"):
                     data["self"] = args[0].__dict__
-                logger.error(f"Exception in {func.__name__}: {e}; state: {data}")
+                logger.error(
+                    f"Exception in {func.__name__}: {e}; state: {data}"
+                )
                 raise
 
         return wrapper

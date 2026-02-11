@@ -10,18 +10,19 @@ Example:
 """
 
 from __future__ import annotations
+
+import socket
 from concurrent.futures import Future
 
-import portal
-import socket
 import netifaces
+import portal
 
 from goggles import (
-    EventBus,
-    Event,
     GOGGLES_HOST,
     GOGGLES_PORT,
     GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
+    Event,
+    EventBus,
 )
 
 
@@ -30,6 +31,9 @@ class GogglesClient:
 
     Wraps a portal.Client to provide event emission with automatic
     future management to prevent memory leaks.
+
+    Attributes:
+        futures: List of pending futures from emitted events.
     """
 
     _client: portal.Client
@@ -56,7 +60,8 @@ class GogglesClient:
         """
         self.futures = []
         self._pruning_threshold = pruning_threshold
-        # Increase maxinflight to avoid stalling the main thread on high-throughput logging.
+        # Increase maxinflight to avoid stalling the main thread on
+        # high-throughput logging.
         self._client = portal.Client(
             addr=addr,
             name=name,
@@ -71,20 +76,27 @@ class GogglesClient:
         Args:
             event: The event to emit.
 
+        Returns:
+            A Future that will complete when the event is delivered.
         """
         # Periodic cleanup of finished futures to avoid memory leak
         if len(self.futures) > self._pruning_threshold:
             self.futures = [f for f in self.futures if not f.done()]
 
         future = self._client.emit(event.to_dict())
-        self.futures.append(future)  # type: ignore
-        return future  # type: ignore
+        self.futures.append(future)  # pyright: ignore[reportArgumentType]
+        # - Future type is not fully specified in portal.Client
+        return future  # pyright: ignore[reportReturnType]
 
     def shutdown(self) -> Future:
-        """Shutdown the EventBus client."""
+        """Shutdown the EventBus client.
+
+        Returns:
+            A Future that will complete when the client is fully shut down.
+        """
         for future in self.futures:
             future.result()
-        return self._client.shutdown()  # type: ignore
+        return self._client.shutdown()  # pyright: ignore[reportReturnType]
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
         """Attach a handler under the given scope.
@@ -103,10 +115,6 @@ class GogglesClient:
         Args:
             handler_name: The name of the handler to detach.
             scope: The scope from which to detach.
-
-        Raises:
-          ValueError: If the handler was not attached under the requested scope.
-
         """
         self._client.detach(handler_name, scope)
 
@@ -190,7 +198,7 @@ def get_bus() -> GogglesClient:
 
     """
     if __i_am_host() and not __is_port_in_use(GOGGLES_HOST, int(GOGGLES_PORT)):
-        global __singleton_server
+        global __singleton_server  # noqa: PLW0603
         try:
             event_bus = EventBus()
             server = portal.Server(
@@ -209,7 +217,7 @@ def get_bus() -> GogglesClient:
             # (e.g. concurrency), no further need
             pass
 
-    global __singleton_client
+    global __singleton_client  # noqa: PLW0603
     if __singleton_client is None:
         __singleton_client = GogglesClient(
             addr=f"{GOGGLES_HOST}:{GOGGLES_PORT}",
