@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import numpy as np
 
 import goggles as gg
@@ -32,11 +33,15 @@ def my_episode(run_index: int, episode_index: int):
         # Supports scopes transparently
         # and has its own step counter
         episode_logger.scalar(
-            "env/reward", run_index * episode_index * episode_length + step, step=step
+            "env/reward",
+            run_index * episode_index * episode_length + step,
+            step=step,
         )
         # Example of image logging, which will also be stored
         # using a namespace
-        episode_logger.image(dummy_image, name="observations/image_stepped", step=step)
+        episode_logger.image(
+            dummy_image, name="observations/image_stepped", step=step
+        )
 
 
 def my_training_run(run_index: int):

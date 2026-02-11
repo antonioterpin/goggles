@@ -1,7 +1,9 @@
 import time
+
+import numpy as np
+
 import goggles as gg
 from goggles import WandBHandler
-import numpy as np
 
 # In this example, we set up a logger that outputs to Weights & Biases (W&B).
 logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)

@@ -1,7 +1,7 @@
 """Demonstration of the Filters module.
 
 This script shows how to:
-1. Use different types of filters (ScaleFilter, MinMaxFilter, AverageFilter, etc.)
+1. Use different filter types (ScaleFilter, MinMaxFilter, AverageFilter)
 2. Chain filters together using ConcatFilter
 3. Work with both numpy arrays and JAX arrays
 4. Reset filter states
@@ -11,8 +11,8 @@ This script shows how to:
 import numpy as np
 
 try:
-    import jax.numpy as jnp
     import jax
+    import jax.numpy as jnp
 
     HAS_JAX = True
 except ImportError:
@@ -22,14 +22,14 @@ except ImportError:
 
 import goggles as gg
 from goggles.filters import (
-    ScaleFilter,
-    MinMaxFilter,
     AverageFilter,
-    ExpAverageFilter,
-    MedianFilter,
-    QuantizationFilter,
     ConcatFilter,
+    ExpAverageFilter,
     FilterConfig,
+    MedianFilter,
+    MinMaxFilter,
+    QuantizationFilter,
+    ScaleFilter,
     create_concat_filter,
 )
 
@@ -72,7 +72,7 @@ def demo_basic_filters():
     exp_averaged_data = []
     for x in data:
         exp_averaged_data.append(exp_avg_filter.step(x))
-    logger.info(f"Exponential average (α=0.3): {exp_averaged_data}")
+    logger.info(f"Exponential average (alpha=0.3): {exp_averaged_data}")
 
 
 def demo_stateful_filters():
@@ -89,7 +89,7 @@ def demo_stateful_filters():
     for i, x in enumerate(data):
         result = median_filter.step(x)
         results_before_reset.append(result)
-        logger.info(f"  Step {i+1}: input={x}, median={result}")
+        logger.info(f"  Step {i + 1}: input={x}, median={result}")
 
     # Reset and process again
     logger.info("Resetting filter and processing same data:")
@@ -98,25 +98,30 @@ def demo_stateful_filters():
     for i, x in enumerate(data):
         result = median_filter.step(x)
         results_after_reset.append(result)
-        logger.info(f"  Step {i+1}: input={x}, median={result}")
+        logger.info(f"  Step {i + 1}: input={x}, median={result}")
 
     # Show that results are identical after reset
-    logger.info(
-        f"Results identical after reset: {np.allclose(results_before_reset, results_after_reset)}"
-    )
+    is_identical = np.allclose(results_before_reset, results_after_reset)
+    logger.info(f"Results identical after reset: {is_identical}")
 
 
-def demo_jax_compatibility():
-    """Demonstrate filter compatibility with JAX arrays."""
+def demo_jax_compatibility() -> None:
+    """Demonstrate filter compatibility with JAX arrays.
+
+    Returns:
+        None.
+
+    """
     logger.info("\n=== JAX Array Compatibility ===")
 
     if not HAS_JAX:
         logger.warning("JAX not available - skipping JAX compatibility demo")
         logger.info("Install JAX with: pip install jax jaxlib")
         return
+    assert jnp is not None
 
     # Create JAX arrays
-    jax_data = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0])  # type: ignore
+    jax_data = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0])
     logger.info(f"JAX input data: {jax_data}")
     logger.info(f"Data type: {type(jax_data)}")
 
@@ -146,7 +151,9 @@ def demo_quantization_filter():
     logger.info(f"Continuous data: {continuous_data}")
 
     # Create quantization filter with custom parameters
-    quant_filter = QuantizationFilter(min_value=-0.2, max_value=0.2, step_size=0.01)
+    quant_filter = QuantizationFilter(
+        min_value=-0.2, max_value=0.2, step_size=0.01
+    )
 
     quantized_data = []
     for x in continuous_data:
@@ -164,9 +171,13 @@ def demo_concat_filter():
     # Create a sequence of filters
     filters = [
         ScaleFilter(scale=10.0),  # Scale up by 10
-        MinMaxFilter(min_val=0.0, max_val=100.0),  # Normalize assuming max is 100
+        MinMaxFilter(
+            min_val=0.0, max_val=100.0
+        ),  # Normalize assuming max is 100
         AverageFilter(window_size=2),  # Smooth with moving average
-        QuantizationFilter(min_value=0.0, max_value=1.0, step_size=0.1),  # Quantize
+        QuantizationFilter(
+            min_value=0.0, max_value=1.0, step_size=0.1
+        ),  # Quantize
     ]
 
     concat_filter = ConcatFilter(filters)
@@ -180,7 +191,7 @@ def demo_concat_filter():
     for i, x in enumerate(raw_data):
         result = concat_filter.step(x)
         processed_data.append(result)
-        logger.info(f"  Step {i+1}: {x:.1f} -> {float(result):.1f}")
+        logger.info(f"  Step {i + 1}: {x:.1f} -> {float(result):.1f}")
 
     logger.info(f"Final processed data: {processed_data}")
 
@@ -192,7 +203,9 @@ def demo_config_based_filters():
     # Define filter configurations
     filter_configs = [
         FilterConfig(type="ScaleFilter", parameters={"scale": 5.0}),
-        FilterConfig(type="MinMaxFilter", parameters={"min_val": 0.0, "max_val": 10.0}),
+        FilterConfig(
+            type="MinMaxFilter", parameters={"min_val": 0.0, "max_val": 10.0}
+        ),
         FilterConfig(type="ExpAverageFilter", parameters={"alpha": 0.2}),
     ]
 
@@ -238,8 +251,8 @@ def demo_multidimensional_data():
         averaged_results.append(averaged)
 
         if i == 0:  # Show details for first sample
-            logger.info(f"Sample {i+1} scaled:\n{scaled}")
-            logger.info(f"Sample {i+1} averaged:\n{averaged}")
+            logger.info(f"Sample {i + 1} scaled:\n{scaled}")
+            logger.info(f"Sample {i + 1} averaged:\n{averaged}")
 
     logger.info(f"Processed {len(scaled_results)} multidimensional samples")
 

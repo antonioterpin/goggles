@@ -29,6 +29,8 @@ repos:
         name: basedpyright
         entry: uv run basedpyright
         language: system
+        types: [python]
+        pass_filenames: false
         stages: [pre-commit, pre-push]
 
   # Generic hygiene

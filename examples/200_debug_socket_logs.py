@@ -24,7 +24,7 @@ logger.warning("This is a warning!")
 logger.error("This is an error!")
 logger.critical("This is critical!")
 
-# If we attach a handler with a lower logging level, debug messages will be shown.
+# Lowering handler log level makes debug messages visible.
 gg.attach(
     gg.ConsoleHandler(name="examples.basic.debug_console", level=gg.DEBUG),
     scopes=["global"],
