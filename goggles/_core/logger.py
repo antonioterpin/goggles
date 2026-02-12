@@ -8,14 +8,15 @@ External code should not import from this module. Instead, depend on:
   - `goggles.get_logger()` (factory returning a TextLogger/GogglesLogger).
 """
 
-import logging
 import inspect
+import logging
 from typing import Any
-from typing_extensions import Self
-import numpy as np
 
-from goggles import TextLogger, GogglesLogger, Event, GOGGLES_ASYNC
-from goggles.types import Metrics, Image, Video, VectorField, Vector
+import numpy as np
+from typing_extensions import Self
+
+from goggles import GOGGLES_ASYNC, Event, GogglesLogger, TextLogger
+from goggles.types import Image, Metrics, Vector, VectorField, Video
 
 
 class CoreTextLogger(TextLogger):
@@ -31,13 +32,6 @@ class CoreTextLogger(TextLogger):
           constructor, or attributes from external code.
         * External users should obtain a `TextLogger` via
           `goggles.get_logger()` and program against the protocol.
-
-    Attributes:
-        _logger: Underlying `logging.Logger` instance. Internal use only.
-        _bound: Persistent structured fields merged into each record.
-            Internal use only.
-        _client: EventBus client for emitting structured events.
-
     """
 
     def __init__(
@@ -49,13 +43,14 @@ class CoreTextLogger(TextLogger):
         """Initialize the CoreTextLogger.
 
         Args:
-            scope: Scope to bind the logger to (e.g., "global", "run", ecc.).
+            scope: Scope to bind the logger to (e.g., "global", "run", etc.).
             name: Optional name of the logger.
-            to_bind:
+            **to_bind:
                 Optional initial persistent context to bind.
 
         """
-        from goggles._core.routing import get_bus
+        # Importing here to avoid circular imports
+        from goggles._core.routing import get_bus  # noqa: PLC0415
 
         self.name = name
         self._scope = scope
@@ -75,10 +70,6 @@ class CoreTextLogger(TextLogger):
 
         Returns:
             Self: A new adapter with the merged persistent context.
-
-        Raises:
-            TypeError: If provided keys are not strings (may occur in stricter
-                configurations; current implementation assumes string keys).
 
         Examples:
             >>> log = get_logger("goggles")  # via public API
@@ -299,7 +290,8 @@ class CoreTextLogger(TextLogger):
 
         """
         return (
-            f"{self.__class__.__name__}(name={self.name!r}, " f"bound={self._bound!r})"
+            f"{self.__class__.__name__}(name={self.name!r}, "
+            f"bound={self._bound!r})"
         )
 
 
@@ -356,9 +348,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a single scalar metric.
 
         Args:
+            name: Metric name.
             value: Metric value.
             step: Global step index.
-            name: Metric name.
             time: Optional global timestamp.
             async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata (e.g., split="train").
@@ -442,7 +434,8 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a video artifact (encoded bytes).
 
         Notes:
-            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1) or (B, F, 1, H, W).
+            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1)
+                or (B, F, 1, H, W).
             With F the number of frames, and B the batch size.
 
         Args:
@@ -628,15 +621,19 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit all key-value pairs in a dictionary as separate metrics.
 
         Notes:
-             * The `name` parameter serves as a base name for the emitted metrics.
-             * Each key in the `data` dictionary is appended to the base name to form the full metric name (e.g., `name/key`).
-             * Values in the dictionary are emitted according to their type:
+            * The `name` parameter serves as a base for the emitted metrics.
+            * Each key in the `data` dictionary is appended to the base name
+                to form the full metric name (e.g., `name/key`).
+            * Values in the dictionary are emitted according to their type:
                 - Scalars (int, float) are emitted as single metrics.
-                - 1D arrays are emitted as multiple metrics with indexed names (e.g., `name/key_0`, `name/key_1`, ...).
+                - 1D arrays are emitted as multiple metrics with indexed names
+                    (e.g., `name/key_0`, `name/key_1`, ...).
                 - 2D arrays are emitted as images.
-                - 3D arrays are emitted as images if the last dimension has 1, 3, or 4 channels;
-                     if the last dimension has 2 channels, they are emitted as vector fields.
-             * Unsupported types are logged as errors.
+                - 3D arrays are emitted as images if the last dimension has
+                    1, 3, or 4 channels;
+                    if the last dimension has 2 channels, they are emitted
+                    as vector fields.
+            * Unsupported types are logged as errors.
 
         Args:
             name: Base name for the metrics.
@@ -667,7 +664,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 continue
 
             if isinstance(value, np.ndarray):
-
                 if value.size == 1:
                     self.scalar(
                         name_log,
@@ -747,7 +743,8 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                         continue
 
             self.error(
-                f"Unsupported type for dictionary logging: topic={topic}, type={type(value)}",
+                f"Unsupported type for dictionary logging: topic={topic}, "
+                f"type={type(value)}",
                 time=time,
                 step=step,
                 async_mode=async_mode,

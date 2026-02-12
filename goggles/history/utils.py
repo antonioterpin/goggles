@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Protocol
 
 import jax
-import jaxlib.xla_client as xc
-
-Device = xc.Device
 
 from .types import History
+
+
+class Device(Protocol):
+    """Minimal protocol for objects accepted as JAX target devices.
+
+    Attributes:
+        id: Device identifier.
+        process_index: Process index owning the device.
+        platform: Backend name (for example, "cpu" or "gpu").
+    """
+
+    id: int
+    process_index: int
+    platform: str
 
 
 def slice_history(
@@ -50,7 +62,7 @@ def slice_history(
         raise TypeError("history arrays must have rank >= 2 (B, T, ...)")
     T = any_arr.shape[1]
     if start < 0 or start + length > T:
-        raise ValueError(f"Invalid slice [{start}:{start+length}] for T={T}")
+        raise ValueError(f"Invalid slice [{start}:{start + length}] for T={T}")
 
     # Normalize and validate `fields`
     if fields is None:
@@ -64,7 +76,9 @@ def slice_history(
             raise TypeError("All field names must be strings.")
         keys = list(fields)
     else:
-        raise TypeError("fields must be a string, list/tuple of strings, or None")
+        raise TypeError(
+            "fields must be a string, list/tuple of strings, or None"
+        )
 
     # Check that all requested fields exist
     missing = set(keys) - set(history)
@@ -111,7 +125,7 @@ def peek_last(history: History, k: int = 1) -> History:
 
 def to_device(
     history: History,
-    devices: Sequence[Device] | None = None,  # type: ignore[type-arg]
+    devices: Sequence[Device] | None = None,
     keys: tuple[str, ...] | None = None,
 ) -> History:
     """Move selected history arrays to one or more JAX devices.
@@ -134,7 +148,11 @@ def to_device(
     devices = devices or jax.devices()
 
     # Select subset of keys if specified
-    subset = history if keys is None else {k: history[k] for k in keys if k in history}
+    subset = (
+        history
+        if keys is None
+        else {k: history[k] for k in keys if k in history}
+    )
 
     moved = {}
     for i, (k, v) in enumerate(subset.items()):
@@ -142,7 +160,9 @@ def to_device(
 
         # Recursively move PyTree leaves to the device
         moved[k] = jax.tree_util.tree_map(
-            lambda x: jax.device_put(x, device) if isinstance(x, jax.Array) else x,
+            lambda x, device=device: jax.device_put(x, device)
+            if isinstance(x, jax.Array)
+            else x,
             v,
         )
 
@@ -164,11 +184,11 @@ def to_host(
     into host (NumPy) memory. Non-array values are left unchanged.
 
     Args:
-        history (History): Mapping field to array (or PyTree of arrays).
-        keys (tuple[str, ...] | None): Subset of fields to copy. If None, all.
+        history: Mapping field to array (or PyTree of arrays).
+        keys: Subset of fields to copy. If None, all.
 
     Returns:
-        History: Copy of the history with arrays stored in host (NumPy) memory.
+        Copy of the history with arrays stored in host (NumPy) memory.
 
     Example:
         >>> host_history = to_host(device_history)
@@ -176,7 +196,11 @@ def to_host(
         <class 'numpy.ndarray'>
 
     """
-    subset = history if keys is None else {k: history[k] for k in keys if k in history}
+    subset = (
+        history
+        if keys is None
+        else {k: history[k] for k in keys if k in history}
+    )
 
     moved = {}
     for k, v in subset.items():

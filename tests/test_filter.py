@@ -1,10 +1,11 @@
 """Test suite for drag filter implementations."""
 
+from typing import Any, cast
+
 import numpy as np
 import pytest
 
 from goggles.filters import (
-    ScaleFilter,
     AverageFilter,
     ConcatFilter,
     ExpAverageFilter,
@@ -12,6 +13,7 @@ from goggles.filters import (
     MedianFilter,
     MinMaxFilter,
     QuantizationFilter,
+    ScaleFilter,
     create_concat_filter,
 )
 
@@ -30,8 +32,16 @@ from goggles.filters import (
     ],
 )
 @pytest.mark.parametrize("shape", [(1,), (3,), (2, 3)])
-def test_minmaxfilter_step(scalar_input, expected_scalar, shape):
-    """Test MinMaxFilter with batched array inputs."""
+def test_minmaxfilter_step(
+    scalar_input: float, expected_scalar: float, shape: tuple[int, ...]
+) -> None:
+    """Test MinMaxFilter with batched array inputs.
+
+    Args:
+        scalar_input: Scalar used to fill the input array.
+        expected_scalar: Expected normalized scalar value.
+        shape: Shape of the generated test arrays.
+    """
     f = MinMaxFilter(min_val=-10.0, max_val=10.0)
 
     input_array = np.full(shape, scalar_input)
@@ -39,15 +49,17 @@ def test_minmaxfilter_step(scalar_input, expected_scalar, shape):
 
     # Test step
     output = f.step(input_array)
-    assert np.allclose(
-        output, expected_array
-    ), f"step failed: input={input_array}, expected={expected_array}, got={output}"
+    assert np.allclose(output, expected_array), (
+        "step failed: "
+        f"input={input_array}, expected={expected_array}, got={output}"
+    )
 
     # Test __call__
     output_call = f(input_array)
-    assert np.allclose(
-        output_call, expected_array
-    ), f"call failed: input={input_array}, expected={expected_array}, got={output_call}"
+    assert np.allclose(output_call, expected_array), (
+        "call failed: "
+        f"input={input_array}, expected={expected_array}, got={output_call}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -63,8 +75,16 @@ def test_minmaxfilter_step(scalar_input, expected_scalar, shape):
     ],
 )
 @pytest.mark.parametrize("shape", [(1,), (3,), (2, 3)])
-def test_minmaxfilter_reset(scalar_input, expected_scalar, shape):
-    """Test MinMaxFilter reset does not affect stateless behavior for array inputs."""
+def test_minmaxfilter_reset(
+    scalar_input: float, expected_scalar: float, shape: tuple[int, ...]
+) -> None:
+    """Test MinMaxFilter reset for stateless behavior with array inputs.
+
+    Args:
+        scalar_input: Scalar used to fill the input array.
+        expected_scalar: Expected normalized scalar value.
+        shape: Shape of the generated test arrays.
+    """
     f = MinMaxFilter(min_val=-10.0, max_val=10.0)
 
     input_array = np.full(shape, scalar_input)
@@ -87,7 +107,9 @@ def test_minmaxfilter_name() -> None:
     f = MinMaxFilter(min_val=-10.0, max_val=10.0)
     name = f.name
     assert "10.0" in name, f"Expected '10.0' in name, got {name}"
-    assert "MinMaxFilter" in name, f"Expected 'MinMaxFilter' in name, got {name}"
+    assert "MinMaxFilter" in name, (
+        f"Expected 'MinMaxFilter' in name, got {name}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -114,7 +136,7 @@ def test_minmaxfilter_invalid_init(max_abs_value: float) -> None:
     ],
 )
 def test_averagefilter_step(inputs: np.ndarray) -> None:
-    """Test the step method of AverageFilter for computing moving averages over arrays.
+    """Test `AverageFilter.step` moving averages over array inputs.
 
     Args:
         inputs: A batch of input vectors (2D array).
@@ -128,7 +150,9 @@ def test_averagefilter_step(inputs: np.ndarray) -> None:
         outputs[-1],
         expected,
         rtol=1e-6,
-        err_msg=(f"step: input {inputs}, expected {expected}, got {outputs[-1]}"),
+        err_msg=(
+            f"step: input {inputs}, expected {expected}, got {outputs[-1]}"
+        ),
     )
 
     f.reset()
@@ -137,7 +161,9 @@ def test_averagefilter_step(inputs: np.ndarray) -> None:
         outputs[-1],
         expected,
         rtol=1e-6,
-        err_msg=(f"call: input {inputs}, expected {expected}, got {outputs[-1]}"),
+        err_msg=(
+            f"call: input {inputs}, expected {expected}, got {outputs[-1]}"
+        ),
     )
 
 
@@ -146,7 +172,9 @@ def test_averagefilter_name() -> None:
     f = AverageFilter(window_size=3)
     name = f.name
     assert "3" in name, f"Expected '3' in name, got {name}"
-    assert "AverageFilter" in name, f"Expected 'AverageFilter' in name, got {name}"
+    assert "AverageFilter" in name, (
+        f"Expected 'AverageFilter' in name, got {name}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -188,7 +216,12 @@ def test_expaveragefilter_invalid_init(alpha: float) -> None:
     ],
 )
 def test_expaveragefilter_step(alpha: float, inputs: np.ndarray) -> None:
-    """Test the step method of ExpAverageFilter with batched input vectors."""
+    """Test the step method of ExpAverageFilter with batched input vectors.
+
+    Args:
+        alpha: Smoothing factor for exponential averaging.
+        inputs: Sequence of batched vectors passed through the filter.
+    """
     f = ExpAverageFilter(alpha=alpha)
     outputs = [f.step(x) for x in inputs]
 
@@ -232,11 +265,19 @@ def test_expaveragefilter_step(alpha: float, inputs: np.ndarray) -> None:
 def test_expaveragefilter_step_edge_cases(
     alpha: float, inputs: np.ndarray, expected: np.ndarray
 ) -> None:
-    """Test ExpAverageFilter with edge cases for alpha (0 and 1), using batched input."""
+    """Test `ExpAverageFilter` edge cases for alpha values 0 and 1.
+
+    Args:
+        alpha: Smoothing factor for exponential averaging.
+        inputs: Sequence of batched vectors passed through the filter.
+        expected: Expected output vectors for each input step.
+    """
     f = ExpAverageFilter(alpha=alpha)
     outputs = [f.step(x) for x in inputs]
     for out, exp in zip(outputs, expected, strict=False):
-        np.testing.assert_allclose(out, exp, rtol=1e-6, err_msg="Edge case failed")
+        np.testing.assert_allclose(
+            out, exp, rtol=1e-6, err_msg="Edge case failed"
+        )
 
 
 def test_expaveragefilter_reset() -> None:
@@ -265,9 +306,9 @@ def test_expaveragefilter_name() -> None:
     f = ExpAverageFilter(alpha=a)
     name = f.name
     assert str(a) in name, f"Expected '{a}' in name, got {name}"
-    assert (
-        "ExpAverageFilter" in name
-    ), f"Expected 'ExpAverageFilter' in name, got {name}"
+    assert "ExpAverageFilter" in name, (
+        f"Expected 'ExpAverageFilter' in name, got {name}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -282,7 +323,7 @@ def test_medianfilter_step(inputs_float: list[list[float]]) -> None:
     """Test the step method of MedianFilter with batched inputs.
 
     Args:
-        inputs: A list of batched input vectors.
+        inputs_float: A list of batched input vectors.
     """
     inputs = [np.array(x) for x in inputs_float]
     f = MedianFilter(window_size=len(inputs))
@@ -326,8 +367,12 @@ def test_medianfilter_name() -> None:
     window_size = 3
     f = MedianFilter(window_size=3)
     name = f.name
-    assert str(window_size) in name, f"Expected '{window_size}' in name, got {name}"
-    assert "MedianFilter" in name, f"Expected 'MedianFilter' in name, got {name}"
+    assert str(window_size) in name, (
+        f"Expected '{window_size}' in name, got {name}"
+    )
+    assert "MedianFilter" in name, (
+        f"Expected 'MedianFilter' in name, got {name}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -346,7 +391,7 @@ def test_medianfilter_invalid_init(window_size: int) -> None:
 
 # Test QuantizationFilter
 def test_quantizationfilter_step() -> None:
-    """Test the step method of QuantizationFilter for clamping and quantization on batched input."""
+    """Test QuantizationFilter clamping and quantization on batched input."""
 
     f = QuantizationFilter(min_value=-0.150, max_value=0.150, step_size=0.00015)
 
@@ -410,7 +455,11 @@ def test_quantizationfilter_reset() -> None:
 
     output2 = f.step(input_array)
     np.testing.assert_allclose(
-        output2, expected, rtol=1e-6, atol=1e-6, err_msg="Reset affected the filter"
+        output2,
+        expected,
+        rtol=1e-6,
+        atol=1e-6,
+        err_msg="Reset affected the filter",
     )
 
 
@@ -424,9 +473,9 @@ def test_quantizationfilter_name() -> None:
     assert str(min) in name, f"Expected '{min}' in name, got {name}"
     assert str(max) in name, f"Expected '{max}' in name, got {name}"
     assert str(step) in name, f"Expected '{step}' in name, got {name}"
-    assert (
-        "QuantizationFilter" in name
-    ), f"Expected 'QuantizationFilter' in name, got {name}"
+    assert "QuantizationFilter" in name, (
+        f"Expected 'QuantizationFilter' in name, got {name}"
+    )
 
 
 # Test ConcatFilter
@@ -453,8 +502,8 @@ def test_concatfilter_step() -> None:
 
     # Manually compute expected values
     # First input → [1.0, 0.0]
-    # Second input → [0.75, 0.25], avg over [1.0, 0.75] = 0.875, [0.0, 0.25] = 0.125
-    # Third input → [1.0, 0.0], avg over [0.75, 1.0] = 0.875, [0.25, 0.0] = 0.125
+    # Second input -> [0.75, 0.25], avg over [1.0, 0.75] and [0.0, 0.25].
+    # Third input -> [1.0, 0.0], avg over [0.75, 1.0] and [0.25, 0.0].
 
     expected = np.array(
         [
@@ -486,11 +535,13 @@ def test_concatfilter_empty() -> None:
     )
 
     # Step should return the same inputs unchanged
-    assert np.allclose(
-        concat_f.step(inputs[0]), inputs[0]
-    ), "Failed step on first input"
+    assert np.allclose(concat_f.step(inputs[0]), inputs[0]), (
+        "Failed step on first input"
+    )
     concat_f.reset()  # Should do nothing
-    assert np.allclose(concat_f.step(inputs[1]), inputs[1]), "Failed step after reset"
+    assert np.allclose(concat_f.step(inputs[1]), inputs[1]), (
+        "Failed step after reset"
+    )
     assert np.allclose(concat_f(inputs[0]), inputs[0]), "Failed call"
 
 
@@ -513,9 +564,9 @@ def test_concatfilter_reset() -> None:
 
     # After reset, the next input should pass through cleanly
     output = concat_f.step(batch3)
-    assert np.allclose(
-        output, batch3
-    ), f"Concat filter reset failed: got {output}, expected {batch3}"
+    assert np.allclose(output, batch3), (
+        f"Concat filter reset failed: got {output}, expected {batch3}"
+    )
 
 
 def test_concatfilter_name() -> None:
@@ -526,7 +577,9 @@ def test_concatfilter_name() -> None:
     name = concat_f.name
     assert f1.name in name, f"Expected '{f1.name}' in name, got {name}"
     assert f2.name in name, f"Expected '{f2.name}' in name, got {name}"
-    assert "ConcatFilter" in name, f"Expected 'ConcatFilter' in name, got {name}"
+    assert "ConcatFilter" in name, (
+        f"Expected 'ConcatFilter' in name, got {name}"
+    )
 
 
 # Test create_concat_filter
@@ -545,16 +598,18 @@ def test_create_concat_filter_valid() -> None:
     concat_f = create_concat_filter(config)
     assert isinstance(concat_f, ConcatFilter), "Expected ConcatFilter instance"
     assert len(concat_f.filters) == 2, "Expected 2 filters in ConcatFilter"
-    assert isinstance(
-        concat_f.filters[0], MinMaxFilter
-    ), "Expected MinMaxFilter as first filter"
-    assert concat_f.filters[0].max_val == 10.0, "Incorrect max_val in MinMaxFilter"
-    assert isinstance(
-        concat_f.filters[1], AverageFilter
-    ), "Expected AverageFilter as second filter"
-    assert (
-        concat_f.filters[1].window_size == 3
-    ), "Incorrect window_size in AverageFilter"
+    assert isinstance(concat_f.filters[0], MinMaxFilter), (
+        "Expected MinMaxFilter as first filter"
+    )
+    assert concat_f.filters[0].max_val == 10.0, (
+        "Incorrect max_val in MinMaxFilter"
+    )
+    assert isinstance(concat_f.filters[1], AverageFilter), (
+        "Expected AverageFilter as second filter"
+    )
+    assert concat_f.filters[1].window_size == 3, (
+        "Incorrect window_size in AverageFilter"
+    )
 
 
 def test_create_concat_filter_invalid_type() -> None:
@@ -613,7 +668,10 @@ def test_scalefilter_step(
         output,
         expected_array,
         rtol=1e-6,
-        err_msg=f"ScaleFilter step failed: input={input_array}, expected={expected_array}, got={output}",
+        err_msg=(
+            "ScaleFilter step failed: "
+            f"input={input_array}, expected={expected_array}, got={output}"
+        ),
     )
 
     # Test __call__
@@ -622,7 +680,10 @@ def test_scalefilter_step(
         output_call,
         expected_array,
         rtol=1e-6,
-        err_msg=f"ScaleFilter call failed: input={input_array}, expected={expected_array}, got={output_call}",
+        err_msg=(
+            "ScaleFilter call failed: "
+            f"input={input_array}, expected={expected_array}, got={output_call}"
+        ),
     )
 
 
@@ -630,14 +691,14 @@ def test_scalefilter_step(
     "scale",
     ["a", None, object()],
 )
-def test_scalefilter_invalid_init(scale) -> None:
+def test_scalefilter_invalid_init(scale: object) -> None:
     """Test ScaleFilter initialization with invalid scale types.
 
     Args:
         scale: The invalid scale value to test.
     """
-    with pytest.raises(ValueError):
-        ScaleFilter(scale=scale)
+    with pytest.raises(TypeError):
+        ScaleFilter(scale=cast(Any, scale))
 
 
 def test_scalefilter_reset() -> None:
@@ -656,7 +717,7 @@ def test_scalefilter_reset() -> None:
 
 
 def test_scalefilter_name() -> None:
-    """Test the name method of ScaleFilter includes class name and scale value."""
+    """Test ScaleFilter name includes class name and scale value."""
     scale = 1.5
     f = ScaleFilter(scale=scale)
     name = f.name

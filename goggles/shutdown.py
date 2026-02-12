@@ -9,6 +9,9 @@ from typing_extensions import Self
 class GracefulShutdown:
     """A context manager for graceful shutdowns.
 
+    Attributes:
+        stop: boolean flag that becomes True when a shutdown signal is received.
+
     Example:
     >>> with GracefulShutdown(exit_message="Shutting down gracefully...") as gs:
     ...     while not gs.stop:
@@ -31,7 +34,8 @@ class GracefulShutdown:
             exit_message: The message to log upon shutdown.
 
         """
-        from . import get_logger
+        # Importing here to avoid circular imports
+        from goggles import get_logger  # noqa: PLC0415
 
         self.logger = get_logger("goggles.shutdown")
         self.exit_message = exit_message
@@ -40,7 +44,11 @@ class GracefulShutdown:
         self._orig_sigterm = None
 
     def __enter__(self) -> Self:
-        """Register the signal handlers."""
+        """Register the signal handlers.
+
+        Returns:
+            Self instance to be used within the context.
+        """
         # save existing handlers
         self._orig_sigint = signal.getsignal(signal.SIGINT)
         self._orig_sigterm = signal.getsignal(signal.SIGTERM)

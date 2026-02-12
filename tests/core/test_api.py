@@ -1,11 +1,12 @@
 """Tests for goggles' outer API."""
 
+import importlib
 import logging
 from typing import ClassVar
+
 import pytest
 
 import goggles as gg
-
 
 # ---------------------------------------------------------------------
 # Logger creation
@@ -17,22 +18,24 @@ def test_get_logger_returns_expected_protocols():
     plain = gg.get_logger("plain")
     with_metrics = gg.get_logger("metrics", with_metrics=True)
 
-    assert isinstance(
-        plain, gg.TextLogger
-    ), "get_logger('plain') should return a TextLogger"
-    assert not isinstance(
-        plain, gg.GogglesLogger
-    ), "get_logger('plain') should not return a GogglesLogger"
-    assert isinstance(
-        with_metrics, gg.GogglesLogger
-    ), "get_logger(with_metrics=True) should return a GogglesLogger"
+    assert isinstance(plain, gg.TextLogger), (
+        "get_logger('plain') should return a TextLogger"
+    )
+    assert not isinstance(plain, gg.GogglesLogger), (
+        "get_logger('plain') should not return a GogglesLogger"
+    )
+    assert isinstance(with_metrics, gg.GogglesLogger), (
+        "get_logger(with_metrics=True) should return a GogglesLogger"
+    )
 
 
 def test_logger_bind_creates_new_instance():
     """Ensure that bind() returns a derived logger."""
     log = gg.get_logger("base")
     bound = log.bind(scope="run", extra_field="value")
-    assert isinstance(bound, gg.TextLogger), "bound logger should be a TextLogger"
+    assert isinstance(bound, gg.TextLogger), (
+        "bound logger should be a TextLogger"
+    )
     assert bound is not log, "bound logger should be a new instance"
 
 
@@ -41,7 +44,7 @@ def test_logger_bind_creates_new_instance():
 # ---------------------------------------------------------------------
 
 
-def test_timeit_measures_execution_time(monkeypatch):
+def test_timeit_measures_execution_time() -> None:
     """Check that @timeit executes and returns the wrapped result."""
     called = {}
 
@@ -51,9 +54,9 @@ def test_timeit_measures_execution_time(monkeypatch):
         return x + 1
 
     assert fn(1) == 2, "timeit decorated function should return correct result"
-    assert (
-        called["x"] == 1
-    ), "timeit decorated function should be called with correct args"
+    assert called["x"] == 1, (
+        "timeit decorated function should be called with correct args"
+    )
 
 
 def test_timeit_nested_does_not_conflict():
@@ -64,9 +67,9 @@ def test_timeit_nested_does_not_conflict():
     def inner(x):
         return x * 2
 
-    assert (
-        inner(3) == 6
-    ), "Nested timeit decorated function should return correct result"
+    assert inner(3) == 6, (
+        "Nested timeit decorated function should return correct result"
+    )
 
 
 def test_trace_on_error_logs_and_rethrows():
@@ -99,7 +102,7 @@ def test_trace_on_error_with_kwargs():
 class DummyHandler:
     name = "dummy"
     capabilities: ClassVar[frozenset[gg.Kind]] = frozenset({"log", "metric"})
-    handled = []
+    handled: ClassVar[list[object]] = []
 
     def can_handle(self, kind):
         return True
@@ -121,7 +124,7 @@ class DummyHandler:
         return cls()
 
 
-def test_attach_and_emit(monkeypatch):
+def test_attach_and_emit() -> None:
     """Attach dummy handler and ensure events are received."""
     gg.register_handler(DummyHandler)
     handler = DummyHandler()
@@ -131,8 +134,11 @@ def test_attach_and_emit(monkeypatch):
     log.info("event test")
     gg.finish()
 
-    assert "closed" in DummyHandler.handled, "Handler should be closed on finish"
-    # Events are now Event objects, which have .payload (previously .msg was used in dict)
+    assert "closed" in DummyHandler.handled, (
+        "Handler should be closed on finish"
+    )
+    # Events are now Event objects, which have .payload
+    # (previously .msg was used in dict).
     assert any(
         hasattr(e, "payload") for e in DummyHandler.handled if e != "closed"
     ), "Events should have a payload attribute"
@@ -144,9 +150,9 @@ def test_eventbus_emit_routing_and_detach():
     handler = DummyHandler()
     bus.attach([handler.to_dict()], scopes=["scope"])
     assert "scope" in bus.scopes, "'scope' should be in bus scopes after attach"
-    assert (
-        handler.name in bus.handlers
-    ), "Handler should be in bus handlers after attach"
+    assert handler.name in bus.handlers, (
+        "Handler should be in bus handlers after attach"
+    )
 
     # Emit dummy event
     event_dict = {
@@ -163,7 +169,9 @@ def test_eventbus_emit_routing_and_detach():
 
     bus.detach("dummy", "scope")
     assert "scope" not in bus.scopes, "'scope' should be removed after detach"
-    assert "dummy" not in bus.handlers, "'dummy' handler should be removed after detach"
+    assert "dummy" not in bus.handlers, (
+        "'dummy' handler should be removed after detach"
+    )
 
 
 def test_detach_raises_for_invalid_scope():
@@ -220,8 +228,6 @@ def test_environment_overrides(monkeypatch):
     monkeypatch.setenv("GOGGLES_PORT", "9999")
     monkeypatch.setenv("GOGGLES_HOST", "remote")
 
-    import importlib
-
     importlib.reload(gg)
     assert gg.GOGGLES_ASYNC is False, "GOGGLES_ASYNC env override failed"
     assert gg.GOGGLES_PORT == "9999", "GOGGLES_PORT env override failed"
@@ -257,10 +263,12 @@ def test_goggles_logger_scalar_and_push(tmp_path):
     gg.finish()
 
     data = next(tmp_path.glob("*.jsonl")).read_text()
-    assert "loss" in data and "accuracy" in data, "Logged metrics missing from file"
+    assert "loss" in data and "accuracy" in data, (
+        "Logged metrics missing from file"
+    )
 
 
-def test_logger_levels_mapping(monkeypatch):
+def test_logger_levels_mapping() -> None:
     """Ensure TextLogger.log dispatches correctly by severity."""
     log = gg.get_logger("severity")
 
@@ -280,13 +288,10 @@ def test_finish_multiple_times_is_safe():
     gg.finish()  # second call should not crash
 
 
-def test_import_adds_nullhandler(monkeypatch):
+def test_import_adds_nullhandler() -> None:
     """Ensure module attaches a NullHandler at import time."""
-    import importlib
-    import goggles as gg1
-
-    importlib.reload(gg1)
-    logger = logging.getLogger(gg1.__name__)
-    assert any(
-        isinstance(h, logging.NullHandler) for h in logger.handlers
-    ), "Goggles logger should have a NullHandler by default"
+    importlib.reload(gg)
+    logger = logging.getLogger(gg.__name__)
+    assert any(isinstance(h, logging.NullHandler) for h in logger.handlers), (
+        "Goggles logger should have a NullHandler by default"
+    )

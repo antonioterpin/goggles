@@ -1,14 +1,19 @@
 import logging
-import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from goggles._core.logger import CoreTextLogger, CoreGogglesLogger
+import pytest
+
+from goggles._core.logger import CoreGogglesLogger, CoreTextLogger
 
 
 @pytest.fixture
-def mock_client():
-    """Mock EventBus client to capture emitted events."""
+def mock_client() -> MagicMock:
+    """Mock EventBus client to capture emitted events.
+
+    Returns:
+        MagicMock: Client whose `emit` returns a completed future mock.
+    """
     client = MagicMock()
     future = MagicMock()
     future.result = MagicMock(return_value=None)
@@ -17,21 +22,45 @@ def mock_client():
 
 
 @pytest.fixture
-def patch_bus(monkeypatch, mock_client):
-    """Patch get_bus() to return a mock client."""
+def patch_bus(
+    monkeypatch: pytest.MonkeyPatch, mock_client: MagicMock
+) -> MagicMock:
+    """Patch get_bus() to return a mock client.
+
+    Args:
+        monkeypatch: Fixture used to replace routing `get_bus`.
+        mock_client: Mock client fixture returned by `mock_client`.
+
+    Returns:
+        MagicMock: Patched mock client.
+    """
     monkeypatch.setattr("goggles._core.routing.get_bus", lambda: mock_client)
     return mock_client
 
 
 @pytest.fixture
-def text_logger(patch_bus):
-    """Return a CoreTextLogger bound to a dummy scope."""
+def text_logger(patch_bus: MagicMock) -> CoreTextLogger:
+    """Return a CoreTextLogger bound to a dummy scope.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+
+    Returns:
+        CoreTextLogger: Text logger under test.
+    """
     return CoreTextLogger(name="test", scope="global")
 
 
 @pytest.fixture
-def goggles_logger(patch_bus):
-    """Return a CoreGogglesLogger bound to a dummy scope."""
+def goggles_logger(patch_bus: MagicMock) -> CoreGogglesLogger:
+    """Return a CoreGogglesLogger bound to a dummy scope.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+
+    Returns:
+        CoreGogglesLogger: Metrics logger under test.
+    """
     return CoreGogglesLogger(name="test", scope="global")
 
 
@@ -98,7 +127,9 @@ def test_scalar_emits_metric_event(goggles_logger, patch_bus):
     goggles_logger.scalar("loss", 0.42)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "metric", "Event kind should be 'metric' for scalar"
-    assert event.payload == {"loss": 0.42}, "Event payload should match scalar metric"
+    assert event.payload == {"loss": 0.42}, (
+        "Event payload should match scalar metric"
+    )
 
 
 @pytest.mark.parametrize(
@@ -122,7 +153,9 @@ def test_artifact_like_methods_emit_event(
     getattr(goggles_logger, method)(fake_payload, name="foo", **kwargs)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == kind, f"Event kind should be '{kind}'"
-    assert "name" in event.extra, "Event extra should contain 'name' for artifacts"
+    assert "name" in event.extra, (
+        "Event extra should contain 'name' for artifacts"
+    )
     assert event.extra["name"] == "foo", "Event extra 'name' mismatch"
 
 
@@ -130,18 +163,21 @@ def test_histogram_adds_name_and_payload(goggles_logger, patch_bus):
     goggles_logger.histogram([1, 2, 3], name="hist", step=1)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "histogram", "Event kind should be 'histogram'"
-    assert event.extra["name"] == "hist", "Event extra 'name' mismatch for histogram"
+    assert event.extra["name"] == "hist", (
+        "Event extra 'name' mismatch for histogram"
+    )
     assert event.payload == [1, 2, 3], "Event payload mismatch for histogram"
 
 
-def test_all_emitters_call_future_result(monkeypatch, patch_bus):
-    """Ensure synchronous mode calls future.result()."""
-    import goggles._core.logger as core_logger
+def test_all_emitters_call_future_result(patch_bus: MagicMock) -> None:
+    """Ensure synchronous mode calls future.result().
 
-    monkeypatch.setattr(core_logger, "GOGGLES_ASYNC", False)
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
     g = CoreGogglesLogger(name="sync", scope="run")
     g._client = patch_bus
 
-    g.scalar("metric", 1.0)
+    g.scalar("metric", 1.0, async_mode=False)
     future = patch_bus.emit.return_value
     future.result.assert_called_once()

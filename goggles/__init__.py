@@ -25,41 +25,48 @@ See Also:
     - API docs for full reference of public interfaces.
     - Internal implementations live under `goggles/_core/`
 
-"""  # noqa: D205
+"""
 
 from __future__ import annotations
 
-import portal
-from portal import packlib, client_socket
-from portal.buffers import SendBuffer, RecvBuffer
-from portal.client import Client, Future
-from portal.client_socket import ClientSocket
-from portal.server_socket import ServerSocket
-from collections import defaultdict
-from typing import (
-    Any,
-    ClassVar,
-    Final,
-    Protocol,
-    runtime_checkable,
-    overload,
-)
-from collections.abc import Callable
-from typing_extensions import Self
-from typing import Literal, TypeVar, ParamSpec
 import logging
 import os
 import select
 import selectors
 import time
+from collections import defaultdict
+from collections.abc import Callable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Final,
+    Literal,
+    ParamSpec,
+    Protocol,
+    TypeVar,
+    cast,
+    overload,
+    runtime_checkable,
+)
 
-from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
-from ._core.integrations import ConsoleHandler, LocalStorageHandler
-from ._core.decorators import timeit as _timeit, trace_on_error as _trace_on_error
-from .shutdown import GracefulShutdown
-from .config import load_configuration, save_configuration, PrettyConfig
+from portal import client_socket, packlib
+from portal.buffers import RecvBuffer, SendBuffer
+from portal.client import Client, Future
+from portal.client_socket import ClientSocket
+from portal.server_socket import ServerSocket
+from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from goggles._core.routing import GogglesClient
+
 from . import filters
-
+from ._core.decorators import timeit as _timeit
+from ._core.decorators import trace_on_error as _trace_on_error
+from ._core.integrations import ConsoleHandler, LocalStorageHandler
+from .config import PrettyConfig, load_configuration, save_configuration
+from .shutdown import GracefulShutdown
+from .types import Event, Image, Kind, Metrics, Vector, VectorField, Video
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -102,6 +109,9 @@ def trace_on_error(
     Args:
         scope: Scope of the logged event ("global" or "run").
 
+    Returns:
+        Decorated function with same signature as input.
+
     Example:
     >>> @trace_on_error()
     ... def my_function(x, y):
@@ -131,7 +141,14 @@ GOGGLES_PORT: Final[str] = os.getenv("GOGGLES_PORT", "2304")
 
 
 # 1. Patch SendBuffer.send to propagate ConnectionResetError
-_original_send = SendBuffer.send
+# Keep a stable reference to the unpatched method across module reloads.
+_send_buffer_cls = cast(Any, SendBuffer)
+if not hasattr(_send_buffer_cls, "_goggles_original_send"):
+    _send_buffer_cls._goggles_original_send = _send_buffer_cls.send
+_original_send = cast(
+    "Callable[[Any, Any], Any]",
+    _send_buffer_cls._goggles_original_send,
+)
 
 
 def _safe_send(self, sock):
@@ -141,7 +158,9 @@ def _safe_send(self, sock):
         raise ConnectionResetError from e
 
 
-SendBuffer.send = _safe_send
+_safe_send.__goggles_patched__ = True  # type: ignore[attr-defined]
+if not getattr(SendBuffer.send, "__goggles_patched__", False):
+    SendBuffer.send = _safe_send
 
 
 # 2. Patch ServerSocket._loop to explicitly disconnect on write errors
@@ -149,7 +168,8 @@ def _patched_server_loop(self):
     writing = False
     try:
         while self.running or self._numsending():
-            # Use 0 timeout if we have data to send to avoid artificially slow throughput
+            # Use 0 timeout if we have data to send
+            # to avoid artificially slow throughput
             timeout = 0 if writing else 0.2
             for key, mask in self.sel.select(timeout=timeout):
                 if key.data == "signal":
@@ -185,7 +205,14 @@ def _patched_server_loop(self):
 ServerSocket._loop = _patched_server_loop
 
 # 3. Silence "Dropping message" log spam
-_original_server_log = ServerSocket._log
+# Keep a stable reference to the unpatched method across module reloads.
+_server_socket_cls = cast(Any, ServerSocket)
+if not hasattr(_server_socket_cls, "_goggles_original_log"):
+    _server_socket_cls._goggles_original_log = _server_socket_cls._log
+_original_server_log = cast(
+    "Callable[..., Any]",
+    _server_socket_cls._goggles_original_log,
+)
 
 
 def _silent_server_log(self, *args):
@@ -194,7 +221,17 @@ def _silent_server_log(self, *args):
     return _original_server_log(self, *args)
 
 
-ServerSocket._log = _silent_server_log
+_silent_server_log.__goggles_patched__ = True  # type: ignore[attr-defined]
+if not getattr(ServerSocket._log, "__goggles_patched__", False):
+    ServerSocket._log = _silent_server_log
+
+
+@runtime_checkable
+class _PollWithClose(Protocol):
+    """Protocol for poll objects that support explicit close()."""
+
+    def close(self) -> None:
+        """Close underlying polling resources."""
 
 
 # 5. Patch ClientSocket._loop to fix future leaks and reconnection
@@ -208,7 +245,9 @@ def _patched_client_loop(self):
 
     while self.running or (self.sendq and isconn):
         if not isconn:
-            if not self.options.autoconn and not self.wantconn.wait(timeout=0.2):
+            if not self.options.autoconn and not self.wantconn.wait(
+                timeout=0.2
+            ):
                 continue
             sock = self._connect()
             if not sock:
@@ -233,14 +272,17 @@ def _patched_client_loop(self):
                 recvbuf.recv(sock)
                 if recvbuf.done():
                     if self.recvq.qsize() > self.options.max_recv_queue:
-                        raise RuntimeError("Too many incoming messages enqueued")
+                        raise RuntimeError(
+                            "Too many incoming messages enqueued"
+                        )
                     msg = recvbuf.result()
                     self.recvq.put(msg)
                     for callback in self.callbacks_recv:
                         callback(msg)
                     recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
             except BlockingIOError:
-                # Expected with non-blocking sockets; no data yet, retry on next poll
+                # Expected with non-blocking sockets;
+                # no data yet, retry on next poll
                 pass
 
             if self.sendq:
@@ -257,7 +299,9 @@ def _patched_client_loop(self):
 
         except OSError as e:
             # Disconnect and trigger high-level recovery
-            detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            detail = (
+                f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+            )
             self._log(f"Connection to server lost ({detail})")
             self.isconn.clear()
             isconn = False
@@ -267,7 +311,8 @@ def _patched_client_loop(self):
                     sock.close()
                 except Exception:
                     pass
-            self.sendq.clear()  # Clear low-level queue; high-level Client will resend
+            # Clear low-level queue; high-level Client will resend
+            self.sendq.clear()
             recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
             for callback in self.callbacks_disc:
                 callback()
@@ -283,8 +328,7 @@ def _patched_client_loop(self):
         poll.unregister(self.get_signal)
     except Exception:
         pass
-    # Explicitly close poll if method exists (Python 3.4+)
-    if hasattr(poll, "close"):
+    if isinstance(poll, _PollWithClose):
         try:
             poll.close()
         except Exception:
@@ -297,6 +341,18 @@ ClientSocket._loop = _patched_client_loop
 # 6. Patch Client.call to avoid infinite backpressure hang
 
 _original_client_call = Client.call
+
+
+class _FutureWithSendArgs(Protocol):
+    """Portal future with internal fields used by Client.call.
+
+    Attributes:
+        sendargs: Serialized request payload chunks for socket send.
+        rai: Mutable flag used by portal to signal disconnected sends.
+    """
+
+    sendargs: tuple[Any, ...]
+    rai: list[bool]
 
 
 def _safe_client_call(self, method, *data):
@@ -312,9 +368,12 @@ def _safe_client_call(self, method, *data):
             # Check for total timeout
             if time.time() - start > timeout_seconds:
                 raise TimeoutError(
-                    f"Goggles: Timeout after {timeout_seconds}s waiting for in-flight requests to complete. "
-                    "The server may be down or unresponsive. Consider checking server connectivity "
-                    f"or increasing GOGGLES_TRANSPORT_TIMEOUT. (inflight={len(self.futures)})"
+                    f"Goggles: Timeout after {timeout_seconds}s waiting for "
+                    "in-flight requests to complete. "
+                    "The server may be down or unresponsive. "
+                    "Consider checking server connectivity "
+                    f"or increasing GOGGLES_TRANSPORT_TIMEOUT. "
+                    f"(inflight={len(self.futures)})"
                 )
 
             self.cond.wait(timeout=0.2)
@@ -323,8 +382,13 @@ def _safe_client_call(self, method, *data):
             except TimeoutError:
                 # Connection not established yet; try again later
                 pass
-            except (BrokenPipeError, ConnectionResetError, ConnectionRefusedError):
-                # BrokenPipe/ConnectionReset/ConnectionRefused should behave like not connected
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionRefusedError,
+            ):
+                # BrokenPipe/ConnectionReset/ConnectionRefused
+                # should behave like not connected
                 pass
 
     with self.lock:
@@ -340,15 +404,16 @@ def _safe_client_call(self, method, *data):
     sendargs = (reqnum, strlen, name, *packlib.pack(data))
     rai = [False]
     future = Future(rai)
-    future.sendargs = sendargs
+    future_with_sendargs = cast(_FutureWithSendArgs, future)
+    future_with_sendargs.sendargs = sendargs
     self.futures[reqnum] = future
     # Store future before sending request because the response may come fast
     # and the response handler runs in the socket's background thread.
     try:
         self.socket.send(*sendargs)
     except client_socket.Disconnected:
-        future = self.futures.pop(reqnum)
-        future.rai[0] = True
+        dropped_future = cast(_FutureWithSendArgs, self.futures.pop(reqnum))
+        dropped_future.rai[0] = True
         raise
     return future
 
@@ -373,7 +438,7 @@ GOGGLES_SUPPRESS_CONNECTIVITY_LOGS: Final[bool] = os.getenv(
 )
 
 # Cache the implementation after first use to avoid repeated imports
-__impl_get_bus: Callable[[], EventBus] | None = None
+__impl_get_bus: Callable[[], GogglesClient] | None = None
 
 
 def _make_text_logger(
@@ -381,7 +446,8 @@ def _make_text_logger(
     scope: str,
     **to_bind: Any,
 ) -> TextLogger:
-    from ._core.logger import CoreTextLogger
+    # Importing here to avoid circular imports
+    from ._core.logger import CoreTextLogger  # noqa: PLC0415
 
     return CoreTextLogger(name=name, scope=scope, **to_bind)
 
@@ -391,7 +457,8 @@ def _make_goggles_logger(
     scope: str,
     **to_bind: Any,
 ) -> GogglesLogger:
-    from ._core.logger import CoreGogglesLogger
+    # Importing here to avoid circular imports
+    from ._core.logger import CoreGogglesLogger  # noqa: PLC0415
 
     return CoreGogglesLogger(name=name, scope=scope, **to_bind)
 
@@ -431,12 +498,16 @@ def get_logger(
     scope: str = "global",
     **to_bind: Any,
 ) -> TextLogger | GogglesLogger:
-    """Return a structured logger (text-only by default, metrics-enabled on opt-in).
+    """Return a structured logger.
 
     This is the primary entry point for obtaining Goggles' structured loggers.
     Depending on the active run and configuration, the returned adapter will
     inject structured context (e.g., `RunContext` info) and persistent fields
     into each emitted log record.
+
+    The logger is by default a text-only logger, but it can be configured
+    to return a `GogglesLogger` which exposes additional methods for logging
+    metrics, media, and artifacts.
 
     Args:
         name: Logger name. If None, the root logger is used.
@@ -519,15 +590,23 @@ class TextLogger(Protocol):
 
         """
         if severity >= logging.CRITICAL:
-            self.critical(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.critical(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.ERROR:
-            self.error(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.error(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.WARNING:
-            self.warning(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.warning(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.INFO:
             self.info(msg, step=step, time=time, async_mode=async_mode, **extra)
         elif severity >= logging.DEBUG:
-            self.debug(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.debug(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         else:
             # Below DEBUG level; no-op by default.
             pass
@@ -738,7 +817,8 @@ class DataLogger(Protocol):
         """Emit a video artifact (encoded bytes).
 
         Notes:
-            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1) or (B, F, 1, H, W).
+            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1)
+                or (B, F, 1, H, W).
             With F the number of frames, and B the batch size.
 
         Args:
@@ -840,13 +920,17 @@ class DataLogger(Protocol):
         """Emit all key-value pairs in a dictionary as separate metrics.
 
         Notes:
-             * The `name` parameter serves as a base name for the emitted metrics.
-             * Each key in the `data` dictionary is appended to the base name to form the full metric name (e.g., `name/key`).
-             * Values in the dictionary are emitted according to their type:
+            * The `name` parameter serves as base name for the emitted metrics.
+            * Each key in the `data` dictionary is appended to the base name to
+            form the full metric name (e.g., `name/key`).
+            * Values in the dictionary are emitted according to their type:
                 - Scalars (int, float) are emitted as single metrics.
-                - 1D arrays are emitted as multiple metrics with indexed names (e.g., `name/key_0`, `name/key_1`, ...).
+                - 1D arrays are emitted as multiple metrics with indexed names
+                    (e.g., `name/key_0`, `name/key_1`, ...).
                 - 2D arrays are emitted as images.
-                - 3D arrays are emitted as images if the last dimension has 1 or 3 channels, or as vector fields if the last dimension has 2 channels.
+                - 3D arrays are emitted as images if the last dimension has
+                    1 or 3 channels, or as vector fields if the last dimension
+                    has 2 channels.
              * Unsupported types are logged as errors.
 
         Args:
@@ -924,12 +1008,7 @@ class Handler(Protocol):
         ...
 
     def close(self) -> None:
-        """Flush and release resources (called when leaving a scope).
-
-        Args:
-            run: The active run context if any.
-
-        """
+        """Flush and release resources (called when leaving a scope)."""
         ...
 
     def to_dict(self) -> dict:
@@ -966,10 +1045,7 @@ class Handler(Protocol):
 class EventBus:
     """Protocol for the process-wide event router."""
 
-    handlers: dict[str, Handler]
-    scopes: dict[str, set[str]]
-
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.handlers: dict[str, Handler] = {}
         self.scopes: dict[str, set[str]] = defaultdict(set)
@@ -1035,11 +1111,16 @@ class EventBus:
         Args:
             event: The event (serialized) to emit, or an Event instance.
 
+        Raises:
+            TypeError: If `event` is neither a `dict` nor an `Event`.
+
         """
         if isinstance(event, dict):
             event = Event.from_dict(event)
         elif not isinstance(event, Event):
-            raise TypeError(f"emit expects a dict or Event, got {type(event)!r}")
+            raise TypeError(
+                f"emit expects a dict or Event, got {type(event)!r}"
+            )
 
         # collect all scopes that this event should hit:
         scope = event.scope
@@ -1068,7 +1149,7 @@ class EventBus:
                 seen_handlers.add(handler_name)
 
 
-def get_bus() -> portal.Client:
+def get_bus() -> GogglesClient:
     """Return the process-wide EventBus singleton client.
 
     The EventBus owns handlers and routes events based on scope and kind.
@@ -1077,27 +1158,27 @@ def get_bus() -> portal.Client:
         The singleton EventBus client.
 
     """
-    global __impl_get_bus
+    global __impl_get_bus  # noqa: PLW0603
     if __impl_get_bus is None:
-        from ._core.routing import get_bus as _impl_get_bus
+        # Importing here to avoid circular imports
+        from ._core.routing import get_bus as _impl_get_bus  # noqa: PLC0415
 
-        __impl_get_bus = _impl_get_bus  # type: ignore
-    return __impl_get_bus()  # type: ignore
+        __impl_get_bus = cast(Callable[[], Any], _impl_get_bus)
+    return __impl_get_bus()
 
 
-def attach(handler: Handler, scopes: list[str] = ["global"]) -> None:
+def attach(handler: Handler, scopes: list[str] | None = None) -> None:
     """Attach a handler to the global EventBus under the specified scopes.
 
     Args:
         handler: The handler to attach.
         scopes: The scopes under which to attach.
 
-    Raises:
-        ValueError: If the handler disallows the requested scope.
-
     """
-    bus = get_bus()
-    bus.attach([handler.to_dict()], scopes)
+    if scopes is None:
+        scopes = ["global"]
+    bus: GogglesClient = get_bus()
+    bus.attach(handlers=[handler.to_dict()], scopes=scopes)
 
 
 def detach(handler_name: str, scope: str) -> None:
@@ -1107,25 +1188,43 @@ def detach(handler_name: str, scope: str) -> None:
         handler_name: The name of the handler to detach.
         scope: The scope from which to detach.
 
-    Raises:
-        ValueError: If the handler was not attached under the requested scope.
-
     """
     bus = get_bus()
     bus.detach(handler_name, scope)
 
 
-def finish() -> None:
-    """Shutdown the global EventBus and close all handlers."""
+def finish(timeout: float | None = None) -> None:
+    """Shutdown the global EventBus and close all handlers.
+
+    Args:
+        timeout: Optional timeout in seconds for shutdown completion.
+            If None, uses ``GOGGLES_SHUTDOWN_TIMEOUT`` (default: 5.0s).
+            Set to 0 or a negative value to wait indefinitely.
+    """
     bus = get_bus()
-    bus.shutdown().result()
+    if timeout is None:
+        timeout = float(os.getenv("GOGGLES_SHUTDOWN_TIMEOUT", "5.0"))
+    if timeout <= 0:
+        timeout = None
+    try:
+        shutdown_future = bus.shutdown(timeout=timeout)
+        if timeout is None:
+            shutdown_future.result()
+        else:
+            shutdown_future.result(timeout=timeout)
+    except TimeoutError:
+        logging.getLogger(__name__).warning(
+            "Timed out while shutting down EventBus after %.2fs.",
+            timeout,
+        )
 
 
 def register_handler(handler_class: type) -> None:
     """Register a custom handler class for serialization/deserialization.
 
     Args:
-        handler_class: The handler class to register. Must have a __name__ attribute.
+        handler_class: The handler class to register.
+            Must have a __name__ attribute.
 
     Example:
         class CustomHandler(gg.ConsoleHandler):
@@ -1158,9 +1257,12 @@ def _get_handler_class(class_name: str) -> type:
     if class_name in globals():
         return globals()[class_name]
 
+    available_handlers = list(_HANDLER_REGISTRY.keys()) + [
+        k for k in globals().keys() if k.endswith("Handler")
+    ]
     raise KeyError(
         f"Handler class '{class_name}' not found. "
-        f"Available handlers: {list(_HANDLER_REGISTRY.keys()) + [k for k in globals().keys() if k.endswith('Handler')]}"
+        f"Available handlers: {available_handlers}"
     )
 
 
@@ -1180,34 +1282,34 @@ except Exception:
     WandBHandler = None
 
 __all__ = [
-    "TextLogger",
-    "GogglesLogger",
-    "get_logger",
-    "attach",
-    "detach",
-    "register_handler",
-    "load_configuration",
-    "save_configuration",
-    "PrettyConfig",
-    "timeit",
-    "trace_on_error",
-    "GracefulShutdown",
+    "CRITICAL",
+    "DEBUG",
+    "ERROR",
+    "INFO",
+    "WARNING",
     "ConsoleHandler",
-    "LocalStorageHandler",
-    "WandBHandler",
     "Event",
-    "Kind",
-    "Metrics",
+    "GogglesLogger",
+    "GracefulShutdown",
     "Image",
-    "Video",
+    "Kind",
+    "LocalStorageHandler",
+    "Metrics",
+    "PrettyConfig",
+    "TextLogger",
     "Vector",
     "VectorField",
-    "INFO",
-    "DEBUG",
-    "WARNING",
-    "ERROR",
-    "CRITICAL",
+    "Video",
+    "WandBHandler",
+    "attach",
+    "detach",
     "filters",
+    "get_logger",
+    "load_configuration",
+    "register_handler",
+    "save_configuration",
+    "timeit",
+    "trace_on_error",
 ]
 
 # ---------------------------------------------------------------------------

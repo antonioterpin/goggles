@@ -1,9 +1,10 @@
 # tests/core/test_routing.py
-import types
 import socket
+import types
+
 import pytest
 
-import goggles._core.routing as routing
+from goggles._core import routing
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +18,9 @@ def reset_singletons():
 
 def test_i_am_host_returns_true_for_localhost(monkeypatch):
     monkeypatch.setattr(routing, "GOGGLES_HOST", "localhost")
-    assert routing.__i_am_host() is True, "localhost should be identified as host"
+    assert routing.__i_am_host() is True, (
+        "localhost should be identified as host"
+    )
 
 
 def test_i_am_host_true_for_local_ip(monkeypatch):
@@ -30,9 +33,9 @@ def test_i_am_host_true_for_local_ip(monkeypatch):
         "ifaddresses",
         lambda _: {routing.netifaces.AF_INET: [{"addr": "192.168.0.5"}]},
     )
-    assert (
-        routing.__i_am_host() is True
-    ), "Matching local IP should be identified as host"
+    assert routing.__i_am_host() is True, (
+        "Matching local IP should be identified as host"
+    )
 
 
 def test_i_am_host_false_when_no_match(monkeypatch):
@@ -45,9 +48,9 @@ def test_i_am_host_false_when_no_match(monkeypatch):
         "ifaddresses",
         lambda _: {routing.netifaces.AF_INET: [{"addr": "192.168.0.4"}]},
     )
-    assert (
-        routing.__i_am_host() is False
-    ), "Mismatched IP should not be identified as host"
+    assert routing.__i_am_host() is False, (
+        "Mismatched IP should not be identified as host"
+    )
 
 
 @pytest.mark.parametrize("code,expected", [(0, True), (111, False)])
@@ -68,7 +71,7 @@ def test_is_port_in_use(monkeypatch, code, expected):
             return self
 
         def __exit__(self, exc_type, exc, tb):
-            return False  # don’t suppress exceptions
+            return False  # do not suppress exceptions
 
     # Ensure each call returns a fresh, valid context manager
     monkeypatch.setattr(
@@ -87,9 +90,9 @@ def test_is_port_in_use_handles_exception(monkeypatch):
         "socket",
         lambda *a, **kw: (_ for _ in ()).throw(Exception("fail")),
     )
-    assert (
-        routing.__is_port_in_use("localhost", 9999) is False
-    ), "Should handle socket creation exception and return False"
+    assert routing.__is_port_in_use("localhost", 9999) is False, (
+        "Should handle socket creation exception and return False"
+    )
 
 
 def test_get_bus_starts_server_if_host(monkeypatch):
@@ -109,30 +112,35 @@ def test_get_bus_starts_server_if_host(monkeypatch):
         routing,
         "portal",
         types.SimpleNamespace(
-            Server=lambda *a, **kw: fake_server, Client=lambda *a, **kw: "CLIENT"
+            Server=lambda *a, **kw: fake_server,
+            Client=lambda *a, **kw: "CLIENT",
         ),
     )
     monkeypatch.setattr(routing, "__i_am_host", lambda: True)
     monkeypatch.setattr(routing, "__is_port_in_use", lambda *a, **kw: False)
 
     result = routing.get_bus()
-    assert isinstance(
-        result, routing.GogglesClient
-    ), "get_bus should return a GogglesClient instance"
-    assert (
-        result._client == "CLIENT"
-    ), "Client attribute should be correctly initialized"
-    assert routing.__singleton_client == result, "Client should be cached in singleton"
-    assert (
-        routing.__singleton_server == fake_server
-    ), "Server should be cached in singleton"
+    assert isinstance(result, routing.GogglesClient), (
+        "get_bus should return a GogglesClient instance"
+    )
+    assert result._client == "CLIENT", (
+        "Client attribute should be correctly initialized"
+    )
+    assert routing.__singleton_client == result, (
+        "Client should be cached in singleton"
+    )
+    assert routing.__singleton_server == fake_server, (
+        "Server should be cached in singleton"
+    )
 
 
 def test_get_bus_reuses_existing_client(monkeypatch):
     routing.__singleton_client = "EXISTING"
     monkeypatch.setattr(routing, "__i_am_host", lambda: False)
     result = routing.get_bus()
-    assert result == "EXISTING", "get_bus should reuse existing singleton client"
+    assert result == "EXISTING", (
+        "get_bus should reuse existing singleton client"
+    )
 
 
 def test_get_bus_fallback_on_server_creation_failure(monkeypatch):
@@ -144,15 +152,18 @@ def test_get_bus_fallback_on_server_creation_failure(monkeypatch):
     monkeypatch.setattr(
         routing,
         "portal",
-        types.SimpleNamespace(Server=FailingServer, Client=lambda *a, **kw: "CLIENT"),
+        types.SimpleNamespace(
+            Server=FailingServer, Client=lambda *a, **kw: "CLIENT"
+        ),
     )
     monkeypatch.setattr(routing, "__i_am_host", lambda: True)
     monkeypatch.setattr(routing, "__is_port_in_use", lambda *a, **kw: False)
 
     result = routing.get_bus()
-    assert isinstance(
-        result, routing.GogglesClient
-    ), "get_bus should return a GogglesClient instance even if server creation fails"
-    assert (
-        result._client == "CLIENT"
-    ), "Client attribute should be correct even on server fail"
+    assert isinstance(result, routing.GogglesClient), (
+        "get_bus should return a GogglesClient instance "
+        "even if server creation fails"
+    )
+    assert result._client == "CLIENT", (
+        "Client attribute should be correct even on server fail"
+    )

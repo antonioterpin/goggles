@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, ClassVar, Literal
 from collections.abc import Mapping, Sequence
+from typing import Any, ClassVar, Literal, TypeAlias
+
 import numpy as np
 from typing_extensions import Self
 
 import wandb
-
 from goggles.types import Kind
 
 Run = Any  # wandb.sdk.wandb_run.Run
-Reinit = Literal["default", "return_previous", "finish_previous", "create_new"]
+Reinit: TypeAlias = Literal[
+    "default", "return_previous", "finish_previous", "create_new"
+]
 
 
 class WandBHandler:
@@ -27,6 +29,7 @@ class WandBHandler:
         name: Stable handler identifier.
         capabilities: Supported event kinds
             ({"metric", "image", "video", "artifact"}).
+        GLOBAL_SCOPE: The default scope name for events w/o an explicit scope.
 
     """
 
@@ -54,13 +57,22 @@ class WandBHandler:
             config: Configuration dictionary to log with the run(s).
             group: W&B group name for runs.
             reinit: W&B reinitialization strategy when opening runs.
-                One of {"finish_previous", "return_previous", "create_new", "default"}.
+                One of:
+                {"finish_previous", "return_previous", "create_new", "default"}.
 
+        Raises:
+            ValueError: If `reinit` is not a valid option.
         """
         self._logger = logging.getLogger(self.name)
-        # Ensure that Goggles logs are not propagated to the root logger to avoid duplicates
+        # Ensure that Goggles logs are not propagated to the root logger
+        # to avoid duplicates
         self._logger.propagate = False
-        valid_reinit = {"finish_previous", "return_previous", "create_new", "default"}
+        valid_reinit: set[str] = {
+            "finish_previous",
+            "return_previous",
+            "create_new",
+            "default",
+        }
         if reinit not in valid_reinit:
             raise ValueError(
                 f"Invalid reinit value '{reinit}'. Must be one of: "
@@ -71,8 +83,10 @@ class WandBHandler:
         self._entity = entity
         self._group = group
         self._base_run_name = run_name
-        self._config: dict[str, Any] = dict(config) if config is not None else {}
-        self._reinit = reinit or "finish_previous"
+        self._config: dict[str, Any] = (
+            dict(config) if config is not None else {}
+        )
+        self._reinit: Reinit = reinit or "finish_previous"
         self._runs: dict[str, Run] = {}
         self._wandb_run: Run | None = None
         self._current_scope: str | None = None
@@ -98,6 +112,9 @@ class WandBHandler:
         Args:
             event: The Goggles event to process.
 
+        Raises:
+            ValueError: If the event kind is unsupported or if the payload is
+                malformed for the given kind.
         """
         scope = getattr(event, "scope", None) or self.GLOBAL_SCOPE
         kind = getattr(event, "kind", None) or "metric"
@@ -126,10 +143,12 @@ class WandBHandler:
             return
 
         if kind in {"image", "video"}:
-            # Preferred key name comes from event.extra["name"], else "image"/"video"
+            # Preferred key name comes from event.extra["name"],
+            # else "image"/"video"
             key_name = extra.pop("name", kind)
 
-            # Allow payload to be either a mapping {name: data} or a single datum
+            # Allow payload to be either a mapping {name: data}
+            # or a single datum
             items = (
                 payload.items()
                 if isinstance(payload, Mapping)
@@ -152,13 +171,14 @@ class WandBHandler:
                     fmt = str(extra.get("format", "mp4"))
                     if fmt not in {"mp4", "gif"}:
                         self._logger.warning(
-                            "Unsupported video format '%s' for '%s'; defaulting to 'mp4'.",
+                            "Unsupported video format '%s' for '%s'; "
+                            "defaulting to 'mp4'.",
                             fmt,
                             name,
                         )
                         fmt = "mp4"
                     new_value = self._prepare_video_for_wandb(value)
-                    logs[name] = wandb.Video(new_value, fps=fps, format=fmt)  # type: ignore
+                    logs[name] = wandb.Video(new_value, fps=fps, format=fmt)  # pyright: ignore[reportArgumentType]
             # Add the extra fields to the logged object
             for k, v in extra.items():
                 logs[k] = v
@@ -178,7 +198,9 @@ class WandBHandler:
             name = payload.get("name", "artifact")
             art_type = payload.get("type", "misc")
             if not isinstance(path, str):
-                self._logger.warning("Artifact missing valid 'path' field; skipping.")
+                self._logger.warning(
+                    "Artifact missing valid 'path' field; skipping."
+                )
                 return
             artifact = wandb.Artifact(name=name, type=art_type, metadata=extra)
             artifact.add_file(path)
@@ -186,11 +208,12 @@ class WandBHandler:
             return
 
         if kind == "histogram":
-            # Support a vector of samples or an (hist, bin_edges) tuple via `np_hist`.
+            # Support a vector of samples or an (hist, bin_edges) tuple
+            # via `np_hist`.
             # Name defaults to "histogram" unless provided in extra.
             name = extra.pop("name", "histogram")
             static = extra.pop("static", False)
-            # `num_bins` can be overridden through extra; default to 64 like W&B.
+            # `num_bins` can be overridden through extra; default to 64 like W&B
             num_bins = int(
                 extra.pop("num_bins", extra.pop("bins", 64))
             )  # TODO: check if bins is needed
@@ -200,7 +223,8 @@ class WandBHandler:
             try:
                 if not isinstance(payload, (Sequence, np.ndarray)):
                     self._logger.warning(
-                        "Invalid histogram payload for '%s' (scope=%s): must be a sequence or tuple.",
+                        "Invalid histogram payload for '%s' (scope=%s): "
+                        "must be a sequence or tuple.",
                         name,
                         scope,
                     )
@@ -219,7 +243,7 @@ class WandBHandler:
                         np_histogram=np.histogram(payload, bins=num_bins)
                     )
 
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._logger.warning(
                     "Invalid histogram payload for '%s' (scope=%s): %s",
                     name,
@@ -238,12 +262,12 @@ class WandBHandler:
 
     def close(self) -> None:
         """Finish all active W&B runs."""
-        for scope, run in list(self._runs.items()):
+        for run in list(self._runs.values()):
             if run is not None:
                 try:
                     run.finish()
-                except:
-                    pass
+                except Exception as exc:
+                    self._logger.warning("Failed to finish W&B run: %s", exc)
         self._runs.clear()
         self._wandb_run = None
         self._current_scope = None
@@ -310,7 +334,7 @@ class WandBHandler:
             name=name,
             config={**self._config, "scope": scope, **extra_config},
             group=self._group,
-            reinit=self._reinit,  # type: ignore
+            reinit=self._reinit,
         )
         self._runs[scope] = run
         return run
@@ -324,7 +348,8 @@ class WandBHandler:
         - (F, T, C, H, W)
 
         Args:
-            value: The input video tensor, which can be in shape (F, H, W), (F, C, H, W), or (F, T, C, H, W).
+            value: The input video tensor.
+                shape is either (F, H, W), (F, C, H, W), or (F, T, C, H, W).
 
         Returns:
             The processed video tensor in shape (F, 3, H, W) or (F, T, 3, H, W).
@@ -334,7 +359,8 @@ class WandBHandler:
             value = value[:, None, :, :]
         elif value.ndim not in (4, 5):
             self._logger.error(
-                f"Video has invalid shape {value.shape}; expected (F,H,W), (F,C,H,W), or (F,T,C,H,W)."
+                f"Video has invalid shape {value.shape}; "
+                "expected (F,H,W), (F,C,H,W), or (F,T,C,H,W)."
             )
 
         if value.shape[1] == 1 and value.ndim == 4:

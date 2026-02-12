@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+
 from .spec import HistorySpec
-from .types import PRNGKey, Array, History
+from .types import Array, History, PRNGKey
 
 
 def _apply_reset(
@@ -29,10 +30,6 @@ def _apply_reset(
 
     Returns:
         Array with the same shape as `hist_row`, updated for this step.
-
-    Raises:
-        ValueError: If `init_mode` is unknown.
-
     """
     shifted_row = jnp.concatenate([hist_row[1:], new_row], axis=0)
 
@@ -45,7 +42,9 @@ def _apply_reset(
         if init_mode == "ones":
             return jnp.ones_like(hist_row)
         if init_mode == "randn":
-            return jax.random.normal(key, hist_row.shape, hist_row.dtype)  # type: ignore
+            if key is None:
+                raise ValueError("init_mode 'randn' requires a PRNG key")
+            return jax.random.normal(key, hist_row.shape, hist_row.dtype)
         raise ValueError(f"Unknown init mode {init_mode!r}")
 
     return jax.lax.cond(reset, do_reset, lambda _: shifted_row, operand=None)
@@ -92,7 +91,9 @@ def create_history(
         elif field.init == "none":
             arr = jnp.empty(shape, field.dtype)
         else:
-            raise ValueError(f"Unknown init mode {field.init!r} for field '{name}'")
+            raise ValueError(
+                f"Unknown init mode {field.init!r} for field '{name}'"
+            )
         history[name] = arr
     return history
 
@@ -106,10 +107,11 @@ def update_history(
 ) -> History:
     """Shift and append new items along the temporal axis.
 
-    Note: this function can be jitted and vmapped over batch dimensions. RNG handling:
-    if `rng` is provided, it may be either a single PRNGKey or an array of per-batch
-    keys with shape (B, 2). This lets callers supply already-sharded keys for
-    multi-device/pmap scenarios.
+    Note: this function can be jitted and vmapped over batch dimensions.
+    RNG handling:
+    if `rng` is provided, it may be either a single PRNGKey or an array of
+    per-batch keys with shape (B, 2). This lets callers supply already-sharded
+    keys for multi-device/pmap scenarios.
 
     Args:
         history: Current history dict (B, T, *shape).
@@ -171,16 +173,20 @@ def update_history(
                 keys = rng_arr
             else:
                 raise ValueError(
-                    "rng must be a PRNGKey (shape (2,)) or per-batch keys with shape "
-                    f"(B, 2); got {tuple(rng_arr.shape)}"
+                    "rng must be a PRNGKey (shape (2,)) or per-batch keys "
+                    f"with shape (B, 2); got {tuple(rng_arr.shape)}"
                 )
         else:
             # Dummy keys; ignored unless init_mode == 'randn'.
             keys = jnp.zeros((hist.shape[0], 2), dtype=jnp.uint32)
 
         # Vmap over batch. Keep new with time-dim = 1 for concat in helper.
-        apply = lambda h, n, r, k: _apply_reset(h, n, r, init_mode, k)
-        updated_field = jax.vmap(apply)(hist, new[:, 0:1, ...], reset_mask, keys)
+        def apply(h, n, r, k, init_mode=init_mode):
+            return _apply_reset(h, n, r, init_mode, k)
+
+        updated_field = jax.vmap(apply)(
+            hist, new[:, 0:1, ...], reset_mask, keys
+        )
         updated[name] = updated_field
 
     return updated
