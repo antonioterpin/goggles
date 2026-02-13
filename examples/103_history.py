@@ -8,8 +8,8 @@ This script shows how to:
 5. Compare JIT vs non-JIT update performance.
 """
 
-import time
 import os
+import time
 from collections.abc import Callable
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Use GPU 0 if available
@@ -18,8 +18,8 @@ import jax.numpy as jnp
 
 from goggles.history import (
     create_history,
-    update_history,
     to_host,
+    update_history,
 )
 from goggles.history.spec import HistorySpec
 from goggles.history.types import History
@@ -32,11 +32,21 @@ except ImportError:
     HAS_MPL = False
 
 
-def main() -> None:  # noqa: D103
+def main() -> None:
     # Define a simple config and parse it into a HistorySpec
     config = {
-        "state": {"length": 4, "shape": (2,), "dtype": jnp.float32, "init": "zeros"},
-        "reward": {"length": 4, "shape": (), "dtype": jnp.float32, "init": "randn"},
+        "state": {
+            "length": 4,
+            "shape": (2,),
+            "dtype": jnp.float32,
+            "init": "zeros",
+        },
+        "reward": {
+            "length": 4,
+            "shape": (),
+            "dtype": jnp.float32,
+            "init": "randn",
+        },
     }
 
     spec = HistorySpec.from_config(config)
@@ -44,7 +54,7 @@ def main() -> None:  # noqa: D103
     rng = jax.random.key(0)
     batch_size = 3
 
-    # Create the history on device (it will automatically be on GPU if available)
+    # Create history on device (GPU if available).
     history = create_history(spec, batch_size, rng)
 
     print("\nCreated history:")
@@ -54,7 +64,7 @@ def main() -> None:  # noqa: D103
     # Define update function
     def simulate_updates(
         update_fn: Callable, n_steps: int = 20
-    ) -> dict[str, History | float]:
+    ) -> tuple[History, float]:
         hist = history
         t0 = time.perf_counter()
         for t in range(n_steps):
@@ -68,21 +78,21 @@ def main() -> None:  # noqa: D103
 
         jax.block_until_ready(hist)
         elapsed = time.perf_counter() - t0
-        return {"history": hist, "elapsed": elapsed}
+        return hist, elapsed
 
     # Non-JIT execution
     print("\nRunning sequential updates (non-JIT)...")
-    out_nonjit = simulate_updates(update_history)
-    print(f"Non-JIT execution time: {out_nonjit['elapsed']:.4f} s")
+    _nonjit_hist, nonjit_elapsed = simulate_updates(update_history)
+    print(f"Non-JIT execution time: {nonjit_elapsed:.4f} s")
 
     # JIT execution
     print("\nRunning JIT-compiled updates...")
     update_history_jit = jax.jit(update_history)
-    out_jit = simulate_updates(update_history_jit)
-    print(f"JIT execution time: {out_jit['elapsed']:.4f} s")
+    jit_hist, jit_elapsed = simulate_updates(update_history_jit)
+    print(f"JIT execution time: {jit_elapsed:.4f} s")
 
     # Move back to host and inspect
-    host_history = to_host(out_jit["history"])  # type: ignore
+    host_history = to_host(jit_hist)
     print("\nFinal host history:")
     for k, v in host_history.items():
         print(f"  {k}: mean={v.mean():.3f}, shape={v.shape}")
@@ -101,17 +111,18 @@ def main() -> None:  # noqa: D103
         plt.tight_layout()
         plt.show()
     else:
-        print("\n(Matplotlib not installed — skipping plot.)")
+        print("\n(Matplotlib not installed - skipping plot.)")
 
     # Timing summary
     print("\nTiming summary:")
-    print(f"  Non-JIT: {out_nonjit['elapsed']:.4f} s")
-    print(f"  JIT:     {out_jit['elapsed']:.4f} s")
+    print(f"  Non-JIT: {nonjit_elapsed:.4f} s")
+    print(f"  JIT:     {jit_elapsed:.4f} s")
     print("=" * 80)
 
     # Further examples
     print(
-        "\nFor a more complete demonstration of how GPU-resident histories are used "
+        "\nFor a complete demonstration of how GPU-resident histories are "
+        "used "
         "in real environments and estimators, check out Flow Gym:"
     )
     print("  🔗 https://github.com/antonioterpin/flowgym")

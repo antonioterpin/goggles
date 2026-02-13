@@ -3,13 +3,14 @@
 import logging
 from pathlib import Path
 from typing import ClassVar, Literal
+
 from typing_extensions import Self
 
 from goggles.types import Event, Kind
 
 
 class ConsoleHandler:
-    """Handle 'log' events and output them to console using Python's logging API.
+    """Handle 'log' events and output them to console using Python's logging.
 
     Attributes:
         name: Stable handler identifier.
@@ -60,6 +61,11 @@ class ConsoleHandler:
 
         Args:
             event: The log event to handle.
+
+        Raises:
+            ValueError:
+                If the event kind is not "log"
+                or if the event payload is not a string.
         """
         if event.kind != "log":
             raise ValueError(f"Unsupported event kind '{event.kind}'")
@@ -96,7 +102,8 @@ class ConsoleHandler:
     def open(self) -> None:
         """Initialize the handler (create logger and formatter)."""
         self._logger = logging.getLogger(self.name)
-        # Ensure that Goggles logs are not propagated to the root logger to avoid duplicates
+        # Ensure that Goggles logs are not propagated to the root logger
+        # to avoid duplicates
         self._logger.propagate = False
         if not self._logger.handlers:
             handler = logging.StreamHandler()
@@ -115,7 +122,11 @@ class ConsoleHandler:
             handler.flush()
 
     def to_dict(self) -> dict:
-        """Serialize the handler for later reconstruction."""
+        """Serialize the handler for later reconstruction.
+
+        Returns:
+            A dictionary containing the handler's configuration.
+        """
         return {
             "cls": self.__class__.__name__,
             "data": {
@@ -128,7 +139,14 @@ class ConsoleHandler:
 
     @classmethod
     def from_dict(cls, serialized: dict) -> Self:
-        """Reconstruct a handler from its serialized representation."""
+        """Reconstruct a handler from its serialized representation.
+
+        Args:
+            serialized: A dictionary containing the handler's configuration.
+
+        Returns:
+            An instance of ConsoleHandler according to the serialized data.
+        """
         data = serialized.get("data", serialized)
         return cls(
             name=data["name"],

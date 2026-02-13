@@ -1,13 +1,25 @@
 """Media utilities for saving images and videos from numpy arrays."""
 
-import yaml
-from typing import Literal
-import numpy as np
-import imageio
 from pathlib import Path
+from typing import Any, Literal, Protocol, cast
+
+import imageio
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
+import yaml
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+
+class _FrameWriter(Protocol):
+    """Subset of imageio writer API used by this module."""
+
+    def append_data(self, image: np.ndarray) -> None:
+        """Append a single frame to the output stream.
+
+        Args:
+            image: Frame to append.
+        """
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:
@@ -15,6 +27,10 @@ def _to_uint8(arr: np.ndarray) -> np.ndarray:
 
     Args:
         arr: Input array of arbitrary dtype and range.
+
+    Returns:
+        uint8 array with values in [0, 255], suitable for saving
+            as an image or video.
     """
     if arr.dtype == np.uint8:
         return arr
@@ -39,6 +55,9 @@ def _normalize_frames(frames: np.ndarray) -> tuple[np.ndarray, str]:
 
     Returns:
         Tuple of (uint8 array, mode string).
+
+    Raises:
+        ValueError: If input shape or channel count is invalid.
     """
     arr = np.asarray(frames)
     if arr.ndim < 3:
@@ -49,7 +68,9 @@ def _normalize_frames(frames: np.ndarray) -> tuple[np.ndarray, str]:
     else:  # (T,H,W,C)
         C = arr.shape[-1]
         if C not in (1, 3, 4):
-            raise ValueError(f"Last dimension must be 1 or 3 channels, got {C}.")
+            raise ValueError(
+                f"Last dimension must be 1 or 3 channels, got {C}."
+            )
     if arr.ndim >= 4 and C == 1:
         arr = arr[..., 0]  # -> (T,H,W)
     arr_u8 = _to_uint8(arr)
@@ -98,10 +119,10 @@ def save_numpy_gif(
     """
     arr_u8, _ = _normalize_frames(frames)
     imgs = [arr_u8[i] for i in range(arr_u8.shape[0])]
-    imageio.mimsave(
+    imageio.mimwrite(  # pyright: ignore[reportCallIssue]
         out_path,
         imgs,
-        format="GIF",
+        format="GIF",  # pyright: ignore[reportArgumentType]
         duration=1.0 / float(fps),
         loop=loop,
         palettesize=256,
@@ -164,13 +185,10 @@ def save_numpy_mp4(
     if ffmpeg_params:
         writer_kwargs["ffmpeg_params"] = ffmpeg_params
 
-    with imageio.get_writer(out_path, **writer_kwargs) as writer:
-        if arr_u8.ndim == 3:
-            for i in range(arr_u8.shape[0]):
-                writer.append_data(arr_u8[i])
-        else:
-            for i in range(arr_u8.shape[0]):
-                writer.append_data(arr_u8[i])
+    with imageio.get_writer(out_path, **writer_kwargs) as writer_raw:
+        writer = cast(_FrameWriter, writer_raw)
+        for i in range(arr_u8.shape[0]):
+            writer.append_data(arr_u8[i])
 
 
 def save_numpy_image(image: np.ndarray, out_path: str, format: str) -> None:
@@ -184,7 +202,7 @@ def save_numpy_image(image: np.ndarray, out_path: str, format: str) -> None:
 
     """
     arr_u8, _ = _normalize_frames(image[np.newaxis, ...])
-    imageio.imwrite(out_path, arr_u8[0], format=format)
+    imageio.imwrite(out_path, arr_u8[0], format=format)  # pyright: ignore[reportCallIssue, reportArgumentType]
 
 
 def save_numpy_vector_field_visualization(
@@ -207,13 +225,16 @@ def save_numpy_vector_field_visualization(
         dpi: Resolution of the output image.
         add_colorbar: Whether to include a colorbar.
 
+    Raises:
+        ValueError: If `mode` is invalid or input shape is incorrect.
     """
     # Store original backend to restore later
     original_backend = matplotlib.get_backend()
     matplotlib.use("Agg")
 
     try:
-        H, W, _ = vector_field.shape
+        H = vector_field.shape[0]
+        W = vector_field.shape[1]
 
         # Create figure that matches pixel aspect; keep margins zero by default
         fig, ax = plt.subplots(figsize=(W / 50, H / 50), dpi=dpi)
@@ -222,14 +243,14 @@ def save_numpy_vector_field_visualization(
         # Compute scalar field and arrow color based on the selected mode
         if mode == "magnitude":
             scalar_field = np.linalg.norm(vector_field, axis=-1)
-            cmap = plt.cm.viridis
+            cmap = plt.get_cmap("viridis")
             arrow_color = "white"
         elif mode == "vorticity":
             # Compute vorticity (curl) of the vector field: dVx/dy - dVy/dx
             dy = np.gradient(vector_field[..., 0], axis=0)
             dx = np.gradient(vector_field[..., 1], axis=1)
             scalar_field = dx - dy
-            cmap = plt.cm.RdBu_r
+            cmap = plt.get_cmap("RdBu_r")
             arrow_color = "black"
         else:
             raise ValueError("mode must be 'magnitude' or 'vorticity'")
@@ -239,7 +260,7 @@ def save_numpy_vector_field_visualization(
             scalar_field,
             cmap=cmap,
             origin="lower",
-            extent=[0, W, 0, H],
+            extent=(0, W, 0, H),
             interpolation="bilinear",
         )
 
@@ -349,7 +370,7 @@ NumpyDumper.add_representer(np.ndarray, _represent_ndarray)
 NumpyDumper.add_multi_representer(np.generic, _represent_numpy_generic)
 
 
-def yaml_dump(obj, **kwargs) -> str:
+def yaml_dump(obj: Any, **kwargs: Any) -> str:
     """Dump an object to a YAML string, handling NumPy types.
 
     Args:

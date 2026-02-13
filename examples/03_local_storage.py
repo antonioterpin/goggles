@@ -1,6 +1,8 @@
-import goggles as gg
 from pathlib import Path
+
 import numpy as np
+
+import goggles as gg
 
 # In this example, we set up a logger that stores events
 # in a structured directory:
@@ -79,8 +81,9 @@ dummy_rgba_video = np.random.rand(T, H, W, 4).astype(np.float32)
 for t in range(T):
     # Create a moving transparent circle
     y, x = np.ogrid[:H, :W]
-    center_y, center_x = H // 2 + 20 * np.sin(2 * np.pi * t / T), W // 2 + 20 * np.cos(
-        2 * np.pi * t / T
+    center_y, center_x = (
+        H // 2 + 20 * np.sin(2 * np.pi * t / T),
+        W // 2 + 20 * np.cos(2 * np.pi * t / T),
     )
     mask = (x - center_x) ** 2 + (y - center_y) ** 2 < 400
     dummy_rgba_video[t, :, :, 3] = 0.8  # Base alpha
@@ -102,7 +105,9 @@ logger.artifact(artifact_yaml, name="yaml_artifact", format="yaml", step=7)
 artifact_csv = "col1,col2\n1,2\n3,4"
 logger.artifact(artifact_csv, name="csv_artifact", format="csv", step=7)
 artifact_unknown = "This is some unknown format data"
-logger.artifact(artifact_unknown, name="unknown_artifact", format="myformat", step=7)
+logger.artifact(
+    artifact_unknown, name="unknown_artifact", format="myformat", step=7
+)
 
 # Vector field logging
 logger.info("Logging sample vector field...")
@@ -115,16 +120,18 @@ def make_lamb_oseen_vortices(
     domain: tuple[float, float, float, float] = (-1.0, 1.0, -1.0, 1.0),
     uniform: tuple[float, float] = (0.0, 0.0),
 ) -> np.ndarray:
-    """
-    Build a 2D incompressible flow from Lamb–Oseen vortices.
+    """Build a 2D incompressible flow from Lamb-Oseen vortices.
 
-    vortices: list of (x0, y0, Gamma, sigma), in domain coords.
-      - (x0, y0): vortex center (same units as 'domain')
-      - Gamma: circulation (sign sets rotation direction)
-      - sigma: core size (Gaussian radius)
-    domain: (xmin, xmax, ymin, ymax) spanning the grid
-    uniform: (U, V) optional background flow
-    Returns: (H, W, 2) with (u, v).
+    Args:
+        H: Grid height in pixels.
+        W: Grid width in pixels.
+        vortices: List of `(x0, y0, Gamma, sigma)` tuples in domain coordinates.
+        domain: Spatial domain as `(xmin, xmax, ymin, ymax)`.
+        uniform: Optional uniform background flow `(U, V)`.
+
+    Returns:
+        Velocity field array of shape `(H, W, 2)` containing `(u, v)`.
+
     """
     xmin, xmax, ymin, ymax = domain
     y = np.linspace(ymin, ymax, H, dtype=np.float32)
@@ -140,10 +147,12 @@ def make_lamb_oseen_vortices(
         dy = Y - y0
         r2 = dx * dx + dy * dy
         r = np.sqrt(r2) + eps
-        # Lamb–Oseen tangential speed:
-        # v_theta(r) = (Gamma / (2π r)) * (1 - exp(-r^2 / (2 sigma^2)))
+        # Lamb-Oseen tangential speed:
+        # v_theta(r) = (Gamma / (2*pi*r)) * (1 - exp(-r^2/(2*sigma^2)))
         v_theta = (
-            (Gamma / (2.0 * np.pi)) * (1.0 - np.exp(-r2 / (2.0 * sigma * sigma))) / r
+            (Gamma / (2.0 * np.pi))
+            * (1.0 - np.exp(-r2 / (2.0 * sigma * sigma)))
+            / r
         )
         # Tangential direction (-dy/r, dx/r)
         u += -dy * (v_theta / r)
@@ -157,7 +166,9 @@ vortices = [
     (-0.4, 0.0, +5.0, 0.15),  # CCW
     (+0.4, 0.0, -5.0, 0.15),  # CW
 ]
-dummy_vector_field = make_lamb_oseen_vortices(VF_H, VF_W, vortices, uniform=(0.2, 0.0))
+dummy_vector_field = make_lamb_oseen_vortices(
+    VF_H, VF_W, vortices, uniform=(0.2, 0.0)
+)
 logger.vector_field(
     dummy_vector_field,
     name="lamb_oseen_dipole",

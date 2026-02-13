@@ -8,8 +8,19 @@ import pytest
 from goggles.history.utils import peek_last, slice_history, to_device, to_host
 
 
-def _make_history(B, T, shapes):
-    """Build a toy HistoryDict with deterministic contents."""
+def _make_history(
+    B: int, T: int, shapes: tuple[tuple[str, tuple[int, ...]], ...]
+) -> dict[str, jax.Array]:
+    """Build a toy HistoryDict with deterministic contents.
+
+    Args:
+        B: Batch dimension size.
+        T: Time dimension size.
+        shapes: Field names and per-timestep payload shapes.
+
+    Returns:
+        dict[str, jax.Array]: History mapping from field to shaped JAX arrays.
+    """
     history = {}
     for i, (name, shape) in enumerate(shapes):
         size = B * T * int(np.prod(shape) if shape else 1)
@@ -40,22 +51,29 @@ def _make_history(B, T, shapes):
 def test_slice_history_dict_and_field_shapes(B, T, shapes, start, length):
     assume_ok = start + length <= T
     if not assume_ok:
-        pytest.skip("Invalid window for this T; exercised in error tests below.")
+        pytest.skip(
+            "Invalid window for this T; exercised in error tests below."
+        )
 
     history = _make_history(B, T, shapes)
 
     # Dict mode: shapes match (B, length, *payload)
     sliced = slice_history(history, start=start, length=length)
-    for (name, shape), arr in zip(shapes, map(lambda k: sliced[k[0]], shapes)):
+    for (name, shape), arr in zip(
+        shapes, map(lambda k: sliced[k[0]], shapes), strict=False
+    ):
         assert arr.shape == (B, length, *shape), f"{name} shape mismatch"
         # Values match direct slicing
         np.testing.assert_array_equal(
-            np.asarray(arr), np.asarray(history[name][:, start : start + length, ...])
+            np.asarray(arr),
+            np.asarray(history[name][:, start : start + length, ...]),
         )
 
     # Single-field mode: same checks for one key
     field_name, field_shape = shapes[0]
-    sliced_one = slice_history(history, start=start, length=length, fields=field_name)
+    sliced_one = slice_history(
+        history, start=start, length=length, fields=field_name
+    )
     sliced_one = sliced_one[field_name]
     assert sliced_one.shape == (
         B,
@@ -113,7 +131,9 @@ def test_peek_last_valid(B, T, shapes, k):
 
     history = _make_history(B, T, shapes)
     last = peek_last(history, k=k)
-    for (name, shape), arr in zip(shapes, map(lambda k: last[k[0]], shapes)):
+    for (name, shape), arr in zip(
+        shapes, map(lambda k: last[k[0]], shapes), strict=False
+    ):
         assert arr.shape == (B, k, *shape), f"{name} shape mismatch"
         np.testing.assert_array_equal(
             np.asarray(arr), np.asarray(history[name][:, -k:, ...])
@@ -189,7 +209,9 @@ def test_to_device_and_to_host_roundtrip(sample_history):
     # Assert arrays live on device initially
     for v in jax.tree_util.tree_leaves(device_hist):
         if isinstance(v, jax.Array):
-            assert v.device in jax.devices(), f"Array {v} should be on a JAX device"
+            assert v.device in jax.devices(), (
+                f"Array {v} should be on a JAX device"
+            )
 
     # Assert round-trip preserves numerical values
     np.testing.assert_array_equal(np.array(host_hist["a"]), np.ones((2, 2)))
@@ -204,7 +226,9 @@ def test_to_device_subset_keys(sample_history):
     dev_hist = to_device(sample_history, keys=("a",))
     assert isinstance(dev_hist["a"], jax.Array), "Key 'a' should be a JAX array"
     # 'b' remains identical
-    assert dev_hist["b"] is sample_history["b"], "Key 'b' should be identical to input"
+    assert dev_hist["b"] is sample_history["b"], (
+        "Key 'b' should be identical to input"
+    )
 
 
 def test_to_host_subset_keys(sample_history):
@@ -213,25 +237,30 @@ def test_to_host_subset_keys(sample_history):
     # Then copy only key 'b'
     host_hist = to_host(dev_hist, keys=("b",))
     # 'b' should now be numpy arrays on host
-    assert isinstance(
-        host_hist["b"]["x"], np.ndarray
-    ), "Nested key 'x' should be a numpy array"
+    assert isinstance(host_hist["b"]["x"], np.ndarray), (
+        "Nested key 'x' should be a numpy array"
+    )
     # 'a' remains jax array
-    assert isinstance(host_hist["a"], jax.Array), "Key 'a' should remain a JAX array"
+    assert isinstance(host_hist["a"], jax.Array), (
+        "Key 'a' should remain a JAX array"
+    )
 
 
 def test_to_device_multiple_devices(monkeypatch, sample_history):
     devices = jax.devices()
     if len(devices) < 2:
-        pytest.skip("requires at least 2 devices to test round-robin assignment")
+        pytest.skip(
+            "requires at least 2 devices to test round-robin assignment"
+        )
 
     moved = to_device(sample_history, devices=devices[:2])
     # Check that elements were placed round-robin across devices
-    a_dev = list(moved["a"].sharding.device_set)[0]
-    b_dev = list(jax.tree_util.tree_leaves(moved["b"])[0].sharding.device_set)[0]
-    assert (
-        a_dev != b_dev
-    ), "Elements should be on different devices for multi-device test"
+    a_dev = next(iter(moved["a"].sharding.device_set))
+    b_leaves = jax.tree_util.tree_leaves(moved["b"])
+    b_dev = next(iter(b_leaves[0].sharding.device_set))
+    assert a_dev != b_dev, (
+        "Elements should be on different devices for multi-device test"
+    )
 
 
 def test_to_device_and_to_host_jittable(sample_history):
@@ -249,7 +278,7 @@ def test_to_device_and_to_host_jittable(sample_history):
 @pytest.mark.parametrize("func", [to_device, to_host])
 def test_functions_are_pure(sample_history, func):
     # Act
-    out = func(sample_history)
+    func(sample_history)
     # Assert input not mutated
     assert sample_history["a"].shape == (2, 2), "Input 'a' shape mutated"
     assert "x" in sample_history["b"], "Input 'b' content mutated"

@@ -1,15 +1,15 @@
 """JSONL integration for Goggles logging framework."""
 
 import json
+import logging
 import threading
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import ClassVar, TypeAlias, cast
 from uuid import uuid4
-from typing_extensions import Self
-import logging
-import numpy as np
 
-from goggles.types import Event, Kind
+import numpy as np
+from typing_extensions import Self
+
 from goggles.media import (
     save_numpy_gif,
     save_numpy_image,
@@ -17,6 +17,10 @@ from goggles.media import (
     save_numpy_vector_field_visualization,
     yaml_dump,
 )
+from goggles.types import Event, Kind
+
+JSONScalar: TypeAlias = str | int | float | bool | None
+JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
 
 class LocalStorageHandler:
@@ -42,14 +46,23 @@ class LocalStorageHandler:
 
     name: str = "jsonl"
     capabilities: ClassVar[frozenset[Kind]] = frozenset(
-        {"log", "metric", "image", "video", "artifact", "vector_field", "histogram"}
+        {
+            "log",
+            "metric",
+            "image",
+            "video",
+            "artifact",
+            "vector_field",
+            "histogram",
+        }
     )
 
     def __init__(self, path: Path, name: str = "jsonl") -> None:
         """Initialize the handler with a base directory.
 
         Args:
-            path: Base directory for logs and media files. Will be created if it doesn't exist.
+            path: Base directory for logs and media files.
+                Will be created if it doesn't exist.
             name: Handler identifier (for logging diagnostics).
 
         """
@@ -79,7 +92,8 @@ class LocalStorageHandler:
 
         # Open logger for diagnostics
         self._logger = logging.getLogger(self.name)
-        # Ensure that Goggles logs are not propagated to the root logger to avoid duplicates
+        # Ensure that Goggles logs are not propagated to the root logger
+        # to avoid duplicates
         self._logger.propagate = False
 
     def close(self) -> None:
@@ -140,9 +154,16 @@ class LocalStorageHandler:
                 self._fp.write("\n")
                 self._fp.flush()
         except Exception:
-            logging.getLogger(self.name).exception("Failed to write JSONL event")
+            logging.getLogger(self.name).exception(
+                "Failed to write JSONL event"
+            )
 
     def to_dict(self) -> dict:
+        """Serialize handler configuration to a dictionary.
+
+        Returns:
+            dict: Dictionary containing the handler class and its configuration.
+        """
         """Serialize handler configuration to dictionary."""
         return {
             "cls": self.__class__.__name__,
@@ -168,7 +189,7 @@ class LocalStorageHandler:
             name=data["name"],
         )
 
-    def _json_serializer(self, obj: Any) -> str:
+    def _json_serializer(self, obj: object) -> JSONValue:
         """Serialize object to JSON-compatible format.
 
         Args:
@@ -178,11 +199,11 @@ class LocalStorageHandler:
             JSON-serializable representation of the object.
         """
         if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.integer, np.floating)):
-            return obj.item()
+            return cast(JSONValue, obj.tolist())
+        if isinstance(obj, (np.integer, np.floating)):
+            return cast(JSONValue, obj.item())
 
-        # For other non-serializable objects, convert to string
+        # For other non-serializable objects, convert to string.
         return str(obj)
 
     def _save_image_to_file(self, event: dict) -> dict | None:
@@ -200,7 +221,9 @@ class LocalStorageHandler:
         if "extra.format" in event:
             image_format = event["extra.format"]
 
-        image_path = self._make_media_name(event, self._images_dir, image_format)
+        image_path = self._make_media_name(
+            event, self._images_dir, image_format
+        )
         try:
             save_numpy_image(
                 event["payload"],
@@ -229,19 +252,22 @@ class LocalStorageHandler:
             video_format = event["extra.format"]
         if video_format not in {"mp4", "gif"}:
             self._logger.warning(
-                f"Unknown video format '{video_format}'. Supported formats are: 'mp4', 'gif'."
-                " The video will not be saved."
+                f"Unknown video format '{video_format}'. "
+                "Supported formats are: 'mp4', 'gif'. "
+                "The video will not be saved."
             )
             return None
 
-        video_path = self._make_media_name(event, self._videos_dir, video_format)
+        video_path = self._make_media_name(
+            event, self._videos_dir, video_format
+        )
 
         fps = 1.0
         if "extra.fps" in event:
             fps = float(event["extra.fps"])
 
         if video_format == "gif":
-            video_data: np.ndarray = event["payload"]
+            video_data = event["payload"]
             loop = 0
             if "extra.loop" in event:
                 loop = event["extra.loop"]
@@ -331,7 +357,9 @@ class LocalStorageHandler:
             dict | None: Updated event with file path instead of raw data.
 
         """
-        vector_field_path = self._make_media_name(event, self._vector_fields_dir, "npy")
+        vector_field_path = self._make_media_name(
+            event, self._vector_fields_dir, "npy"
+        )
 
         if "extra.store_visualization" in event:
             add_colorbar = False
@@ -372,7 +400,9 @@ class LocalStorageHandler:
             dict: Updated event with file path instead of raw data.
 
         """
-        histogram_path = self._make_media_name(event, self._histograms_dir, "npy")
+        histogram_path = self._make_media_name(
+            event, self._histograms_dir, "npy"
+        )
         np.save(histogram_path, event["payload"])
 
         event["payload"] = str(histogram_path.relative_to(self._base_path))

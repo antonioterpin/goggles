@@ -3,6 +3,8 @@
 import inspect
 
 import goggles.history as gh
+import goggles.history.types as ht
+from goggles.history import HistoryFieldSpec, HistorySpec
 
 
 def test_public_api_symbols_exist():
@@ -21,26 +23,26 @@ def test_public_api_symbols_exist():
 
 def test_history_field_spec_signature():
     """Check HistoryFieldSpec constructor signature."""
-    from goggles.history import HistoryFieldSpec
-
     sig = inspect.signature(HistoryFieldSpec)
     params = list(sig.parameters.keys())
     for p in ["length", "shape"]:
-        assert p in params, f"Parameter '{p}' missing from HistoryFieldSpec constructor"
-    assert (
-        "dtype" in params and "init" in params
-    ), "HistoryFieldSpec missing 'dtype' or 'init' parameters"
+        assert p in params, (
+            f"Parameter '{p}' missing from HistoryFieldSpec constructor"
+        )
+    assert "dtype" in params and "init" in params, (
+        "HistoryFieldSpec missing 'dtype' or 'init' parameters"
+    )
 
 
 def test_history_spec_from_config_signature():
-    from goggles.history import HistorySpec
-
-    assert hasattr(
-        HistorySpec, "from_config"
-    ), "HistorySpec missing 'from_config' method"
+    assert hasattr(HistorySpec, "from_config"), (
+        "HistorySpec missing 'from_config' method"
+    )
 
     raw_attr = HistorySpec.__dict__.get("from_config")
-    assert isinstance(raw_attr, classmethod), "from_config should be a @classmethod"
+    assert isinstance(raw_attr, classmethod), (
+        "from_config should be a @classmethod"
+    )
 
     sig = inspect.signature(raw_attr.__func__)
     params = list(sig.parameters.keys())
@@ -49,8 +51,6 @@ def test_history_spec_from_config_signature():
 
 def test_type_aliases_exist():
     """Check shared type aliases are available in types.py."""
-    import goggles.history.types as ht
-
     for name in ["PRNGKey", "Array", "History"]:
         assert hasattr(ht, name), f"Missing type alias: {name}"
         obj = getattr(ht, name)
