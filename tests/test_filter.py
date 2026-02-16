@@ -14,6 +14,7 @@ from goggles.filters import (
     MinMaxFilter,
     QuantizationFilter,
     ScaleFilter,
+    RangeRejectFilter,
     create_concat_filter,
 )
 
@@ -736,3 +737,127 @@ def test_scalefilter_concatfilter() -> None:
 
     output = np.stack([concat_f.step(x) for x in input_array])
     np.testing.assert_allclose(output, expected, rtol=1e-6)
+
+
+def test_rangerejectfilter_replace_only_invalid() -> None:
+    """Only out-of-range values should be replaced."""
+    f = RangeRejectFilter(
+        min_value=-1.0,
+        max_value=1.0,
+        fallback_filter=[{"type": "ScaleFilter", "parameters": {"scale": 0.0}}],
+    )
+
+    data = np.array([-2.0, -0.5, 0.2, 3.0])
+    out = f.step(data)
+
+    # invalid → replaced by fallback (=0), valid unchanged
+    expected = np.array([0.0, -0.5, 0.2, 0.0])
+    np.testing.assert_allclose(out, expected, rtol=1e-6)
+
+
+def test_rangerejectfilter_fallback_chain_applied() -> None:
+    """Test that the fallback chain is applied for out-of-range values."""
+    f = RangeRejectFilter(
+        min_value=0.0,
+        max_value=1.0,
+        fallback_filter=[
+            {"type": "ScaleFilter", "parameters": {"scale": 2.0}},
+            {"type": "ScaleFilter", "parameters": {"scale": 0.5}},
+        ],
+    )
+
+    data = np.array([-1.0, 0.5, 2.0])
+    out = f.step(data)
+
+    # midpoint = 0.5 → fallback sees [0.5,0.5,0.5]
+    expected = np.array([0.5, 0.5, 0.5])
+    np.testing.assert_allclose(out, expected, rtol=1e-6)
+
+
+def test_rangerejectfilter_partial_vector_replacement() -> None:
+    """Test that only out-of-range values are replaced in a vector input."""
+    f = RangeRejectFilter(
+        min_value=-1.0,
+        max_value=1.0,
+        fallback_filter=[
+            {"type": "ScaleFilter", "parameters": {"scale": 10.0}}
+        ],
+    )
+
+    data = np.array([-2.0, 0.1, 2.0])
+    out = f.step(data)
+
+    expected = np.array([0.0, 0.1, 0.0])
+    np.testing.assert_allclose(out, expected, rtol=1e-6)
+
+
+def test_rangerejectfilter_fallback_state_updates() -> None:
+    """Test that fallback filter state updates with out-of-range inputs."""
+    f = RangeRejectFilter(
+        min_value=-1.0,
+        max_value=1.0,
+        fallback_filter=[
+            {"type": "AverageFilter", "parameters": {"window_size": 2}}
+        ],
+    )
+
+    x1 = np.array([0.5])
+    x2 = np.array([0.6])
+    x3 = np.array([5.0])  # invalid
+
+    f.step(x1)
+    f.step(x2)
+
+    out = f.step(x3)
+
+    # fallback sees [0.6, 0.6]
+    expected = np.array([0.6])
+    np.testing.assert_allclose(out, expected, rtol=1e-6)
+
+
+def test_rangerejectfilter_reset() -> None:
+    """Test RangeRejectFilter reset with fallback filter that has state."""
+    f = RangeRejectFilter(
+        min_value=-1.0,
+        max_value=1.0,
+        fallback_filter=[
+            {"type": "ExpAverageFilter", "parameters": {"alpha": 0.5}}
+        ],
+    )
+
+    f.step(np.array([1.0]))
+    f.step(np.array([2.0]))
+
+    f.reset()
+
+    out = f.step(np.array([3.0]))  # invalid
+
+    expected = np.array([0.0])  # midpoint path
+    np.testing.assert_allclose(out, expected, rtol=1e-6)
+
+
+def test_rangerejectfilter_accepts_filterconfig_objects() -> None:
+    """Fallback should accept FilterConfig instances directly."""
+    cfg = FilterConfig(
+        type="ScaleFilter",
+        parameters={"scale": 0.0},
+    )
+
+    f = RangeRejectFilter(
+        min_value=-1.0,
+        max_value=1.0,
+        fallback_filter=[cfg],
+    )
+
+    out = f.step(np.array([5.0]))
+    np.testing.assert_allclose(out, np.array([0.0]), rtol=1e-6)
+
+
+def test_rangerejectfilter_invalid_init() -> None:
+    """Invalid range must raise."""
+    with pytest.raises(ValueError):
+        RangeRejectFilter(
+            min_value=1.0,
+            max_value=-1.0,
+            fallback_filter=[],
+        )

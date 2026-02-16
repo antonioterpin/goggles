@@ -586,6 +586,88 @@ class QuantizationFilter(_BackendAware):
         )
 
 
+class RangeRejectFilter(_BackendAware):
+    """Replace out-of-range values using a fallback filter."""
+
+    def __init__(
+        self,
+        min_value: float,
+        max_value: float,
+        fallback_filter: list[Mapping[str, Any] | FilterConfig],
+        available_filters: dict[str, type[Filter]] | None = None,
+        prefix: str = "",
+    ) -> None:
+        """Initialize the range reject filter.
+
+        Args:
+            min_value: Minimum valid value (inclusive).
+            max_value: Maximum valid value (inclusive).
+            fallback_filter:
+                List of filter configurations (dict or `FilterConfig`) to apply
+                to out-of-range values. These are concatenated in order using
+                `create_concat_filter()`.
+            available_filters: Optional filter registry.
+            prefix: Optional filter name prefix.
+
+        Raises:
+            ValueError: If `min_value >= max_value`.
+        """
+        if min_value >= max_value:
+            raise ValueError("min_value must be < max_value")
+
+        super().__init__(prefix=prefix)
+
+        if available_filters is None:
+            available_filters = AVAILABLE_FILTERS
+
+        self.min_value = float(min_value)
+        self.max_value = float(max_value)
+        self.midpoint = (self.min_value + self.max_value) * 0.5
+
+        fallback_cfgs = [
+            fc if isinstance(fc, FilterConfig) else FilterConfig.from_config(fc)
+            for fc in fallback_filter
+        ]
+
+        self.fallback = create_concat_filter(
+            fallback_cfgs,
+            available_filters=available_filters,
+        )
+
+        self._last_valid: Array | None = None
+
+    def step(self, data: Array) -> Array:
+        xp = self._xp(data)
+
+        valid = xp.logical_and(
+            data >= self.min_value,
+            data <= self.max_value,
+        )
+
+        # Always update fallback state
+        if self._last_valid is None:
+            self._last_valid = xp.where(valid, data, self.midpoint)
+
+        safe_data = xp.where(valid, data, self._last_valid)
+        fallback_value = self.fallback.step(safe_data)
+        self._last_valid = xp.where(valid, data, self._last_valid)
+
+        # Replace only invalid entries
+        return xp.where(valid, data, fallback_value)
+
+    def reset(self) -> None:
+        super().reset()
+        self.fallback.reset()
+        self._last_valid = None
+
+    def _name(self) -> str:
+        return (
+            f"RangeRejectFilter("
+            f"{self.min_value},{self.max_value},"
+            f"fallback={self.fallback.name})"
+        )
+
+
 class ConcatFilter(Filter):
     """Apply multiple filters in sequence."""
 
@@ -634,6 +716,7 @@ AVAILABLE_FILTERS: dict[str, type[Filter]] = {
     "MedianFilter": MedianFilter,
     "QuantizationFilter": QuantizationFilter,
     "ScaleFilter": ScaleFilter,
+    "RangeRejectFilter": RangeRejectFilter,
 }
 """Registry mapping filter type names to filter classes.
 
