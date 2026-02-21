@@ -140,6 +140,10 @@ class Filter(ABC):
     Filters are callable objects that transform an input array into an output
     array, potentially using internal state (e.g., moving averages).
 
+    Right now the filters are not jittable due to internal state.
+    There is an issue connected to make the state a optional input.
+    https://github.com/antonioterpin/goggles/issues/120
+
     Subclasses must implement:
     - `step(data)`: apply one filtering step and return filtered array.
     - `reset()`: reset internal state.
@@ -637,6 +641,15 @@ class RangeRejectFilter(_BackendAware):
         self._last_valid: Array | None = None
 
     def step(self, data: Array) -> Array:
+        """Identify out-of-range values and replace them.
+
+        Args:
+            data: Input array.
+
+        Returns:
+            Array where out-of-range values have been replaced
+            by the fallback filter output.
+        """
         xp = self._xp(data)
 
         valid = xp.logical_and(
@@ -664,6 +677,121 @@ class RangeRejectFilter(_BackendAware):
         return (
             f"RangeRejectFilter("
             f"{self.min_value},{self.max_value},"
+            f"fallback={self.fallback.name})"
+        )
+
+
+class StdRejectFilter(_WindowBufferFilter):
+    """Replace outliers using a fallback filter.
+
+    Per element (index), a value is considered valid if:
+        abs(x_t - mean(x_{t-N:t-1})) <= std_factor * std(x_{t-N:t-1})
+
+    where statistics are computed over the last `window_size` accepted samples
+    for that element.
+    """
+
+    def __init__(
+        self,
+        std_factor: float,
+        window_size: int,
+        fallback_filter: list[Mapping[str, Any] | FilterConfig],
+        available_filters: dict[str, type[Filter]] | None = None,
+        prefix: str = "",
+    ) -> None:
+        """Initialize the std-based reject filter.
+
+        Args:
+            std_factor: Outlier threshold multiplier for standard deviation.
+            window_size: Number of past samples used to estimate mean/std.
+            fallback_filter:
+                List of filter configurations (dict or `FilterConfig`) to apply
+                to outlier values. These are concatenated in order using
+                `create_concat_filter()`.
+            available_filters: Optional filter registry.
+            prefix: Optional filter name prefix.
+
+        Raises:
+            ValueError: If `std_factor <= 0`.
+        """
+        if std_factor <= 0:
+            raise ValueError("std_factor must be > 0")
+
+        super().__init__(window_size=window_size, prefix=prefix)
+
+        if available_filters is None:
+            available_filters = AVAILABLE_FILTERS
+
+        self.std_factor = float(std_factor)
+
+        fallback_cfgs = [
+            fc if isinstance(fc, FilterConfig) else FilterConfig.from_config(fc)
+            for fc in fallback_filter
+        ]
+
+        self.fallback = create_concat_filter(
+            fallback_cfgs,
+            available_filters=available_filters,
+        )
+
+        self._last_valid: Array | None = None
+
+    def step(self, data: Array) -> Array:
+        """Identify outliers and replace them using the fallback filter.
+
+        Args:
+            data: Input array.
+
+        Returns:
+            Array where outliers have been replaced
+            by the fallback filter output.
+        """
+        xp = self._xp(data)
+
+        # For the initial `window_size` steps, we don't have enough history to
+        # compute valid statistics. In this case, we consider all values valid
+        # and just update the fallback state with the raw data.
+        if self.buffer is None or self.n_seen < self.window_size:
+            valid = xp.ones_like(data, dtype=bool)
+            self.fallback.step(
+                data
+            )  # update fallback state with initial values
+            self._push(data)
+            return data
+
+        buf = self.buffer
+        valid_len = min(self.n_seen, self.window_size)
+        hist = buf[:valid_len]
+        mean = xp.mean(hist, axis=0)
+        std = xp.std(hist, axis=0)
+        valid = xp.abs(data - mean) <= self.std_factor * std
+
+        if self._last_valid is None:
+            self._last_valid = mean
+        safe_data = xp.where(valid, data, self._last_valid)
+
+        fallback_value = self.fallback.step(safe_data)
+        self._last_valid = xp.where(valid, data, fallback_value)
+
+        # For typing
+        assert self._last_valid is not None, "Last valid should be initialized"
+
+        # Prevent std collapse
+        if xp.any(valid):
+            self._push(self._last_valid)
+
+        return self._last_valid
+
+    def reset(self) -> None:
+        super().reset()
+        self.fallback.reset()
+        self._last_valid = None
+
+    def _name(self) -> str:
+        return (
+            f"StdRejectFilter("
+            f"std_factor={self.std_factor},"
+            f"window_size={self.window_size},"
             f"fallback={self.fallback.name})"
         )
 
@@ -717,6 +845,7 @@ AVAILABLE_FILTERS: dict[str, type[Filter]] = {
     "QuantizationFilter": QuantizationFilter,
     "ScaleFilter": ScaleFilter,
     "RangeRejectFilter": RangeRejectFilter,
+    "StdRejectFilter": StdRejectFilter,
 }
 """Registry mapping filter type names to filter classes.
 
