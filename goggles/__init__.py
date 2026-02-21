@@ -1201,6 +1201,7 @@ def finish(timeout: float | None = None) -> None:
             If None, uses ``GOGGLES_SHUTDOWN_TIMEOUT`` (default: 5.0s).
             Set to 0 or a negative value to wait indefinitely.
     """
+    time.sleep(3)
     bus = get_bus()
     if timeout is None:
         timeout = float(os.getenv("GOGGLES_SHUTDOWN_TIMEOUT", "5.0"))
