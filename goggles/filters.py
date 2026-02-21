@@ -366,7 +366,6 @@ class _WindowBufferFilter(_BackendAware):
         super().__init__(prefix=prefix)
         self.window_size = window_size
         self.buffer: Array | None = None
-        self.index: int = 0
         self.n_seen: int = 0
 
     def _push(self, data: Array) -> tuple[ModuleType, int]:
@@ -386,6 +385,7 @@ class _WindowBufferFilter(_BackendAware):
             self.buffer = xp.zeros(
                 (self.window_size, *data.shape), dtype=data.dtype
             )
+            self.index: int = 0
 
         # buffer is guaranteed to be non-None here
         assert self.buffer is not None, "Buffer should be initialized"
