@@ -73,8 +73,79 @@ logger.video(rgba_video, name="Random RGBA Video", fps=5, step=100)
 artifact = np.random.rand(100, 100, 3)
 logger.artifact(artifact, name="Random Artifact", step=100)
 
+
+def make_lamb_oseen_vortices(
+    H: int,
+    W: int,
+    vortices: list[tuple[float, float, float, float]],
+    domain: tuple[float, float, float, float] = (-1.0, 1.0, -1.0, 1.0),
+    uniform: tuple[float, float] = (0.0, 0.0),
+) -> np.ndarray:
+    """Build a 2D incompressible flow from Lamb-Oseen vortices.
+
+    Args:
+        H: Height of the output vector field.
+        W: Width of the output vector field.
+        vortices: List of tuples (x0, y0, Gamma, sigma) defining the position,
+            circulation strength, and core size of each vortex.
+        domain:
+            (xmin, xmax, ymin, ymax) defining the spatial extent of the field.
+        uniform: (u, v) uniform flow component to add to the field.
+
+    Returns:
+        A (H, W, 2) array containing the (u, v) vector field.
+    """
+    xmin, xmax, ymin, ymax = domain
+    y = np.linspace(ymin, ymax, H, dtype=np.float32)
+    x = np.linspace(xmin, xmax, W, dtype=np.float32)
+    X, Y = np.meshgrid(x, y)
+
+    u = np.full((H, W), uniform[0], dtype=np.float32)
+    v = np.full((H, W), uniform[1], dtype=np.float32)
+
+    eps = 1e-6
+    for x0, y0, Gamma, sigma in vortices:
+        dx = X - x0
+        dy = Y - y0
+        r2 = dx * dx + dy * dy
+        r = np.sqrt(r2) + eps
+        v_theta = (
+            (Gamma / (2.0 * np.pi))
+            * (1.0 - np.exp(-r2 / (2.0 * sigma * sigma)))
+            / r
+        )
+        u += -dy * (v_theta / r)
+        v += dx * (v_theta / r)
+
+    return np.stack([u, v], axis=-1)
+
+
+# Vector field logging to W&B
+VF_H, VF_W = 128, 128
+vortices = [
+    (-0.4, 0.0, +5.0, 0.15),
+    (+0.4, 0.0, -5.0, 0.15),
+]
+dummy_vector_field = make_lamb_oseen_vortices(
+    VF_H, VF_W, vortices, uniform=(0.2, 0.0)
+)
+
+logger.vector_field(
+    dummy_vector_field,
+    name="lamb_oseen_dipole_magnitude",
+    mode="magnitude",
+    step=101,
+)
+logger.vector_field(
+    dummy_vector_field,
+    name="lamb_oseen_dipole_vorticity",
+    mode="vorticity",
+    add_colorbar=True,
+    step=102,
+)
+
 # Add extra fields to any metric logged to be used as x-axis in W&B
-for i in range(101, 151):
+for i in range(102, 152):
     logger.scalar(
         "loss",
         150 - i,
@@ -92,12 +163,12 @@ for i in range(101, 151):
 
 # Log a static histogram (that does not change over time)
 data = np.random.randn(1000)
-logger.histogram(data, name="Random Values Histogram", static=True, step=151)
+logger.histogram(data, name="Random Values Histogram", static=True, step=152)
 
 # Or a dynamic histogram (that changes over time)
 for i in range(10):
     data = np.random.randn(1000) + i  # Shift mean over time
-    logger.histogram(data, name="Dynamic Random Values Histogram", step=151 + i)
+    logger.histogram(data, name="Dynamic Random Values Histogram", step=152 + i)
 
 time.sleep(2)
 # When using asynchronous logging (like wandb), make sure to finish

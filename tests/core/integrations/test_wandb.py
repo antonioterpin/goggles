@@ -2,6 +2,7 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 import goggles._core.integrations.wandb as wandb_module
@@ -53,7 +54,14 @@ def test_open_idempotent(mock_wandb):
 
 def test_can_handle_supported_kinds():
     h = WandBHandler()
-    for kind in ["metric", "image", "video", "artifact"]:
+    for kind in [
+        "metric",
+        "image",
+        "video",
+        "artifact",
+        "vector_field",
+        "histogram",
+    ]:
         assert h.can_handle(kind), f"WandBHandler should handle '{kind}' events"
     assert not h.can_handle("log"), (
         "WandBHandler should not handle 'log' events by default"
@@ -88,3 +96,69 @@ def test_get_or_create_run_creates_new(mock_wandb):
     assert h._runs["scope1"] == run, (
         "Run should be cached under the given scope"
     )
+
+
+def test_handle_vector_field_logs_image(mock_wandb, monkeypatch):
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="vector_field",
+        scope="global",
+        payload=np.zeros((16, 16, 2), dtype=np.float32),
+        step=3,
+        extra={
+            "name": "flow",
+            "mode": "vorticity",
+            "add_colorbar": True,
+            "tag": "viz",
+        },
+    )
+
+    mocked_image = np.zeros((32, 32, 3), dtype=np.uint8)
+    render_mock = MagicMock(return_value=mocked_image)
+    monkeypatch.setattr(
+        wandb_module, "create_numpy_vector_field_visualization", render_mock
+    )
+
+    h.handle(event)
+
+    run = mock_wandb.init.return_value
+    render_mock.assert_called_once_with(
+        event.payload,
+        mode="vorticity",
+        add_colorbar=True,
+    )
+    mock_wandb.Image.assert_called_once_with(mocked_image)
+    run.log.assert_called_once()
+    logged_payload = run.log.call_args[0][0]
+    assert "flow" in logged_payload, (
+        "Logged payload should contain the field name as key"
+    )
+    assert logged_payload["tag"] == "viz", (
+        "Logged payload should include extra fields"
+    )
+    assert run.log.call_args.kwargs["step"] == 3, (
+        "Logged payload should include the event step"
+    )
+
+
+def test_handle_vector_field_unknown_mode_warns_and_skips(mock_wandb):
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="vector_field",
+        scope="global",
+        payload=np.zeros((16, 16, 2), dtype=np.float32),
+        step=0,
+        extra={"mode": "unknown"},
+    )
+
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(event)
+    finally:
+        h._logger.removeHandler(collector)
+
+    assert any(
+        "unknown vector field visualization mode" in m.lower() for m in messages
+    ), "Should log a warning about the unknown visualization mode"
+    run = mock_wandb.init.return_value
+    run.log.assert_not_called()
