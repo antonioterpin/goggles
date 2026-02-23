@@ -1,5 +1,6 @@
 """Media utilities for saving images and videos from numpy arrays."""
 
+import io
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
@@ -224,91 +225,19 @@ def save_numpy_vector_field_visualization(
         arrow_stride: Stride for downsampling arrows (every Nth point).
         dpi: Resolution of the output image.
         add_colorbar: Whether to include a colorbar.
-
-    Raises:
-        ValueError: If `mode` is invalid or input shape is incorrect.
     """
     # Store original backend to restore later
     original_backend = matplotlib.get_backend()
     matplotlib.use("Agg")
 
     try:
-        H = vector_field.shape[0]
-        W = vector_field.shape[1]
-
-        # Create figure that matches pixel aspect; keep margins zero by default
-        fig, ax = plt.subplots(figsize=(W / 50, H / 50), dpi=dpi)
-        ax.set_aspect("equal")
-
-        # Compute scalar field and arrow color based on the selected mode
-        if mode == "magnitude":
-            scalar_field = np.linalg.norm(vector_field, axis=-1)
-            cmap = plt.get_cmap("viridis")
-            arrow_color = "white"
-        elif mode == "vorticity":
-            # Compute vorticity (curl) of the vector field: dVx/dy - dVy/dx
-            dy = np.gradient(vector_field[..., 0], axis=0)
-            dx = np.gradient(vector_field[..., 1], axis=1)
-            scalar_field = dx - dy
-            cmap = plt.get_cmap("RdBu_r")
-            arrow_color = "black"
-        else:
-            raise ValueError("mode must be 'magnitude' or 'vorticity'")
-
-        # Display scalar field as background
-        im = ax.imshow(
-            scalar_field,
-            cmap=cmap,
-            origin="lower",
-            extent=(0, W, 0, H),
-            interpolation="bilinear",
+        fig, bbox_setting, pad_setting = _build_vector_field_figure(
+            vector_field=vector_field,
+            mode=mode,
+            arrow_stride=arrow_stride,
+            dpi=dpi,
+            add_colorbar=add_colorbar,
         )
-
-        # Arrow grid
-        y_coords, x_coords = np.mgrid[0:H:arrow_stride, 0:W:arrow_stride]
-        u_sampled = vector_field[::arrow_stride, ::arrow_stride, 0]
-        v_sampled = vector_field[::arrow_stride, ::arrow_stride, 1]
-
-        # Plot arrows
-        ax.quiver(
-            x_coords,
-            y_coords,
-            u_sampled,
-            v_sampled,
-            color=arrow_color,
-            alpha=0.9,
-            scale_units="xy",
-            scale=1,
-            width=0.002,
-            headwidth=4,
-            headlength=5,
-            headaxislength=4.5,
-            linewidth=0.5,
-            edgecolor="none",
-        )
-
-        # Remove axes and ticks
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_frame_on(False)
-
-        # (1) Colorbar exactly same height as the axes
-        if add_colorbar:
-            divider = make_axes_locatable(ax)
-            # size can be tweaked; "3%" is a nice thin bar, pad is the gap
-            cax = divider.append_axes("right", size="3%", pad=0.02)
-            cb = fig.colorbar(im, cax=cax)
-            cb.ax.tick_params(length=2)
-
-            # Leave a tiny margin so ticks/labels aren't clipped
-            fig.subplots_adjust(left=0.0, right=0.98, bottom=0.0, top=1.0)
-            bbox_setting = "tight"
-            pad_setting = 0.02
-        else:
-            # (2) No colorbar: strip all outer boundaries/margins
-            fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
-            bbox_setting = "tight"
-            pad_setting = 0.0
 
         # Save
         dir.mkdir(parents=True, exist_ok=True)
@@ -325,6 +254,165 @@ def save_numpy_vector_field_visualization(
     finally:
         # Restore original matplotlib backend
         matplotlib.use(original_backend)
+
+
+def create_numpy_vector_field_visualization(
+    vector_field: np.ndarray,
+    mode: Literal["vorticity", "magnitude"] = "magnitude",
+    arrow_stride: int = 8,
+    dpi: int = 300,
+    add_colorbar: bool = True,
+) -> np.ndarray:
+    """Create a vector field visualization as an RGB NumPy image.
+
+    Args:
+        vector_field: Input vector field of shape (H, W, 2).
+        mode: Visualization mode.
+        arrow_stride: Stride for downsampling arrows (every Nth point).
+        dpi: Resolution used by matplotlib while rendering.
+        add_colorbar: Whether to include a colorbar.
+
+    Returns:
+        Rendered image as a uint8 array with shape (H, W, 3).
+    """
+    # Store original backend to restore later
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+
+    try:
+        fig, bbox_setting, pad_setting = _build_vector_field_figure(
+            vector_field=vector_field,
+            mode=mode,
+            arrow_stride=arrow_stride,
+            dpi=dpi,
+            add_colorbar=add_colorbar,
+        )
+
+        buf = io.BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=dpi,
+            bbox_inches=bbox_setting,  # "tight"
+            pad_inches=pad_setting,  # your 0.02
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+        buf.seek(0)
+        rgba = imageio.imread(buf)  # (H,W,4) uint8 RGBA
+
+        image = np.ascontiguousarray(rgba[..., :3])
+        return image
+
+    finally:
+        # Restore original matplotlib backend
+        matplotlib.use(original_backend)
+
+
+def _build_vector_field_figure(
+    vector_field: np.ndarray,
+    mode: Literal["vorticity", "magnitude"],
+    arrow_stride: int,
+    dpi: int,
+    add_colorbar: bool,
+) -> tuple[Any, str, float]:
+    """Build a matplotlib figure visualizing a 2D vector field.
+
+    Args:
+        vector_field: Input vector field of shape (H, W, 2).
+        mode: Visualization mode.
+        arrow_stride: Stride for downsampling arrows (every Nth point).
+        dpi: Resolution used by matplotlib while rendering.
+        add_colorbar: Whether to include a colorbar.
+
+    Returns:
+        Tuple of (figure, bbox_setting, pad_setting) where:
+        - figure: The matplotlib figure object.
+        - bbox_setting: Value for `bbox_inches` to use when saving.
+        - pad_setting: Value for `pad_inches` to use when saving.
+
+    Raises:
+        ValueError: If `mode` is invalid or input shape is incorrect.
+    """
+    H = vector_field.shape[0]
+    W = vector_field.shape[1]
+
+    # Create figure that matches pixel aspect; keep margins zero by default
+    fig, ax = plt.subplots(figsize=(W / 50, H / 50), dpi=dpi)
+    ax.set_aspect("equal")
+
+    # Compute scalar field and arrow color based on the selected mode
+    if mode == "magnitude":
+        scalar_field = np.linalg.norm(vector_field, axis=-1)
+        cmap = plt.get_cmap("viridis")
+        arrow_color = "white"
+    elif mode == "vorticity":
+        # Compute vorticity (curl) of the vector field: dVx/dy - dVy/dx
+        dy = np.gradient(vector_field[..., 0], axis=0)
+        dx = np.gradient(vector_field[..., 1], axis=1)
+        scalar_field = dx - dy
+        cmap = plt.get_cmap("RdBu_r")
+        arrow_color = "black"
+    else:
+        raise ValueError("mode must be 'magnitude' or 'vorticity'")
+
+    # Display scalar field as background
+    im = ax.imshow(
+        scalar_field,
+        cmap=cmap,
+        origin="lower",
+        extent=(0, W, 0, H),
+        interpolation="bilinear",
+    )
+
+    # Arrow grid
+    y_coords, x_coords = np.mgrid[0:H:arrow_stride, 0:W:arrow_stride]
+    u_sampled = vector_field[::arrow_stride, ::arrow_stride, 0]
+    v_sampled = vector_field[::arrow_stride, ::arrow_stride, 1]
+
+    # Plot arrows
+    ax.quiver(
+        x_coords,
+        y_coords,
+        u_sampled,
+        v_sampled,
+        color=arrow_color,
+        alpha=0.9,
+        scale_units="xy",
+        scale=1,
+        width=0.002,
+        headwidth=4,
+        headlength=5,
+        headaxislength=4.5,
+        linewidth=0.5,
+        edgecolor="none",
+    )
+
+    # Remove axes and ticks
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_frame_on(False)
+
+    # (1) Colorbar exactly same height as the axes
+    if add_colorbar:
+        divider = make_axes_locatable(ax)
+        # size can be tweaked; "3%" is a nice thin bar, pad is the gap
+        cax = divider.append_axes("right", size="3%", pad=0.02)
+        cb = fig.colorbar(im, cax=cax)
+        cb.ax.tick_params(length=2)
+
+        # Leave a tiny margin so ticks/labels aren't clipped
+        fig.subplots_adjust(left=0.0, right=0.98, bottom=0.0, top=1.0)
+        bbox_setting = "tight"
+        pad_setting = 0.02
+    else:
+        # (2) No colorbar: strip all outer boundaries/margins
+        fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+        bbox_setting = "tight"
+        pad_setting = 0.0
+
+    return fig, bbox_setting, pad_setting
 
 
 class NumpyDumper(yaml.SafeDumper):
