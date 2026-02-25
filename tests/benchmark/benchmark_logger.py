@@ -27,6 +27,10 @@ Example:
     GOGGLES_PORT=8374 uv run python \
         -m tests.benchmark.benchmark_logger \
         --log-type print --num-logs 10000
+
+    GOGGLES_PORT=8374 uv run python \
+        -m tests.benchmark.benchmark_logger \
+        --log-type scalar --num-logs 10000 --delay 0.001
 """
 
 import argparse
@@ -102,6 +106,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional delay in seconds between consecutive logging calls "
+            "(default: 0.0)"
+        ),
+    )
     args = parser.parse_args()
 
     # Setup WandB logging
@@ -123,6 +136,7 @@ if __name__ == "__main__":
     logger.info(f"Log type: {args.log_type}")
     logger.info(f"Number of logging calls: {args.num_logs}")
     logger.info(f"Verbose mode: {args.verbose}")
+    logger.info(f"Delay between calls: {args.delay:.6f} s")
     if args.log_type == "image":
         logger.info(f"Image size: {args.image_size}x{args.image_size}")
     elif args.log_type == "video":
@@ -195,6 +209,9 @@ if __name__ == "__main__":
             log_time = (time.time() - start_log_time) * 1000  # Convert to ms
             logger_times.append(log_time)
 
+            if args.delay > 0:
+                time.sleep(args.delay)
+
             if args.verbose and step % 1000 == 0:
                 logger.info(
                     f"Step {step}/{args.num_logs} - Log time: {log_time:.6f} ms"
@@ -236,7 +253,7 @@ if __name__ == "__main__":
             logger.info("=== Logging all individual times ===")
             for idx, log_time in enumerate(logger_times):
                 logger.scalar(
-                    name="logger_call_time",
+                    name="logger_call_time_ms",
                     value=log_time,
                     step=idx + args.num_logs,
                     custom_step={

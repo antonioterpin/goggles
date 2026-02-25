@@ -31,22 +31,19 @@ from goggles import (
 class GogglesClient:
     """Client for the Goggles EventBus.
 
-    Wraps a portal.Client to provide event emission with automatic
-    future management to prevent memory leaks.
+    Wraps a portal.Client to provide event emission.
 
     Attributes:
-        futures: List of pending futures from emitted events.
+        futures: Snapshot of futures currently managed by the underlying
+            portal client (auto-cleaned on completion).
     """
 
     _client: portal.Client
-    futures: list[Future[Any]]
-    _pruning_threshold: int
 
     def __init__(
         self,
         addr: str = f"{GOGGLES_HOST}:{GOGGLES_PORT}",
         name: str = f"EventBus-Client@{socket.gethostname()}",
-        pruning_threshold: int = 100,
         suppress_connectivity_logs: bool = GOGGLES_SUPPRESS_CONNECTIVITY_LOGS,
     ) -> None:
         """Initialize the client.
@@ -54,23 +51,34 @@ class GogglesClient:
         Args:
             addr: Address of the EventBus server.
             name: Name of this client.
-            pruning_threshold: Maximum number of futures to track before
-                triggering cleanup of completed ones; cleanup occurs when the
-                number of futures exceeds this threshold. Defaults to 100.
             suppress_connectivity_logs: If True, suppress connectivity logs.
 
         """
-        self.futures = []
-        self._pruning_threshold = pruning_threshold
-        # Increase maxinflight to avoid stalling the main thread on
-        # high-throughput logging.
+        # The underlying portal.Client() already manages futures lifecycle
+        # automatically: it stores them in a dict keyed by request number,
+        # and removes them when responses are received.
         self._client = portal.Client(
             addr=addr,
             name=name,
-            maxinflight=1024,
-            max_send_queue=1024,
+            maxinflight=2048,
+            max_recv_queue=2048,
+            max_send_queue=2048,
             logging=not suppress_connectivity_logs,
         )
+
+    @property
+    def futures(self) -> list[Future[Any]]:
+        """Return a snapshot of pending futures from the portal client.
+
+        The portal client internally manages a dict of futures keyed by
+        request number. This property extracts the future values for
+        introspection. Futures are automatically removed when their
+        corresponding requests complete.
+
+        Returns:
+            List of Future objects currently tracked by the portal client.
+        """
+        return list(self._client.futures.values())
 
     def emit(self, event: Event) -> Future[Any]:
         """Emit an event via the EventBus.
@@ -81,17 +89,13 @@ class GogglesClient:
         Returns:
             A Future that will complete when the event is delivered.
         """
-        # Periodic cleanup of finished futures to avoid memory leak
-        if len(self.futures) > self._pruning_threshold:
-            self.futures = [f for f in self.futures if not f.done()]
-
-        future = cast(Future[Any], self._client.emit(event.to_dict()))
-        self.futures.append(future)
-        # Future type is not fully specified in portal.Client.
-        return future
+        return cast(Future[Any], self._client.emit(event.to_dict()))
 
     def shutdown(self, timeout: float | None = None) -> Future[Any]:
         """Shutdown the EventBus client.
+
+        Waits for pending futures to complete (optional timeout), then
+        shuts down the portal client.
 
         Args:
             timeout: Optional timeout in seconds to wait for pending futures
@@ -105,6 +109,7 @@ class GogglesClient:
         if timeout is not None and timeout > 0:
             deadline = time.monotonic() + timeout
 
+        # Wait for pending futures tracked by portal client.
         for future in self.futures:
             try:
                 if deadline is None:
@@ -120,13 +125,6 @@ class GogglesClient:
                 # Ignore failed/dropped futures during shutdown.
                 pass
 
-        # Keep only unfinished futures (if any) for introspection after
-        # shutdown.
-        self.futures = [
-            future
-            for future in self.futures
-            if not getattr(future, "done", lambda: False)()
-        ]
         return cast(Future[Any], self._client.shutdown())
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
