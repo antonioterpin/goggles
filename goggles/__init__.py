@@ -50,7 +50,7 @@ from typing import (
     runtime_checkable,
 )
 
-from portal import client_socket, packlib
+from portal import client_socket, packlib, setup
 from portal.buffers import RecvBuffer, SendBuffer
 from portal.client import Client, Future
 from portal.client_socket import ClientSocket
@@ -70,6 +70,19 @@ from .types import Event, Image, Kind, Metrics, Vector, VectorField, Video
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+# Change portal defaults. Can affect other portal users in the same process.
+setup(
+    clientkw={
+        "maxinflight": 2048,
+        "max_recv_queue": 2048,
+        "max_send_queue": 2048,
+    },
+    serverkw={
+        "max_recv_queue": 4096,
+        "max_send_queue": 4096,
+    },
+)
 
 
 def timeit(

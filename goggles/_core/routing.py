@@ -67,8 +67,6 @@ class GogglesClient:
         self._client = portal.Client(
             addr=addr,
             name=name,
-            maxinflight=1024,
-            max_send_queue=1024,
             logging=not suppress_connectivity_logs,
         )
 
