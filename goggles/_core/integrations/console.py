@@ -1,25 +1,19 @@
-"""Console-based log handler for EventBus integration."""
+"""Console handler config container (no-op).
+
+In the simplified goggles branch, handlers are inert objects that only store
+their configuration. `gg.attach(...)` will read these values and set global
+defaults used by the simplified loggers.
+"""
 
 import logging
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Literal
 
 from typing_extensions import Self
 
-from goggles.types import Event, Kind
-
 
 class ConsoleHandler:
-    """Handle 'log' events and output them to console using Python's logging.
-
-    Attributes:
-        name: Stable handler identifier.
-        capabilities: Supported event kinds (only {"log"}).
-
-    """
-
-    name: str = "goggles.console"
-    capabilities: ClassVar[frozenset[Kind]] = frozenset({"log"})
+    """No-op console handler that only stores configuration."""
 
     def __init__(
         self,
@@ -29,97 +23,26 @@ class ConsoleHandler:
         path_style: Literal["absolute", "relative"] = "relative",
         project_root: Path | None = None,
     ) -> None:
-        """Initialize the ConsoleHandler.
+        """Initialize the console handler.
 
         Args:
-            name: Stable handler identifier.
-            level: Minimum log level to handle.
-            path_style: Whether to print absolute
-                or relative file paths. Defaults to "relative".
-            project_root: Root path used for relative paths.
-
+            name: The name of the console handler.
+            level: The logging level for the console handler.
+            path_style: Whether to display absolute or relative file paths in log messages.
+            project_root: The root directory to use for relative paths (if path_style is "relative").
         """
         self.name = name
         self.level = int(level)
         self.path_style = path_style
         self.project_root = Path(project_root or Path.cwd())
-        self._logger: logging.Logger
-
-    def can_handle(self, kind: Kind) -> bool:
-        """Return whether this handler can process the given kind.
-
-        Args:
-            kind: The event kind to check.
-
-        Returns:
-            True if the handler can process the kind, False otherwise.
-        """
-        return kind in self.capabilities
-
-    def handle(self, event: Event) -> None:
-        """Forward a log event to Python's logging system.
-
-        Args:
-            event: The log event to handle.
-
-        Raises:
-            ValueError:
-                If the event kind is not "log"
-                or if the event payload is not a string.
-        """
-        if event.kind != "log":
-            raise ValueError(f"Unsupported event kind '{event.kind}'")
-
-        level = int(event.level) if event.level else logging.NOTSET
-        message = str(event.payload)
-
-        # Derive display path
-        path = Path(event.filepath)
-        if self.path_style == "relative":
-            try:
-                path = path.relative_to(self.project_root)
-            except ValueError:
-                pass  # fallback to absolute if outside root
-        path_str = f"{path}:{event.lineno}"
-
-        # ANSI color codes for different log levels
-        level_name = logging.getLevelName(level)
-        color_codes = {
-            "DEBUG": "\033[36m",  # Cyan
-            "INFO": "\033[34m",  # Blue
-            "WARNING": "\033[33m",  # Yellow
-            "ERROR": "\033[31m",  # Red
-            "CRITICAL": "\033[91m",  # Bright Red
-        }
-        reset_code = "\033[0m"  # Reset color
-
-        color = color_codes.get(level_name, "")
-        colored_message = f"{color}{path_str} - {message}{reset_code}"
-
-        # We manually construct prefix since stacklevel=3 may mislead
-        self._logger.log(level, colored_message, stacklevel=2)
 
     def open(self) -> None:
-        """Initialize the handler (create logger and formatter)."""
-        self._logger = logging.getLogger(self.name)
-        # Ensure that Goggles logs are not propagated to the root logger
-        # to avoid duplicates
-        self._logger.propagate = False
-        if not self._logger.handlers:
-            handler = logging.StreamHandler()
-            handler.setFormatter(
-                logging.Formatter(
-                    "%(asctime)s - %(levelname)s - %(message)s",
-                    datefmt="%Y-%m-%d %H:%M:%S",
-                )
-            )
-            self._logger.addHandler(handler)
-        self._logger.setLevel(self.level or logging.INFO)
+        """Open the console handler. No-op for this implementation."""
+        return None
 
     def close(self) -> None:
-        """Flush and release console handler resources."""
-        for handler in self._logger.handlers:
-            handler.flush()
+        """Close the console handler. No-op for this implementation."""
+        return None
 
     def to_dict(self) -> dict:
         """Serialize the handler for later reconstruction.

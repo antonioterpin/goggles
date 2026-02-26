@@ -1,43 +1,37 @@
-"""Internal logger implementation.
+"""Internal logger implementation."""
 
-WARNING: This module is an internal implementation detail of Goggles'
-logging system. It is not part of the public API.
-
-External code should not import from this module. Instead, depend on:
-  - `goggles.TextLogger`, `goggles.GogglesLogger` (protocol / interface), and
-  - `goggles.get_logger()` (factory returning a TextLogger/GogglesLogger).
-"""
-
+from __future__ import annotations
+import numpy as np
 import inspect
 import logging
-from typing import Any
+from typing import Any, Mapping, Sequence, cast, Literal
+from pathlib import Path
+from queue import Empty, Queue
+from threading import Event as ThreadEvent, Thread
 
-import numpy as np
-from typing_extensions import Self
+from goggles._core.config_simple import (
+    ConsoleConfig,
+    WandBConfig,
+    CONSOLE,
+    WANDB,
+)
 
 from goggles import GOGGLES_ASYNC, Event, GogglesLogger, TextLogger
 from goggles.types import Image, Metrics, Vector, VectorField, Video
+import weakref
+
+ACTIVE: weakref.WeakSet[CoreGogglesLogger] = weakref.WeakSet()
+Run = Any  # wandb.sdk.wandb_run.Run
 
 
 class CoreTextLogger(TextLogger):
-    """Internal concrete implementation of the TextLogger protocol.
-
-    This adapter wraps a `logging.Logger` and maintains a dictionary of
-    persistent, structured fields ("bound" context). Each log call merges
-    the bound context with per-call extras before delegating to the underlying
-    logger.
-
-    Notes:
-        * This class is **internal** to Goggles. Do not rely on its presence,
-          constructor, or attributes from external code.
-        * External users should obtain a `TextLogger` via
-          `goggles.get_logger()` and program against the protocol.
-    """
+    """Internal concrete implementation of the TextLogger protocol."""
 
     def __init__(
         self,
         scope: str,
         name: str | None = None,
+        console_config: ConsoleConfig = CONSOLE,
         **to_bind: Any,
     ):
         """Initialize the CoreTextLogger.
@@ -45,52 +39,78 @@ class CoreTextLogger(TextLogger):
         Args:
             scope: Scope to bind the logger to (e.g., "global", "run", etc.).
             name: Optional name of the logger.
+            console_config: ConsoleConfig instance for console logging.
             **to_bind:
                 Optional initial persistent context to bind.
 
         """
-        # Importing here to avoid circular imports
-        from goggles._core.routing import get_bus  # noqa: PLC0415
-
         self.name = name
         self._scope = scope
         self._bound: dict[str, Any] = dict(**to_bind or {})
-        self._client = get_bus()
+        self.console_config = console_config
+        self.color_codes = {
+            "DEBUG": "\033[36m",  # Cyan
+            "INFO": "\033[34m",  # Blue
+            "WARNING": "\033[33m",  # Yellow
+            "ERROR": "\033[31m",  # Red
+            "CRITICAL": "\033[91m",  # Bright Red
+        }
+        self.reset_code = "\033[0m"  # Reset color
+        self._logger: logging.Logger | None = None
 
-    def bind(self, /, *, scope: str = "global", **fields: Any) -> Self:
-        """Return a new logger with `fields` merged into persistent context.
+    def open(self) -> None:
+        """Initialize the logger (create logger and formatter)."""
+        if not self.console_config.enabled:
+            return  # Don't initialize if console logging is disabled
+        if self._logger is not None:
+            return
 
-        This method does not mutate the current instance. It returns a new
-        adapter whose bound context is the shallow merge of the existing bound
-        dictionary and `fields`. Keys in `fields` overwrite existing keys.
+        logger = logging.getLogger(self.console_config.name)
+        logger.propagate = False
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s - %(levelname)s - %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            logger.addHandler(handler)
+        logger.setLevel(self.console_config.level or logging.INFO)
+        self._logger = logger
+
+    def _log(self, level: int, msg: str, filepath: str, lineno: int) -> None:
+        """Forward a log event to Python's logging system.
 
         Args:
-            scope: Scope to bind the new logger under (e.g., "global" or "run").
-            **fields: Key-value pairs to bind into the new logger's context.
-
-        Returns:
-            Self: A new adapter with the merged persistent context.
-
-        Examples:
-            >>> log = get_logger("goggles")  # via public API
-            >>> run_log = log.bind(scope="exp42", module="train")
-            >>> run_log.info("Initialized")
-
+            level: The logging level (e.g., logging.DEBUG).
+            msg: The message to log.
+            filepath: The file path where the log event originated.
+            lineno: The line number in the file where the log event originated.
         """
-        return self.__class__(
-            scope=scope,
-            name=self.name,
-            **{**self._bound, **fields},
-        )
+        if self._logger is None:
+            self.open()
 
-    def get_bound(self) -> dict[str, Any]:
-        """Get a copy of the current persistent bound context.
+        if self._logger is None:
+            return
 
-        Returns:
-            A shallow copy of the bound context dictionary.
+        # Derive display path
+        path = Path(filepath)
+        if self.console_config.path_style == "relative":
+            try:
+                path = path.relative_to(self.console_config.project_root)
+            except ValueError:
+                pass  # fallback to absolute if outside root
+        path_str = f"{path}:{lineno}"
 
-        """
-        return dict(self._bound)
+        # ANSI color codes for different log levels
+        level_name = logging.getLevelName(level)
+
+        color = self.color_codes.get(level_name, "")
+        colored_message = f"{color}{path_str} - {msg}{self.reset_code}"
+
+        # We manually construct prefix since stacklevel=3 may mislead
+        self._logger.log(level, colored_message, stacklevel=2)
 
     def debug(
         self,
@@ -113,21 +133,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
-            Event(
-                kind="log",
-                scope=self._scope,
-                payload=msg,
-                filepath=filepath,
-                lineno=lineno,
-                level=logging.DEBUG,
-                step=step,
-                time=time,
-                extra={**self._bound, **extra},
-            )
-        )
-        if not async_mode:
-            future.result()
+        self._log(logging.DEBUG, msg, filepath, lineno)
 
     def info(
         self,
@@ -150,22 +156,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
-            Event(
-                kind="log",
-                scope=self._scope,
-                payload=msg,
-                filepath=filepath,
-                lineno=lineno,
-                level=logging.INFO,
-                step=step,
-                time=time,
-                extra={**self._bound, **extra},
-            )
-        )
-
-        if not async_mode:
-            future.result()
+        self._log(logging.INFO, msg, filepath, lineno)
 
     def warning(
         self,
@@ -188,22 +179,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
-            Event(
-                kind="log",
-                scope=self._scope,
-                payload=msg,
-                filepath=filepath,
-                lineno=lineno,
-                level=logging.WARNING,
-                step=step,
-                time=time,
-                extra={**self._bound, **extra},
-            )
-        )
-
-        if not async_mode:
-            future.result()
+        self._log(logging.WARNING, msg, filepath, lineno)
 
     def error(
         self,
@@ -226,22 +202,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
-            Event(
-                kind="log",
-                scope=self._scope,
-                payload=msg,
-                level=logging.ERROR,
-                filepath=filepath,
-                lineno=lineno,
-                step=step,
-                time=time,
-                extra={**self._bound, **extra},
-            )
-        )
-
-        if not async_mode:
-            future.result()
+        self._log(logging.ERROR, msg, filepath, lineno)
 
     def critical(
         self,
@@ -264,22 +225,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
-            Event(
-                kind="log",
-                scope=self._scope,
-                payload=msg,
-                level=logging.CRITICAL,
-                filepath=filepath,
-                lineno=lineno,
-                step=step,
-                time=time,
-                extra={**self._bound, **extra},
-            )
-        )
-
-        if not async_mode:
-            future.result()
+        self._log(logging.CRITICAL, msg, filepath, lineno)
 
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
@@ -297,6 +243,396 @@ class CoreTextLogger(TextLogger):
 
 class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     """A GogglesLogger that is also a CoreTextLogger."""
+
+    def __init__(
+        self,
+        scope: str,
+        name: str | None = None,
+        console_config: ConsoleConfig = CONSOLE,
+        wandb_config: WandBConfig = WANDB,
+        **to_bind: Any,
+    ) -> None:
+        """Initialize logger and start a placeholder background worker.
+
+        Args:
+            scope: The scope of the logger.
+            name: The name of the logger.
+            console_config: The console configuration for this logger.
+            wandb_config: The W&B configuration for this logger.
+            **to_bind: 
+                Additional key-value pairs to bind to the logger's context.
+        """
+        CoreTextLogger.__init__(
+            self,
+            scope=scope,
+            name=name,
+            console_config=console_config,
+            **to_bind,
+        )
+        self.wandb_config = wandb_config
+        self._event_queue: Queue[Event | None] = Queue()
+        self._worker_stop = ThreadEvent()
+        self._worker = Thread(
+            target=self._worker_loop,
+            name="goggles-event-worker",
+            daemon=True,
+        )
+        self._worker.start()
+        ACTIVE.add(self)
+
+    def _wlog(self, level: int, msg: str, *args) -> None:
+        """Worker-safe logging method for internal use.
+
+        Args:
+            level: The logging level.
+            msg: The message to log.
+            *args: Arguments to format the message with.
+        """
+        try:
+            text = msg % args if args else msg
+        except Exception:
+            text = f"{msg} {args}"
+        self._log(level, text, "<wandb-worker>", 0)
+
+    def _worker_loop(self) -> None:
+        """W&B worker: mirrors the old WandBHandler.handle() switch.
+
+        Raises:
+            ValueError: If the event payload is invalid for its kind.
+        """
+        import wandb
+        from goggles.media import create_numpy_vector_field_visualization
+
+        self._wandb_run = None
+
+        while True:
+            try:
+                event = self._event_queue.get(timeout=0.1)
+            except Empty:
+                if self._worker_stop.is_set():
+                    break
+                continue
+
+            if event is None:
+                self._event_queue.task_done()
+                break
+
+            try:
+                if not self.wandb_config.enabled:
+                    # if wandb is disabled, just drop metric/media events
+                    continue
+
+                kind = getattr(event, "kind", None) or "metric"
+                step = getattr(event, "step", None)
+                payload = getattr(event, "payload", None)
+                extra = dict(getattr(event, "extra", {}) or {})
+                extra_config = extra.pop("config_wandb", {}) or {}
+
+                run = self._ensure_wandb_run(extra_config)
+                if run is None:
+                    continue
+
+                if kind == "metric":
+                    if not isinstance(payload, Mapping):
+                        raise ValueError(
+                            "Metric event payload must be a mapping of name→value."
+                        )
+                    payload = {
+                        k: v for k, v in payload.items() if v is not None
+                    }
+                    if not payload:
+                        self._wlog(
+                            logging.WARNING,
+                            "Skipping metric log with empty payload (scope=%s).",
+                            self._scope,
+                        )
+                        continue
+                    for k, v in extra.items():
+                        payload[k] = v
+                    run.log(payload, step=step)
+                    continue
+
+                if kind in {"image", "video"}:
+                    key_name = extra.pop("name", kind)
+                    items = (
+                        payload.items()
+                        if isinstance(payload, Mapping)
+                        else [(key_name, payload)]
+                    )
+
+                    logs = {}
+                    for name, value in items:
+                        if value is None:
+                            self._wlog(
+                                logging.WARNING,
+                                "Skipping %s '%s' with None payload (scope=%s).",
+                                kind,
+                                name,
+                                self._scope,
+                            )
+                            continue
+                        if kind == "image":
+                            logs[name] = wandb.Image(value)
+                        else:
+                            fps = int(extra.get("fps", 20))
+                            fmt = str(extra.get("format", "mp4"))
+                            if fmt not in {"mp4", "gif"}:
+                                self._wlog(
+                                    logging.WARNING,
+                                    "Unsupported video format '%s' for '%s'; "
+                                    "defaulting to 'mp4'.",
+                                    fmt,
+                                    name,
+                                )
+
+                                fmt = "mp4"
+                            new_value = self._prepare_video_for_wandb(value)
+                            logs[name] = wandb.Video(
+                                new_value, fps=fps, format=fmt
+                            )  # pyright: ignore[reportArgumentType]
+
+                    for k, v in extra.items():
+                        logs[k] = v
+                    if logs:
+                        run.log(logs, step=step)
+                    continue
+
+                if kind == "artifact":
+                    if not isinstance(payload, Mapping):
+                        self._wlog(
+                            logging.WARNING,
+                            "Artifact payload must be mapping; got %r",
+                            type(payload),
+                        )
+                        continue
+                    path = payload.get("path")
+                    name = payload.get("name", "artifact")
+                    art_type = payload.get("type", "misc")
+                    if not isinstance(path, str):
+                        self._wlog(
+                            logging.WARNING,
+                            "Artifact payload missing 'path' string; got %r",
+                            type(path),
+                        )
+                        continue
+                    artifact = wandb.Artifact(
+                        name=name, type=art_type, metadata=extra
+                    )
+                    artifact.add_file(path)
+                    run.log_artifact(artifact)
+                    continue
+
+                if kind == "histogram":
+                    name = extra.pop("name", "histogram")
+                    static = bool(extra.pop("static", False))
+                    num_bins = int(extra.pop("num_bins", extra.pop("bins", 64)))
+
+                    logs = {}
+                    try:
+                        if not isinstance(payload, (Sequence, np.ndarray)):
+                            self._wlog(
+                                logging.WARNING,
+                                "Invalid histogram payload for '%s' (scope=%s): "
+                                "must be a sequence or tuple.",
+                                name,
+                                self._scope,
+                            )
+                            continue
+
+                        if static:
+                            payload_list = list(payload)
+                            data = [[v] for v in payload_list]
+                            table = wandb.Table(data=data, columns=["values"])
+                            logs[name] = wandb.plot.histogram(
+                                table,
+                                "values",
+                                title="Histogram of Random Values",
+                            )
+                        else:
+                            logs[name] = wandb.Histogram(
+                                np_histogram=np.histogram(
+                                    payload, bins=num_bins
+                                )
+                            )
+                    except Exception as exc:
+                        self._wlog(
+                            logging.WARNING,
+                            f"Invalid histogram payload for '{name}' "
+                            f"(scope={self._scope}): {exc}",
+                        )
+                        continue
+
+                    for k, v in extra.items():
+                        logs[k] = v
+                    if logs:
+                        run.log(logs, step=step)
+                    continue
+
+                if kind == "vector_field":
+                    name = extra.pop("name", "vector_field")
+                    mode = str(extra.pop("mode", "magnitude"))
+                    add_colorbar = bool(extra.pop("add_colorbar", False))
+
+                    if mode not in {"vorticity", "magnitude"}:
+                        self._wlog(
+                            logging.WARNING,
+                            f"Unknown vector field visualization mode '{mode}'. "
+                            "Supported modes are: 'vorticity', 'magnitude'. "
+                            "The vector field visualization will not be sent to W&B.",
+                        )
+                        continue
+                    mode_literal = cast(Literal["vorticity", "magnitude"], mode)
+
+                    logs = {}
+                    items = (
+                        payload.items()
+                        if isinstance(payload, Mapping)
+                        else [(name, payload)]
+                    )
+                    for field_name, value in items:
+                        if value is None:
+                            self._wlog(
+                                logging.WARNING,
+                                f"Skipping vector field '{field_name}' with None "
+                                f"payload (scope={self._scope}).",
+                            )
+                            continue
+                        try:
+                            image = create_numpy_vector_field_visualization(
+                                value,
+                                mode=mode_literal,
+                                add_colorbar=add_colorbar,
+                            )
+                            logs[field_name] = wandb.Image(image)
+                        except Exception as exc:
+                            self._wlog(
+                                logging.WARNING,
+                                f"Invalid vector field payload for '{field_name}' "
+                                f"(scope={self._scope}): {exc}",
+                            )
+                            continue
+
+                    for k, v in extra.items():
+                        logs[k] = v
+                    if logs:
+                        run.log(logs, step=step)
+                    continue
+
+                # unsupported kinds: drop
+                self._wlog(
+                    logging.WARNING,
+                    "Dropping unsupported event kind '%s' (scope=%s).",
+                    kind,
+                    self._scope,
+                )
+                continue
+
+            except Exception as exc:
+                self._wlog(
+                    logging.ERROR,
+                    f"Error processing event in W&B worker (scope={self._scope}): {exc}",
+                )
+                continue
+            finally:
+                self._event_queue.task_done()
+
+        # shutdown: finish run if created
+        run = getattr(self, "_wandb_run", None)
+        if run is not None:
+            try:
+                run.finish()
+            except Exception:
+                pass
+        self._wandb_run = None
+
+    def _enqueue_event(self, event: Event) -> None:
+        """Enqueue an event for background processing.
+
+        Args:
+            event: The event to enqueue.
+        """
+        self._event_queue.put(event)
+
+    def close(self, timeout: float | None = None) -> None:
+        """Stop the placeholder worker thread.
+
+        Args:
+            timeout: Maximum time to wait for the worker thread to finish. If None, wait indefinitely.
+        """
+        if self._worker_stop.is_set():
+            return
+        self._event_queue.put(None)  # Sentinel to unblock the worker if waiting
+        self._worker_stop.set()
+        self._worker.join(timeout=timeout)
+
+    def _ensure_wandb_run(self, extra_config: dict) -> Any:
+        """Create the per-logger W&B run if needed.
+
+        Args:
+            extra_config:
+                Additional configuration to merge with the logger's WandBConfig when initializing
+
+        Returns:
+            The active W&B run, or None if W&B logging is disabled.
+        """
+        import wandb
+
+        if getattr(self, "_wandb_run", None) is not None:
+            return self._wandb_run
+
+        if not self.wandb_config.enabled:
+            return None
+
+        # Run name: base run_name if provided, else derive from logger name.
+        base = self.wandb_config.run_name
+        if self._scope == "global" and base:
+            run_name = base
+        else:
+            run_name = f"{base or 'run'}-{self._scope}"
+
+        cfg = dict(self.wandb_config.config or {})
+        cfg.update({"scope": self._scope})
+        cfg.update(extra_config or {})
+
+        self._wandb_run = wandb.init(
+            project=self.wandb_config.project,
+            entity=self.wandb_config.entity,
+            name=run_name,
+            group=self.wandb_config.group,
+            reinit=cast(
+                Literal[
+                    "default",
+                    "return_previous",
+                    "finish_previous",
+                    "create_new",
+                ],
+                self.wandb_config.reinit,
+            ),
+            config=cfg,
+        )
+        return self._wandb_run
+
+    def _prepare_video_for_wandb(self, value: np.ndarray) -> np.ndarray:
+        """Normalize video array to shape (B, F, 3, H, W) for W&B logging.
+
+        Args:
+            value: The input video array to prepare for W&B logging.
+
+        Returns:
+            A numpy array with shape (B, F, 3, H, W)
+        """
+        if value.ndim == 3:
+            value = value[:, None, :, :]
+        elif value.ndim not in (4, 5):
+            # keep behavior: log error and continue
+            self._wlog(logging.ERROR, f"Video has invalid shape {value.shape}")
+            return value
+
+        if value.ndim == 4 and value.shape[1] == 1:
+            value = np.repeat(value, 3, axis=1)
+        if value.ndim == 5 and value.shape[2] == 1:
+            value = np.repeat(value, 3, axis=2)
+        return value
 
     def push(
         self,
@@ -318,7 +654,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._enqueue_event(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -331,9 +667,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 extra={**self._bound, **extra},
             )
         )
-
-        if not async_mode:
-            future.result()
 
     def scalar(
         self,
@@ -357,7 +690,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._enqueue_event(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -370,9 +703,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 extra={**self._bound, **extra},
             )
         )
-
-        if not async_mode:
-            future.result()
 
     def image(
         self,
@@ -402,7 +732,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
         extra["format"] = format
-        future = self._client.emit(
+        self._enqueue_event(
             Event(
                 kind="image",
                 scope=self._scope,
@@ -415,9 +745,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 extra=extra,
             )
         )
-
-        if not async_mode:
-            future.result()
 
     def video(
         self,
@@ -456,7 +783,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         extra["fps"] = fps
         extra["format"] = format
 
-        future = self._client.emit(
+        self._enqueue_event(
             Event(
                 kind="video",
                 scope=self._scope,
@@ -469,9 +796,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 extra=extra,
             )
         )
-
-        if not async_mode:
-            future.result()
 
     def artifact(
         self,
@@ -502,7 +826,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             extra["name"] = name
         extra["format"] = format
 
-        future = self._client.emit(
+        self._enqueue_event(
             Event(
                 kind="artifact",
                 scope=self._scope,
@@ -515,9 +839,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 extra=extra,
             )
         )
-
-        if not async_mode:
-            future.result()
 
     def vector_field(
         self,
@@ -545,7 +866,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._enqueue_event(
             Event(
                 kind="vector_field",
                 scope=self._scope,
@@ -558,9 +879,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 extra=extra,
             )
         )
-
-        if not async_mode:
-            future.result()
 
     def histogram(
         self,
@@ -591,7 +909,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._enqueue_event(
             Event(
                 kind="histogram",
                 scope=self._scope,
@@ -604,9 +922,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 extra=extra,
             )
         )
-
-        if not async_mode:
-            future.result()
 
     def dictionary(
         self,
