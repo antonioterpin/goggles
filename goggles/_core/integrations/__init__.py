@@ -1,25 +1,13 @@
-"""Integration module for Goggles core.
-
-This module defines the handlers to be attached to the EventBus to dispatch
-events to the appropriate integration modules.
-
-Example:
-    class PrintHandler(TextHandler):
-        def emit(self, record: LogRecord) -> None:
-            print(self.format(record))
-
-"""
+"""Integrations module."""
 
 from importlib import import_module
 from importlib.util import find_spec
 from typing import Any
 
 from .console import ConsoleHandler
-from .storage import LocalStorageHandler
 
 __all__: list[str] = [
     "ConsoleHandler",
-    "LocalStorageHandler",
 ]
 
 if find_spec("wandb") is not None:
