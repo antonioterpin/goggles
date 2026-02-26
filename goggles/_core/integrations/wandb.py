@@ -18,7 +18,11 @@ Reinit: TypeAlias = Literal[
 
 
 class WandBHandler:
-    """No-op WandB handler that only stores configuration."""
+    """No-op WandB handler that only stores configuration.
+    
+    The actual W&B run management and logging is handled by the simplified loggers
+    that read the configuration from this handler when attached.
+    """
 
     def __init__(
         self,
