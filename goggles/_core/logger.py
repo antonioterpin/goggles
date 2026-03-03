@@ -259,7 +259,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             name: The name of the logger.
             console_config: The console configuration for this logger.
             wandb_config: The W&B configuration for this logger.
-            **to_bind: 
+            **to_bind:
                 Additional key-value pairs to bind to the logger's context.
         """
         CoreTextLogger.__init__(
