@@ -32,10 +32,6 @@ class GogglesClient:
     """Client for the Goggles EventBus.
 
     Wraps a portal.Client to provide event emission.
-
-    Attributes:
-        futures: Snapshot of futures currently managed by the underlying
-            portal client (auto-cleaned on completion).
     """
 
     _client: portal.Client
