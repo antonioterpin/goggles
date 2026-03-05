@@ -227,7 +227,7 @@ class WandBHandler:
                 extra.pop("num_bins", extra.pop("bins", 64))
             )  # TODO: check if bins is needed
 
-            logs = {}
+            logs: dict[str, Any] = {}
 
             try:
                 if not isinstance(payload, (Sequence, np.ndarray)):
