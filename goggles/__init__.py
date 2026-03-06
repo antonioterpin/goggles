@@ -64,7 +64,13 @@ from . import filters
 from ._core.decorators import timeit as _timeit
 from ._core.decorators import trace_on_error as _trace_on_error
 from ._core.integrations import ConsoleHandler, LocalStorageHandler
-from .config import PrettyConfig, load_configuration, save_configuration
+from .config import (
+    PrettyConfig,
+    apply_overrides,
+    load_configuration,
+    parse_value,
+    save_configuration,
+)
 from .shutdown import GracefulShutdown
 from .types import Event, Image, Kind, Metrics, Vector, VectorField, Video
 
@@ -1302,11 +1308,13 @@ __all__ = [
     "VectorField",
     "Video",
     "WandBHandler",
+    "apply_overrides",
     "attach",
     "detach",
     "filters",
     "get_logger",
     "load_configuration",
+    "parse_value",
     "register_handler",
     "save_configuration",
     "timeit",
