@@ -1,5 +1,6 @@
 """Types used in Goggles."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, TypeAlias
 
@@ -17,7 +18,7 @@ Kind = Literal[
     "vector_field",
 ]
 
-Metrics = dict[str, float | int | np.ndarray]
+Metrics = Mapping[str, float | int | np.ndarray]
 Image: TypeAlias = np.ndarray
 Video: TypeAlias = np.ndarray
 Vector: TypeAlias = np.ndarray
