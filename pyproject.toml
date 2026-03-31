@@ -30,7 +30,7 @@ classifiers = [
 dependencies = [
     "ruamel.yaml",
     "rich",
-    "portal>=3.7.3",
+    "portal>=3.7.3,<3.8",  # Future was removed in portal 3.8.0
     "typing-extensions>=4.15.0",
     "netifaces>=0.11.0",
     "pyyaml>=6.0.3",
