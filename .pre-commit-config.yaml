@@ -1,19 +1,19 @@
 exclude: ^pyproject\.toml$
 
 repos:
-  # Ruff: lint (will fail on violations like unused/incorrect noqa, similar to pyright)
+  # Ruff: lint + format (single source of truth; rules live in pyproject.toml)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.1
     hooks:
       - id: ruff
         stages: [pre-commit, pre-push]
-        # Removed --fix to make it fail on violations (including RUF100)
-        # Run 'uv run ruff check --fix .' manually to auto-fix if needed
+        # No --fix: fail loudly on violations (including RUF100).
+        # Run `uv run ruff check --fix .` manually to auto-fix.
 
       - id: ruff-format
         stages: [pre-commit, pre-push]
 
-  # Pydoclint: docstring linting (refer to pyproject.toml for configuration)
+  # Pydoclint: docstring/signature consistency (see pyproject.toml)
   - repo: local
     hooks:
       - id: pydoclint
@@ -23,7 +23,15 @@ repos:
         types: [python]
         stages: [pre-commit, pre-push]
 
-  # Type checking (BasedPyright)
+  # Generic hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  # Expensive checks: only run on push (type-checking and the test suite).
   - repo: local
     hooks:
       - id: basedpyright
@@ -32,12 +40,12 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
-        stages: [pre-commit, pre-push]
+        stages: [pre-push]
 
-  # Generic hygiene
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
-    hooks:
-      - id: check-yaml
-      - id: end-of-file-fixer
-      - id: trailing-whitespace
+      - id: pytest
+        name: pytest
+        entry: uv run pytest
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]

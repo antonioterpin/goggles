@@ -669,6 +669,7 @@ class RangeRejectFilter(_BackendAware):
         return xp.where(valid, data, fallback_value)
 
     def reset(self) -> None:
+        """Reset own state and the fallback filter chain."""
         super().reset()
         self.fallback.reset()
         self._last_valid = None
@@ -783,6 +784,7 @@ class StdRejectFilter(_WindowBufferFilter):
         return self._last_valid
 
     def reset(self) -> None:
+        """Reset own state and the fallback filter chain."""
         super().reset()
         self.fallback.reset()
         self._last_valid = None
