@@ -108,16 +108,18 @@ target-version = "py310"
 [tool.ruff.lint]
 # Enable comprehensive rule sets
 select = [
-    "E",     # pycodestyle errors (style/formatting)
-    "W",     # pycodestyle warnings
-    "F",     # pyflakes (logical errors)
-    "UP",    # pyupgrade (modern Python syntax)
-    "I",     # isort (import sorting)
-    "N",     # pep8-naming (naming conventions)
-    "B",     # flake8-bugbear (potential bugs)
-    "PL",    # pylint (code quality)
-    "PGH003",# blanket type: ignore
-    "RUF",   # ruff-specific rules (includes RUF100 for unused noqa)
+    "E",      # pycodestyle errors (style/formatting)
+    "W",      # pycodestyle warnings
+    "W505",   # doc-line-too-long (opt-in, paired with max-doc-length)
+    "F",      # pyflakes (logical errors)
+    "UP",     # pyupgrade (modern Python syntax)
+    "I",      # isort (import sorting)
+    "N",      # pep8-naming (naming conventions)
+    "B",      # flake8-bugbear (potential bugs)
+    "D",      # pydocstyle (Google-style docstrings)
+    "PL",     # pylint (code quality)
+    "PGH003", # blanket type: ignore
+    "RUF",    # ruff-specific rules (includes RUF100 for unused noqa)
 ]
 
 # NOTE: issue #117 tracks removing these "too many" ignores:
@@ -132,13 +134,29 @@ ignore = [
     "PLR0912", # Too many branches
     "PLR0915", # Too many statements
     "PLR0911", # Too many return statements
+    "D100",    # Missing docstring in public module
+    "D104",    # Missing docstring in public package
+    "D105",    # Missing docstring in magic method
+    "D107",    # Missing docstring in __init__ (documented at class level)
 ]
 
 # Ensure unused/incorrect noqa comments are detected (similar to pyright's strictness)
 # RUF100 is already included via "RUF" above, but we want to ensure it's not accidentally ignored
 
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "PLR2004"]  # Tests: no docstring policy, allow magic values
+"examples/*" = ["D"]           # Examples: documented via README/comments
+"**/__init__.py" = ["D"]       # Package stubs often re-export only
+
 [tool.ruff.lint.pep8-naming]
 extend-ignore-names = ["__post_init__"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 80
+max-doc-length = 80
 
 # Pydoclint configuration
 # Pydoclint is used together with Ruff because
