@@ -35,6 +35,11 @@ Hydra multirun (one process per sweep point)::
     uv run python examples/105_benchmark.py --multirun \
         log_type=scalar delay=0.001,0.0001,0.0
 
+Run every preset in one multirun (W&B offline)::
+
+    WANDB_MODE=offline uv run python examples/105_benchmark.py --multirun \
+        +preset=scalar_30hz,scalar_1khz,scalar_10khz,scalar_max,scalar_long,image_sweep,video_sweep,video_long
+
 W&B online vs offline
 ---------------------
 
