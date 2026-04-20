@@ -661,6 +661,8 @@ class Sink:
 socket_path = os.environ["GOGGLES_SOCKET"]
 out_path = os.environ["OUT_PATH"]
 expected = int(os.environ.get("EXPECTED", "1"))
+deadline_s = float(os.environ.get("DEADLINE", "30"))
+grace_s = float(os.environ.get("GRACE", "0.5"))
 transport = LocalTransport(socket_path=socket_path)
 assert transport.is_host
 sink = Sink(out_path=out_path)
@@ -668,18 +670,50 @@ with transport._bus._lock:
     transport._bus.handlers[sink.name] = sink
     transport._bus.scopes["global"] = {sink.name}
 Path(os.environ["READY_PATH"]).write_text("ready")
-deadline = time.time() + 30
+deadline = time.time() + deadline_s
 while time.time() < deadline:
     if sink.count >= expected:
+        # Stay up for a short grace period so any client still in the
+        # middle of its own shutdown finishes draining before we close
+        # the server socket.
+        time.sleep(grace_s)
         break
     time.sleep(0.05)
-transport.shutdown(timeout=5.0)
+transport.shutdown(timeout=10.0)
 print(sink.count)
 """
 
 
+CLIENT_WORKER_SRC = """
+import os
+import sys
+
+from goggles import Event
+from goggles._core.transport import LocalTransport
+
+
+socket_path = os.environ["GOGGLES_SOCKET"]
+tag = os.environ["CLIENT_TAG"]
+n = int(os.environ["N_EVENTS"])
+
+client = LocalTransport(socket_path=socket_path)
+try:
+    assert not client.is_host, "client subprocess must not become host"
+    for i in range(n):
+        client.emit(Event(
+            kind="log", scope="global", payload=f"{tag}-{i}",
+            filepath="client.py", lineno=i,
+        ))
+finally:
+    client.shutdown(timeout=30.0)
+"""
+
+
 def _launch_host_subprocess(
-    socket_path: str, tmp_path: Path, expected: int
+    socket_path: str,
+    tmp_path: Path,
+    expected: int,
+    deadline: float = 30.0,
 ) -> tuple[subprocess.Popen, Path]:
     out_path = tmp_path / "count.txt"
     ready_path = tmp_path / "ready.txt"
@@ -691,6 +725,7 @@ def _launch_host_subprocess(
     env["OUT_PATH"] = str(out_path)
     env["READY_PATH"] = str(ready_path)
     env["EXPECTED"] = str(expected)
+    env["DEADLINE"] = str(deadline)
 
     proc = subprocess.Popen(
         [sys.executable, str(worker_script)],
@@ -840,6 +875,96 @@ def test_cross_process_multiple_concurrent_clients(
         proc.terminate()
         try:
             proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
+@pytest.mark.resilience
+def test_cross_process_twenty_clients(socket_path: str, tmp_path: Path) -> None:
+    """One host subprocess + 19 concurrent client subprocesses.
+
+    Each client is an independent OS process that opens its own
+    ``LocalTransport`` in client mode, emits a batch of events, then
+    runs a graceful shutdown. Total = 19 * 50 = 950 events. We bring
+    up a host subprocess (count=950) first so the in-test process is
+    not competing to become host.
+
+    This stresses:
+      * accept() and reader-thread-per-client fan-in (20 concurrent
+        reader threads on the host),
+      * the SHM-less happy path end-to-end across many short-lived
+        clients,
+      * graceful shutdown ordering: every client's BYE is ordered
+        after its queued frames, so no frame is lost.
+
+    Slow-marked because spawning 20 Python interpreters is ~3-5 s.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+        tmp_path: pytest's per-test temporary directory.
+    """
+    n_clients = 19
+    n_per_client = 50
+    total = n_clients * n_per_client
+
+    proc, out_path = _launch_host_subprocess(
+        socket_path, tmp_path, expected=total, deadline=120.0
+    )
+    client_script = tmp_path / "client_worker.py"
+    client_script.write_text(CLIENT_WORKER_SRC)
+
+    try:
+        clients: list[subprocess.Popen] = []
+        for i in range(n_clients):
+            env = os.environ.copy()
+            env["GOGGLES_SOCKET"] = socket_path
+            env["CLIENT_TAG"] = f"client{i:02d}"
+            env["N_EVENTS"] = str(n_per_client)
+            clients.append(
+                subprocess.Popen(
+                    [sys.executable, str(client_script)],
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            )
+
+        try:
+            for c in clients:
+                try:
+                    c.wait(timeout=90.0)
+                except subprocess.TimeoutExpired:
+                    c.kill()
+                    c.wait()
+                    err = c.stderr.read().decode() if c.stderr else ""
+                    pytest.fail(
+                        f"client did not exit within 90 s; stderr: {err}"
+                    )
+                if c.returncode != 0:
+                    stderr = c.stderr.read().decode() if c.stderr else ""
+                    pytest.fail(
+                        f"client exited with code {c.returncode}: {stderr}"
+                    )
+        finally:
+            for c in clients:
+                if c.stdout is not None:
+                    c.stdout.close()
+                if c.stderr is not None:
+                    c.stderr.close()
+
+        assert _wait_until(
+            lambda: out_path.exists() and out_path.read_text() == str(total),
+            timeout=30.0,
+        ), (
+            f"host recorded "
+            f"{out_path.read_text() if out_path.exists() else '<no file>'}/"
+            f"{total}"
+        )
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10.0)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
