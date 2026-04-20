@@ -14,7 +14,7 @@ A lightweight, flexible Python observability framework designed for robotics res
 
 ## ✨ Features
 
-- 🤖 **Multi-process (and multi-machines) logging** - Synchronize logs across spawned processes reliably and efficiently (shared memory when available).
+- 🤖 **Multi-process logging on a single machine** - Synchronize logs across spawned processes via a Unix-domain-socket transport; large numpy payloads travel through shared memory when they cross the threshold.
 - 🎯 **Multi-output support** - Log to console, files, and remote services simultaneously.
 - 📊 **Experiment tracking** - Native integration with Weights & Biases for metrics, images, and videos.
 - 🕒 **Performance profiling** - `@goggles.timeit` decorator for automatic runtime measurement.
@@ -52,7 +52,7 @@ uv add "robo-goggles[jax]"
 For the development installation, see our [How to contribute](./CONTRIBUTING.md) page.
 
 > [!WARNING]
-> **Port selection**: Goggles requires a port for communication, and works multi-process, multi-machine, multi-user. If different projects have the same port, the behavior is undefined. You can set a unique port for each projet by setting in `.env` the variable `GOGGLES_PORT`.
+> **Socket selection**: Goggles uses a Unix domain socket to route events to a single host process per machine. The first process to bind becomes the host; later processes connect as clients. Two unrelated projects sharing the same socket path will end up sharing a bus, which is not what you want. Pin a per-project path in your `.env` via `GOGGLES_SOCKET=/tmp/goggles-<project>.sock`.
 
 
 ### Basic usage
@@ -284,10 +284,37 @@ As in the WandB example, all the handlers work in the background. By default, th
 >[!WARNING]
 > This functionality still needs thorough tesing, as well as a better documentation. Help is appreciated! 🤗
 
-### Multi-machine logging
-Goggles provides options to synchronize logging across machines, since there is always only a single server active. The relevant environment variables here are `GOGGLES_HOST` and `GOGGLES_PORT`.
->[!WARNING]
-> This functionality still needs thorough tesing, as well as a better documentation. Help is appreciated! 🤗
+### Multi-process logging (same machine)
+All processes that share the same `GOGGLES_SOCKET` path converge on a single `EventBus`. The first process to bind the socket becomes the host and runs the attached handlers; later processes connect as clients and forward events to it. Cross-machine logging is not supported in the built-in transport; if you need it, add a new implementation of `goggles._core.transport.Transport`.
+
+### Reducing GC jitter in hot loops
+At high logging frequency (≥1 kHz) Python's gen-2 garbage collector can cause millisecond-scale latency spikes. After you have attached handlers and finished setup, call `gg.freeze()` once before your hot loop:
+
+```python
+gg.attach(...)
+gg.freeze()         # promote startup objects out of the GC scan set
+for step in range(steps):
+    logger.scalar("loss", loss, step=step)
+```
+
+`gg.freeze()` wraps `gc.freeze()`; the collector still runs on churn allocated after the call, but it stops rescanning the long-lived startup state.
+
+### W&B online vs offline
+
+The W&B upload runs on a background thread that W&B's own SDK manages; Goggles' producer thread only calls `wandb.log({...})`, which enqueues locally and returns quickly. Online vs offline mode therefore **does not change the hot-path latency** your training loop sees — only *where the data ends up* changes.
+
+When to set `WANDB_MODE=offline`:
+- **Airgapped or flaky-network hosts** (shared clusters, HPC compute nodes without outbound Internet access).
+- **Benchmarking / reproducible latency measurements** — removes network jitter from the picture (see [examples/105_benchmark.py](./examples/105_benchmark.py)).
+- **Untrusted environments** where you don't want to stream data out during the run; you review and then sync.
+- **Faster startup** — no auth round-trip at `wandb.init`.
+
+Offline runs are written to `./wandb/offline-run-<timestamp>-<id>/` and can be uploaded later with:
+
+```bash
+wandb sync wandb/                         # all offline runs
+wandb sync wandb/offline-run-<id>         # a specific run
+```
 
 ### Adding a custom handler
 > [!NOTE]

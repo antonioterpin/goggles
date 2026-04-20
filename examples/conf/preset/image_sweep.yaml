@@ -1,0 +1,11 @@
+# @package _global_
+# Sweep image RGB resolution from 32x32 up to 1024x1024.
+#
+# 32/64/128 px stay below GOGGLES_SHM_THRESHOLD (64 KiB) and travel
+# inline via pickle protocol 5; 256/512/1024 px exceed the threshold
+# and take the zero-copy shared-memory side-channel.
+log_type: image
+num_logs: 500
+delay: 0.0
+image:
+  sizes: [32, 64, 128, 256, 512, 1024]

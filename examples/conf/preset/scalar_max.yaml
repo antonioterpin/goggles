@@ -1,0 +1,5 @@
+# @package _global_
+# Scalar logging as fast as possible (no inter-call delay).
+log_type: scalar
+num_logs: 50000
+delay: 0.0

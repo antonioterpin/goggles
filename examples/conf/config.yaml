@@ -1,0 +1,43 @@
+# Default configuration for benchmark_logger.
+#
+# Override any field via CLI: `num_logs=5000 delay=0.001`
+# Use named presets: `+preset=scalar_10khz`
+# Run a sweep: `--multirun image.sizes=[[32],[64],[128],[256],[512]] log_type=image`
+
+defaults:
+  - _self_
+
+# Which logger method to exercise.
+# One of: scalar | image | video | info | debug | print
+log_type: scalar
+
+# Total logging calls per run (one run per sweep point).
+num_logs: 10000
+
+# Seconds to sleep between consecutive calls. 0.0 = max throughput.
+# 0.001 = 1 kHz; 0.0001 = 10 kHz.
+delay: 0.0
+
+# If true, emit periodic progress lines during the run.
+verbose: false
+
+# Image logging parameters.
+image:
+  # Edge length (px) when running a single-resolution benchmark.
+  size: 64
+  # List of edge lengths (px) for a sweep; overrides `image.size`.
+  sizes: null
+
+# Video logging parameters.
+video:
+  size: 64
+  sizes: null
+  frames: 10
+
+# Weights & Biases integration.
+wandb:
+  # If false, run the benchmark without attaching the WandBHandler -- useful
+  # for isolating hot-path overhead from upload backlog.
+  enabled: true
+  project: goggles
+  experiment: benchmark_goggles

@@ -57,6 +57,19 @@ class CoreTextLogger(TextLogger):
         self._bound: dict[str, Any] = dict(**to_bind or {})
         self._client = get_bus()
 
+    def _dispatch(self, event: Event, *, async_mode: bool) -> None:
+        """Route ``event`` through the transport.
+
+        Args:
+            event: Event to dispatch.
+            async_mode: If True, fire-and-forget. Otherwise block until
+                the transport has routed the event.
+        """
+        if async_mode:
+            self._client.emit(event)
+        else:
+            self._client.emit_sync(event)
+
     def bind(self, /, *, scope: str = "global", **fields: Any) -> Self:
         """Return a new logger with `fields` merged into persistent context.
 
@@ -113,7 +126,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -124,10 +137,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-        if not async_mode:
-            future.result()
 
     def info(
         self,
@@ -150,7 +162,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -161,11 +173,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def warning(
         self,
@@ -188,7 +198,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -199,11 +209,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def error(
         self,
@@ -226,7 +234,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -237,11 +245,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def critical(
         self,
@@ -264,7 +270,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -275,11 +281,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
@@ -318,7 +322,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -329,11 +333,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def scalar(
         self,
@@ -357,7 +359,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -368,11 +370,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def image(
         self,
@@ -402,7 +402,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
         extra["format"] = format
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="image",
                 scope=self._scope,
@@ -413,11 +413,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def video(
         self,
@@ -456,7 +454,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         extra["fps"] = fps
         extra["format"] = format
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="video",
                 scope=self._scope,
@@ -467,11 +465,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def artifact(
         self,
@@ -502,7 +498,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             extra["name"] = name
         extra["format"] = format
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="artifact",
                 scope=self._scope,
@@ -513,11 +509,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def vector_field(
         self,
@@ -545,7 +539,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="vector_field",
                 scope=self._scope,
@@ -556,11 +550,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def histogram(
         self,
@@ -591,7 +583,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="histogram",
                 scope=self._scope,
@@ -602,11 +594,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def dictionary(
         self,

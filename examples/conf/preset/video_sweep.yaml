@@ -1,0 +1,8 @@
+# @package _global_
+# Sweep video resolution across a few typical frame sizes.
+log_type: video
+num_logs: 200
+delay: 0.0
+video:
+  sizes: [32, 64, 128, 256]
+  frames: 10
