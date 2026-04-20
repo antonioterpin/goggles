@@ -10,6 +10,7 @@ External code should not import from this module. Instead, depend on:
 
 import inspect
 import logging
+import os
 from typing import Any
 
 import numpy as np
@@ -17,6 +18,18 @@ from typing_extensions import Self
 
 from goggles import GOGGLES_ASYNC, Event, GogglesLogger, TextLogger
 from goggles.types import Image, Metrics, Vector, VectorField, Video
+
+# Walking the call stack via `inspect.currentframe` is ~5-15 μs and
+# allocates. At 10 kHz that's measurable on the producer hot path. Set
+# GOGGLES_CAPTURE_CALLER=0 to skip it — every event will carry
+# ("<unknown>", 0) for filepath/lineno, which matters only for the console
+# formatter (wandb and file handlers don't use it).
+_CAPTURE_CALLER: bool = os.getenv("GOGGLES_CAPTURE_CALLER", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+_UNKNOWN_CALLER: tuple[str, int] = ("<unknown>", 0)
 
 
 class CoreTextLogger(TextLogger):
@@ -745,14 +758,19 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 def _caller_id() -> tuple[str, int]:
     """Get the caller's filepath and line number for logging purposes.
 
+    Honours the ``GOGGLES_CAPTURE_CALLER`` env var: when disabled, returns
+    a constant tuple and skips the frame walk entirely — relevant for
+    producers logging at 10 kHz+ where the 5-15 μs stack walk is visible
+    in p99 latency.
+
     Returns:
         A tuple of (file path, line number).
 
     """
+    if not _CAPTURE_CALLER:
+        return _UNKNOWN_CALLER
     frame = inspect.currentframe()
     if frame is None or frame.f_back is None or frame.f_back.f_back is None:
-        return ("<unknown>", 0)
+        return _UNKNOWN_CALLER
     caller_frame = frame.f_back.f_back
-    filename = caller_frame.f_code.co_filename
-    line_number = caller_frame.f_lineno
-    return (filename, line_number)
+    return (caller_frame.f_code.co_filename, caller_frame.f_lineno)

@@ -32,6 +32,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import threading
 from collections import defaultdict
 from collections.abc import Callable
 from typing import (
@@ -749,25 +750,36 @@ class Handler(Protocol):
 # EventBus and run management
 # ---------------------------------------------------------------------------
 class EventBus:
-    """Protocol for the process-wide event router."""
+    """Process-wide event router.
+
+    Thread-safe: ``attach`` / ``detach`` / ``shutdown`` may be called
+    concurrently with ``emit``; handler invocations happen outside the
+    internal lock so a slow handler cannot block concurrent registration.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.handlers: dict[str, Handler] = {}
         self.scopes: dict[str, set[str]] = defaultdict(set)
+        self._lock = threading.RLock()
 
     def shutdown(self) -> None:
         """Shutdown the EventBus and close all handlers."""
-        copy_map = {
-            scope: handlers_names.copy()
-            for scope, handlers_names in self.scopes.items()
-        }
+        with self._lock:
+            copy_map = {
+                scope: handlers_names.copy()
+                for scope, handlers_names in self.scopes.items()
+            }
         for scope, handlers_names in copy_map.items():
             for handler_name in handlers_names:
-                self.detach(handler_name, scope)
+                try:
+                    self.detach(handler_name, scope)
+                except ValueError:
+                    # Another thread may have already detached this pair.
+                    pass
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
-        """Attach a handler under the given scope.
+        """Attach handler(s) under the given scopes.
 
         Args:
             handlers:
@@ -778,16 +790,18 @@ class EventBus:
         for handler_dict in handlers:
             handler_class = _get_handler_class(handler_dict["cls"])
             handler = handler_class.from_dict(handler_dict["data"])
-            if handler.name not in self.handlers:
-                # Initialize handler and store it
+            with self._lock:
+                newly_added = handler.name not in self.handlers
+                if newly_added:
+                    self.handlers[handler.name] = handler
+                for scope in scopes:
+                    if scope not in self.scopes:
+                        self.scopes[scope] = set()
+                    self.scopes[scope].add(handler.name)
+            if newly_added:
+                # Call handler.open() outside the lock: it may do I/O
+                # (e.g. open a wandb run) and must not block readers.
                 handler.open()
-                self.handlers[handler.name] = handler
-
-            # Add to requested scopes
-            for scope in scopes:
-                if scope not in self.scopes:
-                    self.scopes[scope] = set()
-                self.scopes[scope].add(handler.name)
 
     def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
@@ -800,19 +814,35 @@ class EventBus:
           ValueError: If the handler was not attached under the requested scope.
 
         """
-        if scope not in self.scopes or handler_name not in self.scopes[scope]:
-            raise ValueError(
-                f"Handler '{handler_name}' not attached under scope '{scope}'"
-            )
-        self.scopes[scope].remove(handler_name)
-        if not self.scopes[scope]:
-            del self.scopes[scope]
-        if not any(handler_name in self.scopes[s] for s in self.scopes):
-            self.handlers[handler_name].close()
-            del self.handlers[handler_name]
+        to_close: Handler | None = None
+        with self._lock:
+            if (
+                scope not in self.scopes
+                or handler_name not in self.scopes[scope]
+            ):
+                raise ValueError(
+                    f"Handler '{handler_name}' not attached under scope "
+                    f"'{scope}'"
+                )
+            self.scopes[scope].remove(handler_name)
+            if not self.scopes[scope]:
+                del self.scopes[scope]
+            if not any(handler_name in self.scopes[s] for s in self.scopes):
+                to_close = self.handlers.pop(handler_name, None)
+        # Close outside the lock to avoid blocking emit/attach.
+        if to_close is not None:
+            try:
+                to_close.close()
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Handler '%s' raised in close()", handler_name
+                )
 
     def emit(self, event: dict | Event) -> None:
         """Emit an event to eligible handlers (errors isolated per handler).
+
+        Snapshots the routing table under the lock, then invokes handlers
+        outside of it so concurrent attach/detach calls are non-blocking.
 
         Args:
             event: The event (serialized) to emit, or an Event instance.
@@ -828,31 +858,32 @@ class EventBus:
                 f"emit expects a dict or Event, got {type(event)!r}"
             )
 
-        # collect all scopes that this event should hit:
         scope = event.scope
 
-        # Example:
-        # event.scope == "global"
-        # matches: "global", "global.local1", "global.local2", but not "another"
-        target_scopes = [
-            s for s in self.scopes if s == scope or scope.startswith(s + ".")
-        ]
-
-        if not target_scopes:
-            return
-
-        # Ensure we don't call the same handler twice
-        # if it's attached to multiple scopes
-        seen_handlers: set[str] = set()
-
-        for s in target_scopes:
-            for handler_name in self.scopes[s]:
-                if handler_name in seen_handlers:
+        # Snapshot under lock so attach/detach can't race with us.
+        with self._lock:
+            target_handlers: list[Handler] = []
+            seen: set[str] = set()
+            for s, names in self.scopes.items():
+                if s != scope and not scope.startswith(s + "."):
                     continue
-                handler = self.handlers.get(handler_name)
-                if handler and handler.can_handle(event.kind):
+                for handler_name in names:
+                    if handler_name in seen:
+                        continue
+                    seen.add(handler_name)
+                    handler = self.handlers.get(handler_name)
+                    if handler is not None:
+                        target_handlers.append(handler)
+
+        for handler in target_handlers:
+            try:
+                if handler.can_handle(event.kind):
                     handler.handle(event)
-                seen_handlers.add(handler_name)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Handler '%s' raised while dispatching event",
+                    getattr(handler, "name", "?"),
+                )
 
 
 def get_bus() -> Transport:

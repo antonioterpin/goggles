@@ -72,21 +72,84 @@ uploaded later with::
 from __future__ import annotations
 
 import datetime
+import os
+import sys
+import threading
 import time
 from statistics import mean, median, quantiles, stdev
-from typing import Any
+from typing import Any, ClassVar, cast
 
 import hydra
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
 import goggles as gg
+from goggles import Event, Kind
 
 _logger = gg.get_logger(
     "goggles.benchmark",
     scope="goggles.benchmark",
     with_metrics=True,
 )
+
+
+class _DeliveryCounter:
+    """Handler that just counts events delivered to the host.
+
+    Used to verify end-to-end reliability: the producer emits N events,
+    then ``finish()`` blocks until everything drains; this handler's
+    count must equal N. Prior to the shutdown fix, bulk video benchmarks
+    were losing >90 % of events here.
+
+    Attributes:
+        name: Handler identifier used by the bus's dedup logic.
+        capabilities: Event kinds this handler claims to handle.
+    """
+
+    name = "goggles.benchmark.counter"
+    capabilities: ClassVar[frozenset[Kind]] = frozenset(
+        {
+            "log",
+            "metric",
+            "image",
+            "video",
+            "artifact",
+            "histogram",
+            "vector",
+            "vector_field",
+        }
+    )
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._count_by_kind: dict[str, int] = {}
+
+    def can_handle(self, kind: Kind) -> bool:
+        del kind
+        return True
+
+    def handle(self, event: Event) -> None:
+        with self._lock:
+            self._count_by_kind[event.kind] = (
+                self._count_by_kind.get(event.kind, 0) + 1
+            )
+
+    def open(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    @property
+    def totals(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._count_by_kind)
+
+    def to_dict(self) -> dict:
+        return {"cls": "_DeliveryCounter", "data": {}}
+
+    @classmethod
+    def from_dict(cls, serialized: dict) -> _DeliveryCounter:
+        del serialized
+        return cls()
 
 
 def _run_one(
@@ -99,6 +162,7 @@ def _run_one(
     video_frames: int,
     label: str,
     verbose: bool,
+    step_offset: int = 0,
 ) -> list[float]:
     """Run a single benchmark pass and return per-call timings in ms.
 
@@ -111,6 +175,10 @@ def _run_one(
         video_frames: Frames per video sample.
         label: Tag used in logs + as the metric name suffix.
         verbose: If True, log periodic progress lines.
+        step_offset: Base step for this run. All logger calls log at
+            ``step_offset + idx`` so sweep points that share a wandb run
+            (same scope) don't collide on step 0..N-1 and trigger
+            "step X < current step Y" rejections.
 
     Returns:
         A list of per-call wall-clock times, in milliseconds.
@@ -119,7 +187,8 @@ def _run_one(
         ValueError: If ``log_type`` is not one of the supported values.
     """
     times: list[float] = []
-    for step in range(num_logs):
+    for step_in_run in range(num_logs):
+        step = step_offset + step_in_run
         if log_type == "scalar":
             value: Any = np.random.randn()
         elif log_type == "image":
@@ -173,9 +242,9 @@ def _run_one(
         if delay > 0:
             time.sleep(delay)
 
-        if verbose and step % max(1, num_logs // 10) == 0:
+        if verbose and step_in_run % max(1, num_logs // 10) == 0:
             _logger.info(
-                f"[{label}] step {step}/{num_logs} - {elapsed_ms:.6f} ms"
+                f"[{label}] step {step_in_run}/{num_logs} - {elapsed_ms:.6f} ms"
             )
 
     return times
@@ -267,6 +336,125 @@ def _build_runs(cfg: DictConfig) -> list[tuple[str, dict]]:
     ]
 
 
+def _snapshot_wandb_runs() -> list[tuple[str, str]]:
+    """Capture ``(scope, "entity/project/run_id")`` for each live wandb run.
+
+    Call this *before* ``gg.finish()`` runs — the handler's ``close()``
+    clears its internal run map and resets the wandb globals, after which
+    the identifiers are no longer accessible without going through the API.
+
+    Returns:
+        A list of ``(scope, run_path)`` pairs; empty if the wandb handler
+        is not attached or its runs can't be introspected.
+    """
+    transport_any: Any = gg.get_bus()
+    handler: Any = None
+    bus_any: Any = getattr(transport_any, "_bus", None)
+    if bus_any is not None:
+        handler = bus_any.handlers.get("wandb")
+    if handler is None:
+        return []
+    snapshots: list[tuple[str, str]] = []
+    runs: Any = getattr(handler, "_runs", {})
+    for scope, run in list(runs.items()):
+        try:
+            entity = run.entity
+            project = run.project
+            run_id = run.id
+        except AttributeError:
+            continue
+        snapshots.append((scope, f"{entity}/{project}/{run_id}"))
+    return snapshots
+
+
+def _verify_wandb_history(
+    runs: list[tuple[str, str]],
+    expected_rows: int,
+    poll_timeout: float = 60.0,
+    poll_interval: float = 2.0,
+) -> None:
+    """Poll wandb for each run's history and report delivered-row counts.
+
+    Prints a single line per run to stderr. Skipped silently in offline
+    mode (``WANDB_MODE=offline``) because ``wandb.Api`` only reads the
+    backend, not the local ``wandb/offline-run-*`` tree — run
+    ``wandb sync`` first if you want offline runs audited.
+
+    Args:
+        runs: ``(scope, "entity/project/run_id")`` pairs from
+            :func:`_snapshot_wandb_runs`.
+        expected_rows: Number of history rows each run should contain.
+        poll_timeout: Max seconds to wait for the wandb backend to
+            reflect every logged row. wandb's sync thread is async and
+            can lag the producer by a few seconds even after
+            ``run.finish()``.
+        poll_interval: Seconds between polls.
+    """
+    if not runs:
+        return
+    if os.environ.get("WANDB_MODE", "").lower() == "offline":
+        print(
+            "wandb verification skipped (offline mode; run `wandb sync` "
+            "and query manually if you need delivered-row counts).",
+            file=sys.stderr,
+        )
+        return
+    try:
+        import wandb  # noqa: PLC0415
+    except ImportError:
+        return
+
+    try:
+        api = wandb.Api()
+    except Exception as exc:
+        print(f"wandb verification skipped: {exc}", file=sys.stderr)
+        return
+
+    for scope, path in runs:
+        deadline = time.monotonic() + poll_timeout
+        last_count = -1
+        while time.monotonic() < deadline:
+            try:
+                run = api.run(path)
+                # ``scan_history`` is unsampled and reflects the true
+                # server-side row count, unlike ``run.history`` which
+                # caps at 500 samples by default.
+                count = sum(1 for _ in run.scan_history())
+            except Exception as exc:
+                print(
+                    f"wandb run {path} (scope={scope}): query failed: {exc}",
+                    file=sys.stderr,
+                )
+                break
+            if count >= expected_rows:
+                last_count = count
+                break
+            last_count = count
+            time.sleep(poll_interval)
+        verdict = "OK" if last_count >= expected_rows else "INCOMPLETE"
+        print(
+            f"wandb run {path} (scope={scope}): "
+            f"{last_count}/{expected_rows} history rows [{verdict}]",
+            file=sys.stderr,
+        )
+
+
+def _kind_for_log_type(log_type: str) -> str:
+    """Map a benchmark ``log_type`` to the event ``kind`` it produces.
+
+    Args:
+        log_type: Value from the Hydra config's ``log_type`` field.
+
+    Returns:
+        The corresponding event kind used in ``Event.kind``.
+    """
+    if log_type in {"info", "debug", "print"}:
+        return "log"
+    if log_type == "scalar":
+        return "metric"
+    return log_type
+
+
 def _summary(all_results: list[tuple[str, list[float]]]) -> None:
     """Emit a concise across-run table with min/median/p99/max.
 
@@ -311,6 +499,17 @@ def main(cfg: DictConfig) -> None:
         scopes=["goggles.benchmark"],
     )
 
+    gg.register_handler(_DeliveryCounter)
+    gg.attach(_DeliveryCounter(), scopes=["goggles.benchmark"])
+    # ``gg.attach`` deserializes the handler via ``from_dict`` so the
+    # instance owned by the bus is not the one we constructed here; pull
+    # out the canonical copy the drain thread will actually dispatch to.
+    transport_any: Any = gg.get_bus()
+    counter = cast(
+        _DeliveryCounter,
+        transport_any._bus.handlers["goggles.benchmark.counter"],
+    )
+
     if cfg.wandb.enabled:
         # For reproducible numbers on CI / HPC / airgapped hosts, run with
         # `WANDB_MODE=offline` and sync the run afterwards with
@@ -337,6 +536,11 @@ def main(cfg: DictConfig) -> None:
     _logger.info(f"Runs: {[label for label, _ in runs]}")
 
     all_results: list[tuple[str, list[float]]] = []
+    # Global monotonic step counter. Every sweep point + the replay phase
+    # advances it, so wandb (which tracks one global step per run) never
+    # sees a regression. Prior versions let each sweep reuse step=0..N-1,
+    # causing "Tried to log to step 0 < current step 499" rejections.
+    next_step = 0
     try:
         for label, opts in runs:
             _logger.info(f"--- Running [{label}] ---")
@@ -345,24 +549,76 @@ def main(cfg: DictConfig) -> None:
                 delay=float(cfg.delay),
                 label=label,
                 verbose=bool(cfg.verbose),
+                step_offset=next_step,
                 **opts,
             )
+            next_step += int(cfg.num_logs)
             all_results.append((label, timings))
             _report(timings, label)
     finally:
         _summary(all_results)
 
+        expected_wandb_rows = 0
         if cfg.wandb.enabled:
+            # Replay timings into wandb. Continues the global step counter
+            # past all main-loop runs so the wandb monotonicity check
+            # keeps accepting values.
             for label, timings in all_results:
                 for idx, log_time in enumerate(timings):
                     _logger.scalar(
                         name=f"logger_call_time_ms_{label}",
                         value=log_time,
-                        step=idx,
-                        custom_step={"idx": idx, "run": label},
+                        step=next_step + idx,
                     )
+                next_step += len(timings)
+            expected_wandb_rows = next_step
 
-        gg.finish()
+        # Capture run identifiers while the wandb handler is still live;
+        # ``gg.finish()`` below will call its ``close()`` which clears
+        # the handler's internal run map.
+        wandb_runs = _snapshot_wandb_runs() if cfg.wandb.enabled else []
+
+        # Wait indefinitely for drain (``timeout=0`` means no deadline
+        # inside ``gg.finish``). When wandb is attached, wandb.Image for
+        # large payloads can cost tens of ms per call, and a bounded
+        # timeout silently drops the tail of the drain queue — that was
+        # the source of the "image=2063/3000 (31.2% dropped)" reports
+        # from the image_sweep preset.
+        print(
+            "Draining... (this waits for wandb to finish uploading; "
+            "set GOGGLES_SHUTDOWN_TIMEOUT to bound it).",
+            file=sys.stderr,
+        )
+        gg.finish(timeout=0)
+
+        # Delivery-count check: every enqueued event must have reached a
+        # handler. This catches transport-level drops (e.g. the shutdown
+        # race that used to lose >90 % of video frames). Print directly
+        # to stderr because the transport is already shut down and any
+        # _logger.* call after finish() would be a silent no-op.
+        totals = counter.totals
+        payload_kind = _kind_for_log_type(cfg.log_type)
+        expected = len(runs) * int(cfg.num_logs)
+        actual = totals.get(payload_kind, 0)
+        if actual < expected:
+            dropped_pct = 100.0 * (expected - actual) / max(1, expected)
+            print(
+                f"DELIVERY LOSS: {payload_kind}={actual}/{expected} "
+                f"({dropped_pct:.1f}% dropped). Totals: {totals}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"All {actual} {payload_kind} events delivered end-to-end. "
+                f"Totals: {totals}",
+                file=sys.stderr,
+            )
+
+        # Second line of defence: even if the handler saw every event,
+        # wandb's own async pipeline could have dropped some. Cross-check
+        # the backend's row count against what we emitted.
+        if wandb_runs:
+            _verify_wandb_history(wandb_runs, expected_rows=expected_wandb_rows)
 
 
 if __name__ == "__main__":

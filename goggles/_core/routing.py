@@ -32,7 +32,7 @@ def get_bus() -> Transport:
     """
     global __singleton_transport  # noqa: PLW0603
     current = __singleton_transport
-    if current is None or not getattr(current, "_running", True):
+    if current is None or not current.is_running:
         from goggles._core.transport import LocalTransport  # noqa: PLC0415
 
         current = LocalTransport()

@@ -1,19 +1,21 @@
-"""LocalTransport: Unix-socket based transport for same-machine logging.
+"""LocalTransport: cross-platform local-machine transport for logging.
 
-This module replaces the previous portal-based RPC with a direct Unix-domain-
-socket transport. The first process to bind the configured socket path becomes
-the host (owns the `EventBus` and dispatches events to attached handlers).
-Subsequent processes on the same machine connect as clients; their events are
-serialized with pickle protocol 5 and forwarded to the host.
+The first process to bind the configured socket path becomes the host (owns
+the :class:`EventBus` and dispatches events to attached handlers); subsequent
+processes on the same machine connect as clients.
+
+On Unix (Linux, macOS) the transport uses ``AF_UNIX`` streams with the
+socket file protected at ``0o600``. On Windows, ``AF_UNIX`` is unreliable
+across Python versions, so the transport binds a TCP loopback socket on
+``127.0.0.1`` and writes the chosen port to a sidecar discovery file at the
+same logical ``socket_path``. Both paths share the same framing protocol.
 
 Payloads above :data:`_DEFAULT_SHM_THRESHOLD` bytes take a zero-copy
 shared-memory side-channel: the client writes the numpy buffer into a
 ``multiprocessing.shared_memory.SharedMemory`` block and sends only metadata
-over the socket; the host maps the same block as a view and passes it to
-handlers before unlinking it.
-
-Only same-machine multi-process routing is supported. Cross-machine logging is
-out of scope; add a new implementation of :class:`Transport` if needed.
+over the socket; the host maps the same block, copies the view out, and
+unlinks the block. The client tracks outstanding block names and unlinks
+any that never made it to the host (e.g. because shutdown dropped them).
 """
 
 from __future__ import annotations
@@ -24,6 +26,8 @@ import pickle
 import queue
 import socket
 import struct
+import sys
+import tempfile
 import threading
 import time
 from multiprocessing import shared_memory
@@ -54,18 +58,36 @@ _HEADER_SIZE = struct.calcsize(_HEADER_FMT)
 
 _DEFAULT_SHM_THRESHOLD = 65536
 
+_IS_WINDOWS = sys.platform == "win32"
+
+
+def _user_tag() -> str:
+    """Portable per-user identifier for default socket-path naming.
+
+    Returns:
+        A short string unique per local user.
+    """
+    getuid = getattr(os, "getuid", None)
+    if getuid is not None:
+        return str(getuid())
+    return os.environ.get("USERNAME") or os.environ.get("USER") or "default"
+
 
 def _default_socket_path() -> str:
     """Default socket path, overridable via ``GOGGLES_SOCKET``.
 
+    On Unix this is the Unix-domain-socket path. On Windows it is the
+    sidecar discovery file that records the TCP port the host is listening
+    on; the file itself is not a socket.
+
     Returns:
-        Absolute filesystem path to the Unix domain socket.
+        Absolute filesystem path.
     """
     override = os.getenv("GOGGLES_SOCKET")
     if override:
         return override
-    runtime_dir = os.getenv("XDG_RUNTIME_DIR") or "/tmp"
-    return os.path.join(runtime_dir, f"goggles-{os.getuid()}.sock")
+    runtime_dir = os.getenv("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+    return os.path.join(runtime_dir, f"goggles-{_user_tag()}.sock")
 
 
 def _default_shm_threshold() -> int:
@@ -106,7 +128,9 @@ def _pack_small(event: Event) -> bytes:
     """Serialize an Event for the small inline path.
 
     Uses pickle protocol 5 with ``buffer_callback`` to avoid copying numpy
-    array bytes into the main pickle stream.
+    array bytes into the main pickle stream. The out-of-band buffers are
+    concatenated into the returned ``bytes`` with a single intermediate
+    ``bytearray`` (one memcpy per buffer rather than two).
 
     Args:
         event: Event to serialize.
@@ -117,16 +141,15 @@ def _pack_small(event: Event) -> bytes:
     """
     buffers: list[pickle.PickleBuffer] = []
     main = pickle.dumps(event, protocol=5, buffer_callback=buffers.append)
-    parts: list[bytes] = [
-        struct.pack("!I", len(main)),
-        main,
-        struct.pack("!I", len(buffers)),
-    ]
+    out = bytearray()
+    out += struct.pack("!I", len(main))
+    out += main
+    out += struct.pack("!I", len(buffers))
     for buf in buffers:
         mv = buf.raw()
-        parts.append(struct.pack("!I", len(mv)))
-        parts.append(bytes(mv))
-    return b"".join(parts)
+        out += struct.pack("!I", len(mv))
+        out += mv  # bytearray += memoryview is a single memcpy
+    return bytes(out)
 
 
 def _unpack_small(payload: bytes) -> Event:
@@ -167,6 +190,9 @@ def _pack_large(event: Event, shm_name: str) -> bytes:
 
     Returns:
         Pickled metadata + a stripped event (payload replaced by None).
+
+    Raises:
+        TypeError: If ``event.payload`` is not a ``numpy.ndarray``.
     """
     arr = event.payload
     if not isinstance(arr, np.ndarray):
@@ -174,7 +200,6 @@ def _pack_large(event: Event, shm_name: str) -> bytes:
             "LARGE path requires numpy.ndarray payload, got "
             f"{type(arr).__name__}"
         )
-    # Build a stripped event: same fields, payload=None. The host fills it in.
     stripped = Event(
         kind=event.kind,
         scope=event.scope,
@@ -197,11 +222,7 @@ def _pack_large(event: Event, shm_name: str) -> bytes:
 
 
 def _unpack_large(payload: bytes) -> Event:
-    """Reconstruct an Event from a LARGE frame and the shared memory it names.
-
-    The shared-memory block is opened, its bytes are viewed as a numpy array
-    (zero-copy), the view is copied into a private array, and the block is
-    closed and unlinked.
+    """Reconstruct an Event from a LARGE frame and unlink the named shm.
 
     Args:
         payload: Pickled metadata produced by :func:`_pack_large`.
@@ -218,14 +239,10 @@ def _unpack_large(payload: bytes) -> Event:
     shm = shared_memory.SharedMemory(name=shm_name)
     try:
         view = np.ndarray(shape, dtype=dtype, buffer=shm.buf)
-        # Copy out before unlinking so the Event owns its payload.
         arr = np.array(view, copy=True)
     finally:
         shm.close()
-        try:
-            shm.unlink()
-        except FileNotFoundError:
-            pass
+        _try_unlink_shm(shm_name)
     return Event(
         kind=stripped.kind,
         scope=stripped.scope,
@@ -239,12 +256,225 @@ def _unpack_large(payload: bytes) -> Event:
     )
 
 
+def _try_unlink_shm(name: str) -> None:
+    """Best-effort unlink of a named shm block, tolerant to already-gone.
+
+    Args:
+        name: Name of the shared-memory block to remove.
+    """
+    try:
+        shm = shared_memory.SharedMemory(name=name)
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+    try:
+        shm.close()
+    except OSError:
+        pass
+    try:
+        shm.unlink()
+    except (FileNotFoundError, OSError):
+        pass
+
+
+# --- Cross-platform endpoint ----------------------------------------------
+
+
+class _Endpoint(Protocol):
+    """Platform abstraction for binding / connecting to a logical path."""
+
+    @staticmethod
+    def connect(path: str, timeout: float = 1.0) -> socket.socket | None:
+        """Attempt to connect to a host at ``path``.
+
+        Args:
+            path: Logical endpoint identifier.
+            timeout: Connect timeout in seconds.
+
+        Returns:
+            Connected stream socket, or None if no host is listening.
+        """
+        ...
+
+    @staticmethod
+    def bind(path: str) -> socket.socket:
+        """Bind and listen at ``path``.
+
+        Args:
+            path: Logical endpoint identifier.
+
+        Returns:
+            The bound server socket.
+        """
+        ...
+
+    @staticmethod
+    def cleanup(path: str) -> None:
+        """Remove filesystem artifacts associated with ``path``.
+
+        Best-effort; callers should not rely on failure modes.
+
+        Args:
+            path: Logical endpoint identifier.
+        """
+        ...
+
+    @staticmethod
+    def accept_address_hint() -> str:
+        """Return a human-readable label for logs.
+
+        Returns:
+            A short string identifying the endpoint family.
+        """
+        ...
+
+
+class _UnixEndpoint:
+    """AF_UNIX-based endpoint for Linux and macOS."""
+
+    @staticmethod
+    def connect(path: str, timeout: float = 1.0) -> socket.socket | None:
+        if not os.path.exists(path):
+            return None
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        try:
+            sock.connect(path)
+        except OSError:
+            sock.close()
+            return None
+        sock.settimeout(None)
+        return sock
+
+    @staticmethod
+    def bind(path: str) -> socket.socket:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+            try:
+                os.chmod(parent, 0o700)
+            except OSError:
+                # Parent may be a shared dir (e.g. /tmp); don't fail here.
+                pass
+
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        old_umask = os.umask(0o077)
+        try:
+            server.bind(path)
+        finally:
+            os.umask(old_umask)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        server.listen(64)
+        return server
+
+    @staticmethod
+    def cleanup(path: str) -> None:
+        try:
+            os.unlink(path)
+        except (FileNotFoundError, IsADirectoryError):
+            pass
+        except OSError:
+            _log.exception("Failed to unlink socket file at %s", path)
+
+    @staticmethod
+    def accept_address_hint() -> str:
+        return "AF_UNIX"
+
+
+class _WindowsEndpoint:
+    """TCP loopback endpoint for Windows.
+
+    The "socket path" becomes a sidecar file recording the port the host
+    chose; clients read it to find the host.
+    """
+
+    _LOOPBACK = "127.0.0.1"
+
+    @staticmethod
+    def _read_port(path: str) -> int | None:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = f.read().strip()
+        except OSError:
+            return None
+        try:
+            return int(data)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def connect(path: str, timeout: float = 1.0) -> socket.socket | None:
+        port = _WindowsEndpoint._read_port(path)
+        if port is None:
+            return None
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        try:
+            sock.connect((_WindowsEndpoint._LOOPBACK, port))
+        except OSError:
+            sock.close()
+            return None
+        sock.settimeout(None)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        return sock
+
+    @staticmethod
+    def bind(path: str) -> socket.socket:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((_WindowsEndpoint._LOOPBACK, 0))
+        server.listen(64)
+        port = server.getsockname()[1]
+        # Write port atomically: write to tmp, then rename.
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(str(port))
+        os.replace(tmp, path)
+        return server
+
+    @staticmethod
+    def cleanup(path: str) -> None:
+        try:
+            os.unlink(path)
+        except (FileNotFoundError, IsADirectoryError):
+            pass
+        except OSError:
+            _log.exception("Failed to remove discovery file at %s", path)
+
+    @staticmethod
+    def accept_address_hint() -> str:
+        return "TCP loopback"
+
+
+def _endpoint() -> type[_Endpoint]:
+    if _IS_WINDOWS:
+        return _WindowsEndpoint  # type: ignore[return-value]
+    return _UnixEndpoint  # type: ignore[return-value]
+
+
 # --- Transport Protocol ----------------------------------------------------
 
 
 @runtime_checkable
 class Transport(Protocol):
     """Contract for routing Goggles events to the EventBus."""
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the transport is accepting new events.
+
+        Returns:
+            True while the transport is live, False after shutdown or an
+            unrecoverable send failure.
+        """
+        ...
 
     def emit(self, event: Event) -> None:
         """Route an event asynchronously (fire-and-forget).
@@ -257,6 +487,9 @@ class Transport(Protocol):
     def emit_sync(self, event: Event) -> None:
         """Route an event, blocking until it has reached the bus.
 
+        In client mode this is best-effort: there is no cross-process ack,
+        so it behaves like :meth:`emit` plus a local queue flush.
+
         Args:
             event: Event to route.
         """
@@ -266,7 +499,7 @@ class Transport(Protocol):
         """Attach handlers under the given scopes.
 
         Args:
-            handlers: Serialized handlers to attach.
+            handlers: Serialized handler dicts (see ``Handler.to_dict``).
             scopes: Scopes under which to attach.
         """
         ...
@@ -284,7 +517,8 @@ class Transport(Protocol):
         """Flush pending events and release resources.
 
         Args:
-            timeout: Maximum time to wait for pending events, in seconds.
+            timeout: Max seconds per background thread for clean exit.
+                ``None`` means wait indefinitely.
         """
         ...
 
@@ -292,22 +526,43 @@ class Transport(Protocol):
 # --- LocalTransport --------------------------------------------------------
 
 
-_SENTINEL = object()
+_SENTINEL = object()  # "stop draining / sending" marker
+
+
+class _SendItem:
+    """Tuple-like wrapper for queued send items.
+
+    Carrying the shm name (if any) alongside the frame bytes lets the
+    sender free the shm block if sending fails, so the segment doesn't
+    leak when shutdown drops the queue.
+    """
+
+    __slots__ = ("frame", "shm_name")
+
+    def __init__(self, frame: bytes, shm_name: str | None = None) -> None:
+        """Initialise the send item.
+
+        Args:
+            frame: Framed bytes to send on the wire.
+            shm_name: Name of the associated shared-memory block, if any.
+        """
+        self.frame = frame
+        self.shm_name = shm_name
 
 
 class LocalTransport:
-    """Unix-socket based transport with auto-elected host.
+    """Cross-platform local transport with auto-elected host.
 
     On construction, the transport either:
       1. Connects to an existing host at ``socket_path`` (client mode), or
-      2. Binds the socket and becomes host (running an accept loop that
+      2. Binds the endpoint and becomes host (running an accept loop that
          spawns one reader thread per connected client).
 
-    Host mode also owns an ``EventBus`` instance; its own ``emit`` calls
-    dispatch directly to the bus via a background drain thread (no socket,
-    no serialization). Client-mode ``emit`` calls pickle the event and send
-    it to the host; payloads above ``shm_threshold`` bytes travel through
-    shared memory instead of the socket.
+    Host mode owns an :class:`EventBus`; its own ``emit`` calls dispatch
+    directly to the bus via a background drain thread. Client-mode ``emit``
+    calls pickle the event and send it to the host; payloads above
+    ``shm_threshold`` bytes travel through shared memory instead of the
+    socket.
     """
 
     def __init__(
@@ -318,9 +573,10 @@ class LocalTransport:
         """Initialize a LocalTransport.
 
         Args:
-            socket_path: Path of the Unix domain socket.
-                Defaults to the value of ``GOGGLES_SOCKET`` or a
-                per-user path under ``$XDG_RUNTIME_DIR`` / ``/tmp``.
+            socket_path: Path of the Unix domain socket (Unix) or
+                discovery file (Windows). Defaults to the value of
+                ``GOGGLES_SOCKET`` or a per-user path under
+                ``$XDG_RUNTIME_DIR`` / the platform temp dir.
             shm_threshold: Payload size threshold (bytes) at or above which
                 numpy payloads travel through shared memory. Defaults to
                 ``GOGGLES_SHM_THRESHOLD`` or 64 KiB. ``0`` disables shm.
@@ -334,14 +590,24 @@ class LocalTransport:
             if shm_threshold is not None
             else _default_shm_threshold()
         )
+        self._endpoint = _endpoint()
         self._bus: EventBus = EventBus()
         self._is_host = False
+        # ``_running`` gates new emits; it can be flipped to False either
+        # by ``shutdown`` (graceful) or by the send loop when it detects
+        # a dead socket. ``_shutdown_called`` is only set by ``shutdown``
+        # so the cleanup path runs exactly once regardless of who first
+        # noticed the transport was done.
         self._running = True
+        self._shutdown_called = False
+        self._state_lock = threading.Lock()
 
         # Host-side state
         self._server_sock: socket.socket | None = None
         self._accept_thread: threading.Thread | None = None
         self._reader_threads: list[threading.Thread] = []
+        self._client_sockets: list[socket.socket] = []
+        self._client_sockets_lock = threading.Lock()
         self._drain_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._drain_thread: threading.Thread | None = None
 
@@ -349,7 +615,8 @@ class LocalTransport:
         self._client_sock: socket.socket | None = None
         self._send_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._send_thread: threading.Thread | None = None
-        self._send_lock = threading.Lock()
+        self._pending_shm: set[str] = set()
+        self._pending_shm_lock = threading.Lock()
 
         self._connect_or_host()
 
@@ -357,35 +624,41 @@ class LocalTransport:
 
     @property
     def is_host(self) -> bool:
-        """Whether this transport is the host for its socket path."""
+        """Whether this transport owns the EventBus (bound the socket)."""
         return self._is_host
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the transport is accepting new events."""
+        return self._running
 
     # ----- setup -----------------------------------------------------------
 
     def _connect_or_host(self) -> None:
-        """Try to connect to the socket; otherwise bind and become host."""
-        # Attempt to join an existing host first.
+        """Try to connect to the socket; otherwise bind and become host.
+
+        Raises:
+            OSError: If neither connecting nor binding succeed (for
+                example, no write permission on the endpoint path).
+        """
         if self._try_connect():
             self._start_send_worker()
             return
 
-        # Clean up any stale socket file and bind.
-        parent = os.path.dirname(self._socket_path)
-        if parent and not os.path.isdir(parent):
-            os.makedirs(parent, exist_ok=True)
-        try:
-            os.unlink(self._socket_path)
-        except FileNotFoundError:
-            pass
+        # Probe failed: safe to claim the path. If a stale file exists,
+        # clean it up. On Windows the discovery-file rewrite is idempotent
+        # so we don't need a separate unlink step.
+        if not _IS_WINDOWS:
+            if os.path.exists(self._socket_path):
+                # Attempt one last probe before clobbering; the bind race is
+                # handled below by falling back to client mode if bind fails.
+                self._endpoint.cleanup(self._socket_path)
 
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            server.bind(self._socket_path)
-            server.listen(64)
+            server = self._endpoint.bind(self._socket_path)
         except OSError:
-            # Race: another process bound between our connect and bind.
-            server.close()
-            if self._try_connect():
+            # Another process won the bind race. Retry connect.
+            if self._try_connect(retries=5, backoff=0.02):
                 self._start_send_worker()
                 return
             raise
@@ -405,18 +678,12 @@ class LocalTransport:
             True iff a connection was established and stored on the instance.
         """
         for attempt in range(retries):
-            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            try:
-                sock.connect(self._socket_path)
+            sock = self._endpoint.connect(self._socket_path)
+            if sock is not None:
                 self._client_sock = sock
                 return True
-            except OSError:
-                # Includes ConnectionRefusedError (no listener),
-                # FileNotFoundError (no socket file), and ENOTSOCK
-                # (stale regular file at the path).
-                sock.close()
-                if attempt < retries - 1:
-                    time.sleep(backoff * (2**attempt))
+            if attempt < retries - 1:
+                time.sleep(backoff * (2**attempt))
         return False
 
     def _start_host_workers(self) -> None:
@@ -454,6 +721,8 @@ class LocalTransport:
                 conn, _ = self._server_sock.accept()
             except OSError:
                 return
+            with self._client_sockets_lock:
+                self._client_sockets.append(conn)
             reader = threading.Thread(
                 target=self._reader_loop,
                 args=(conn,),
@@ -481,9 +750,18 @@ class LocalTransport:
                 self._dispatch_incoming(kind, body)
         finally:
             try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
                 conn.close()
             except OSError:
                 pass
+            with self._client_sockets_lock:
+                try:
+                    self._client_sockets.remove(conn)
+                except ValueError:
+                    pass
 
     def _dispatch_incoming(self, kind: int, body: bytes) -> None:
         """Route an incoming framed message to the appropriate handler.
@@ -519,7 +797,8 @@ class LocalTransport:
             except Exception:
                 _log.exception("Failed to handle DETACH frame")
         elif kind == _MSG_BYE:
-            # Client announced disconnect; reader will hit EOF and exit.
+            # Client announced graceful disconnect; reader will hit EOF
+            # after all queued frames have been consumed.
             return
         else:
             _log.warning("Unknown frame kind %d", kind)
@@ -544,14 +823,49 @@ class LocalTransport:
             item = self._send_queue.get()
             if item is _SENTINEL:
                 return
+            assert isinstance(item, _SendItem)
             try:
-                with self._send_lock:
-                    self._client_sock.sendall(item)
-            except (BrokenPipeError, ConnectionResetError, OSError):
+                self._client_sock.sendall(item.frame)
+            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
                 _log.warning(
-                    "Goggles client socket closed; dropping queued events"
+                    "Goggles client socket closed (%s); dropping queued events",
+                    exc,
                 )
+                self._fail_pending(item)
                 return
+            else:
+                # Frame reached the kernel; host will unlink the shm after
+                # it processes the frame. If the frame carried a shm name,
+                # we can drop our tracking entry.
+                if item.shm_name is not None:
+                    with self._pending_shm_lock:
+                        self._pending_shm.discard(item.shm_name)
+
+    def _fail_pending(self, failing: _SendItem) -> None:
+        """Unlink any shm blocks we created that won't be delivered.
+
+        Args:
+            failing: The send item whose sendall just errored; its shm
+                needs unlinking too.
+        """
+        self._running = False
+        names: list[str] = []
+        if failing.shm_name is not None:
+            names.append(failing.shm_name)
+        while True:
+            try:
+                item = self._send_queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is _SENTINEL:
+                continue
+            if isinstance(item, _SendItem) and item.shm_name is not None:
+                names.append(item.shm_name)
+        for name in names:
+            _try_unlink_shm(name)
+        with self._pending_shm_lock:
+            for name in names:
+                self._pending_shm.discard(name)
 
     # ----- framing helpers -------------------------------------------------
 
@@ -568,17 +882,20 @@ class LocalTransport:
         """
         return struct.pack(_HEADER_FMT, kind, len(body)) + body
 
-    def _encode_event(self, event: Event) -> bytes:
-        """Encode an Event as a single framed wire message.
-
-        Chooses between the small inline path and the shm side-channel
-        based on ``self._shm_threshold`` and the payload's byte size.
+    def _encode_event(self, event: Event) -> _SendItem:
+        """Encode an Event as a framed send item.
 
         Args:
             event: Event to encode.
 
         Returns:
-            Framed bytes ready to send over the socket.
+            Send item carrying the framed bytes and (for LARGE frames) the
+            name of the shared-memory block the client allocated.
+
+        Raises:
+            BaseException: Propagates any failure from shm allocation,
+                buffer copy, or pickling after reaping the allocated
+                segment so it doesn't leak.
         """
         payload = event.payload
         if (
@@ -586,28 +903,38 @@ class LocalTransport:
             and isinstance(payload, np.ndarray)
             and payload.nbytes >= self._shm_threshold
         ):
-            # Allocate shm and copy the array bytes in once.
             shm = shared_memory.SharedMemory(
                 create=True, size=max(1, payload.nbytes)
             )
+            shm_name = shm.name
+            with self._pending_shm_lock:
+                self._pending_shm.add(shm_name)
             try:
                 view = np.ndarray(
                     payload.shape, dtype=payload.dtype, buffer=shm.buf
                 )
                 view[...] = payload
-                body = _pack_large(event, shm_name=shm.name)
+                body = _pack_large(event, shm_name=shm_name)
+            except BaseException:
+                # Alloc/copy/pack failed; reap the segment we created.
+                try:
+                    shm.close()
+                finally:
+                    _try_unlink_shm(shm_name)
+                with self._pending_shm_lock:
+                    self._pending_shm.discard(shm_name)
+                raise
             finally:
                 shm.close()
-            return self._frame(_MSG_LARGE, body)
-        return self._frame(_MSG_SMALL, _pack_small(event))
+            return _SendItem(
+                frame=self._frame(_MSG_LARGE, body), shm_name=shm_name
+            )
+        return _SendItem(frame=self._frame(_MSG_SMALL, _pack_small(event)))
 
     # ----- public API ------------------------------------------------------
 
     def emit(self, event: Event) -> None:
         """Route an event asynchronously.
-
-        Host mode enqueues the event for the drain thread. Client mode
-        enqueues a framed wire message for the send thread.
 
         Args:
             event: Event to route.
@@ -616,20 +943,20 @@ class LocalTransport:
             return
         if self._is_host:
             self._drain_queue.put(event)
-        else:
-            try:
-                frame = self._encode_event(event)
-            except Exception:
-                _log.exception("Failed to encode event for transport")
-                return
-            self._send_queue.put(frame)
+            return
+        try:
+            item = self._encode_event(event)
+        except Exception:
+            _log.exception("Failed to encode event for transport")
+            return
+        self._send_queue.put(item)
 
     def emit_sync(self, event: Event) -> None:
-        """Route an event and block until the bus has seen it.
+        """Route an event and (host) block until the bus has seen it.
 
         In host mode the event is dispatched inline on the caller thread.
-        In client mode this currently behaves like :meth:`emit`; there is
-        no cross-process ack protocol (tracked as future work).
+        In client mode this enqueues the event and then waits for the
+        send queue to drain (best-effort; there is no cross-process ack).
 
         Args:
             event: Event to route.
@@ -640,7 +967,24 @@ class LocalTransport:
             except Exception:
                 _log.exception("Handler raised in emit_sync")
             return
-        self.emit(event)
+        if not self._running:
+            return
+        try:
+            item = self._encode_event(event)
+        except Exception:
+            _log.exception("Failed to encode event for transport")
+            return
+        self._send_queue.put(item)
+        # Wait until the sender has caught up with this item.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if self._send_queue.empty():
+                return
+            time.sleep(0.001)
+        _log.warning(
+            "emit_sync: send queue did not drain within 5s; "
+            "continuing without ack"
+        )
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
         """Attach handlers under the given scopes.
@@ -652,10 +996,10 @@ class LocalTransport:
         if self._is_host:
             self._bus.attach(handlers, scopes)
             return
+        if not self._running:
+            return
         body = pickle.dumps((handlers, scopes), protocol=5)
-        with self._send_lock:
-            assert self._client_sock is not None
-            self._client_sock.sendall(self._frame(_MSG_ATTACH, body))
+        self._send_queue.put(_SendItem(frame=self._frame(_MSG_ATTACH, body)))
 
     def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
@@ -667,10 +1011,10 @@ class LocalTransport:
         if self._is_host:
             self._bus.detach(handler_name, scope)
             return
+        if not self._running:
+            return
         body = pickle.dumps((handler_name, scope), protocol=5)
-        with self._send_lock:
-            assert self._client_sock is not None
-            self._client_sock.sendall(self._frame(_MSG_DETACH, body))
+        self._send_queue.put(_SendItem(frame=self._frame(_MSG_DETACH, body)))
 
     def shutdown(self, timeout: float | None = None) -> None:
         """Flush pending work and release resources.
@@ -679,9 +1023,11 @@ class LocalTransport:
             timeout: Max seconds to wait per background thread for a clean
                 exit. ``None`` means wait indefinitely.
         """
-        if not self._running:
-            return
-        self._running = False
+        with self._state_lock:
+            if self._shutdown_called:
+                return
+            self._shutdown_called = True
+            self._running = False
 
         if self._is_host:
             self._shutdown_host(timeout)
@@ -690,6 +1036,9 @@ class LocalTransport:
 
     def _shutdown_host(self, timeout: float | None) -> None:
         """Host-side shutdown: close listen socket, drain queue, close bus.
+
+        Reader threads are unblocked by shutting down their peer sockets
+        so ``recv`` returns immediately.
 
         Args:
             timeout: Max seconds to wait for each background thread.
@@ -700,10 +1049,16 @@ class LocalTransport:
             except OSError:
                 pass
             self._server_sock = None
-        try:
-            os.unlink(self._socket_path)
-        except FileNotFoundError:
-            pass
+        self._endpoint.cleanup(self._socket_path)
+
+        # Wake up any reader threads blocked in recv().
+        with self._client_sockets_lock:
+            conns = list(self._client_sockets)
+        for conn in conns:
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
         if self._accept_thread is not None:
             self._accept_thread.join(timeout=timeout)
@@ -711,9 +1066,25 @@ class LocalTransport:
         for t in self._reader_threads:
             t.join(timeout=timeout)
 
+        depth = self._drain_queue.qsize()
+        if depth > 0:
+            _log.info(
+                "goggles host shutdown: waiting for %d queued events "
+                "to drain (timeout=%s)",
+                depth,
+                "inf" if timeout is None else f"{timeout:.1f}s",
+            )
         self._drain_queue.put(_SENTINEL)
         if self._drain_thread is not None:
             self._drain_thread.join(timeout=timeout)
+            if self._drain_thread.is_alive():
+                remaining = self._drain_queue.qsize()
+                _log.warning(
+                    "goggles host shutdown: drain did not finish within "
+                    "%.1fs; %d events will not reach handlers",
+                    timeout if timeout is not None else -1.0,
+                    remaining,
+                )
 
         try:
             self._bus.shutdown()
@@ -721,25 +1092,51 @@ class LocalTransport:
             _log.exception("EventBus.shutdown raised")
 
     def _shutdown_client(self, timeout: float | None) -> None:
-        """Client-side shutdown: announce BYE, flush sends, close socket.
+        """Client-side shutdown: enqueue BYE, drain, then close socket.
+
+        BYE is placed on the send queue rather than sent out-of-band so
+        it is ordered after every previously-enqueued frame. The sentinel
+        that follows terminates the sender loop *after* it has drained.
 
         Args:
-            timeout: Max seconds to wait for the send thread.
+            timeout: Max seconds to wait for the send queue to drain.
         """
+        # Enqueue a graceful BYE followed by the stop sentinel.
         try:
-            if self._client_sock is not None:
-                with self._send_lock:
-                    try:
-                        self._client_sock.sendall(self._frame(_MSG_BYE, b""))
-                    except OSError:
-                        pass
-        finally:
-            self._send_queue.put(_SENTINEL)
-            if self._send_thread is not None:
-                self._send_thread.join(timeout=timeout)
-            if self._client_sock is not None:
-                try:
-                    self._client_sock.close()
-                except OSError:
-                    pass
-                self._client_sock = None
+            self._send_queue.put(_SendItem(frame=self._frame(_MSG_BYE, b"")))
+        except Exception:
+            _log.exception("Failed to enqueue BYE frame")
+        self._send_queue.put(_SENTINEL)
+
+        if self._send_thread is not None:
+            self._send_thread.join(timeout=timeout)
+            if self._send_thread.is_alive():
+                _log.warning(
+                    "goggles client send thread did not drain within "
+                    "%.2fs; %d undelivered events will be dropped",
+                    timeout if timeout is not None else -1.0,
+                    self._send_queue.qsize(),
+                )
+
+        # Anything still in the queue won't ship; unlink its shm blocks.
+        self._fail_pending(_SendItem(frame=b""))
+
+        # Final sweep: if emits raced with the send thread dying, we may
+        # have pending_shm names whose send-items never made it into the
+        # queue we just drained. Reap them now so /dev/shm stays clean.
+        with self._pending_shm_lock:
+            stragglers = list(self._pending_shm)
+            self._pending_shm.clear()
+        for name in stragglers:
+            _try_unlink_shm(name)
+
+        if self._client_sock is not None:
+            try:
+                self._client_sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                self._client_sock.close()
+            except OSError:
+                pass
+            self._client_sock = None

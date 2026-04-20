@@ -1,0 +1,11 @@
+# @package _global_
+# Long-form scalar benchmark: 60 s at 1 kHz.
+#
+# Use this to catch behaviours that only show up at scale — drain-queue
+# backpressure, GC pauses, file-descriptor leaks, etc. Pair with:
+#   GOGGLES_CAPTURE_CALLER=0 uv run python examples/105_benchmark.py \
+#       +preset=scalar_long
+# to isolate transport cost from the inspect.currentframe() overhead.
+log_type: scalar
+num_logs: 60000
+delay: 0.001
