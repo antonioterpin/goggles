@@ -13,6 +13,7 @@ Default run (scalar, 10k calls, max throughput)::
 
 Named presets (see `conf/preset/`)::
 
+    uv run python examples/105_benchmark.py +preset=scalar_30hz
     uv run python examples/105_benchmark.py +preset=scalar_1khz
     uv run python examples/105_benchmark.py +preset=scalar_10khz
     uv run python examples/105_benchmark.py +preset=scalar_max
