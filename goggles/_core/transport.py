@@ -716,9 +716,14 @@ class LocalTransport:
     def _accept_loop(self) -> None:
         """Accept client connections and spawn a reader thread per client."""
         assert self._server_sock is not None
+        # On Linux, closing a listening AF_UNIX socket from another thread
+        # does not wake a blocked accept(); poll so shutdown can break out.
+        self._server_sock.settimeout(0.1)
         while self._running:
             try:
                 conn, _ = self._server_sock.accept()
+            except TimeoutError:
+                continue
             except OSError:
                 return
             with self._client_sockets_lock:
