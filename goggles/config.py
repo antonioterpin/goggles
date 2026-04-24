@@ -9,7 +9,6 @@ from typing import Any, TypeVar
 from rich.console import Console
 from rich.pretty import Pretty
 from ruamel.yaml import YAML
-from yaml.representer import SafeRepresenter
 
 Cfg = TypeVar("Cfg", bound="PrettyConfig")
 
@@ -148,26 +147,6 @@ def load_configuration(file_path: str) -> PrettyConfig:
         data = yaml.load(f) or {}
         # Wrap the loaded dict in our PrettyConfig
         return PrettyConfig(data)
-
-
-def represent_prettyconfig(
-    dumper: SafeRepresenter,
-    data: PrettyConfig,
-) -> Any:
-    """Represent PrettyConfig as a YAML mapping.
-
-    Args:
-        dumper: The YAML dumper.
-        data: The PrettyConfig instance.
-
-    Returns:
-        YAML mapping representation of the provided config.
-
-    """
-    return dumper.represent_mapping("tag:yaml.org,2002:map", dict(data))
-
-
-SafeRepresenter.add_representer(PrettyConfig, represent_prettyconfig)
 
 
 def save_configuration(config: PrettyConfig, file_path: str) -> None:

@@ -31,7 +31,6 @@ dependencies = [
     "ruamel.yaml",
     "rich",
     "typing-extensions>=4.15.0",
-    "pyyaml>=6.0.3",
     "numpy>=1.23",
     "imageio>=2.37.0",
     "matplotlib>=3.10.7",
