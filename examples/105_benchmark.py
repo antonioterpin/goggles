@@ -78,11 +78,12 @@ uploaded later with::
 from __future__ import annotations
 
 import datetime
+import multiprocessing as mp
 import os
 import sys
 import threading
 import time
-from statistics import mean, median, quantiles, stdev
+from statistics import median, quantiles, stdev
 from typing import Any, ClassVar, cast
 
 import hydra
@@ -92,11 +93,12 @@ from omegaconf import DictConfig, OmegaConf
 import goggles as gg
 from goggles import Event, Kind
 
-_logger = gg.get_logger(
-    "goggles.benchmark",
-    scope="goggles.benchmark",
-    with_metrics=True,
-)
+# ``_logger`` is populated inside the per-preset subprocess (see
+# ``_run_benchmark``). Creating it at module import would make the parent
+# Hydra process bind the goggles socket, which subsequently spawned
+# subprocesses would then connect to as clients -- defeating the isolation
+# that running each sweep point in its own process is meant to provide.
+_logger: gg.GogglesLogger = cast(Any, None)
 
 
 class _DeliveryCounter:
@@ -169,8 +171,14 @@ def _run_one(
     label: str,
     verbose: bool,
     step_offset: int = 0,
-) -> list[float]:
+) -> np.ndarray:
     """Run a single benchmark pass and return per-call timings in ms.
+
+    All payload allocations (random scalars, image/video buffers, message
+    strings) happen up front, so the timed region covers only the
+    ``logger.*`` call itself, not numpy or string allocation noise. The
+    timings array is also preallocated to avoid Python list-grow churn at
+    high logging frequencies.
 
     Args:
         log_type: "scalar", "image", "video", "info", "debug", or "print".
@@ -187,63 +195,77 @@ def _run_one(
             "step X < current step Y" rejections.
 
     Returns:
-        A list of per-call wall-clock times, in milliseconds.
+        A 1-D ``float64`` array of per-call wall-clock times, in
+        milliseconds, length ``num_logs``.
 
     Raises:
         ValueError: If ``log_type`` is not one of the supported values.
     """
-    times: list[float] = []
+    times = np.empty(num_logs, dtype=np.float64)
+
+    # Pre-generate payloads outside the timed region. For image/video we
+    # reuse a single buffer across calls: the transport copies the bytes
+    # on its way out, so reusing the source array costs nothing in
+    # realism but removes the np.random.randint allocation from the hot
+    # path (which is exactly the call we're trying to measure).
+    scalar_values: np.ndarray | None = None
+    image_value: np.ndarray | None = None
+    video_value: np.ndarray | None = None
+    text_values: list[str] | None = None
+    metric_name = f"test_metric_{label}"
+    image_name = f"test_image_{label}"
+    video_name = f"test_video_{label}"
+
+    if log_type == "scalar":
+        scalar_values = np.random.randn(num_logs)
+    elif log_type == "image":
+        image_value = np.random.randint(
+            0, 256, (image_size, image_size, 3), dtype=np.uint8
+        )
+    elif log_type == "video":
+        video_value = np.random.randint(
+            0,
+            256,
+            (video_frames, 3, video_size, video_size),
+            dtype=np.uint8,
+        )
+    elif log_type in ("info", "debug", "print"):
+        text_values = [
+            f"{log_type} message step {step_offset + i}"
+            for i in range(num_logs)
+        ]
+    else:
+        raise ValueError(f"Unsupported log_type: {log_type}")
+
     for step_in_run in range(num_logs):
         step = step_offset + step_in_run
-        if log_type == "scalar":
-            value: Any = np.random.randn()
-        elif log_type == "image":
-            value = np.random.randint(
-                0,
-                256,
-                (image_size, image_size, 3),
-                dtype=np.uint8,
-            )
-        elif log_type == "video":
-            value = np.random.randint(
-                0,
-                256,
-                (video_frames, 3, video_size, video_size),
-                dtype=np.uint8,
-            )
-        elif log_type in ("info", "debug", "print"):
-            value = f"{log_type} message step {step}"
-        else:
-            raise ValueError(f"Unsupported log_type: {log_type}")
 
         start = time.perf_counter()
         if log_type == "scalar":
+            assert scalar_values is not None
             _logger.scalar(
-                name=f"test_metric_{label}",
-                value=float(value),
+                name=metric_name,
+                value=float(scalar_values[step_in_run]),
                 step=step,
             )
         elif log_type == "image":
-            _logger.image(
-                name=f"test_image_{label}",
-                image=value,
-                step=step,
-            )
+            assert image_value is not None
+            _logger.image(name=image_name, image=image_value, step=step)
         elif log_type == "video":
-            _logger.video(
-                name=f"test_video_{label}",
-                video=value,
-                step=step,
-            )
+            assert video_value is not None
+            _logger.video(name=video_name, video=video_value, step=step)
         elif log_type == "info":
-            _logger.info(value)
+            assert text_values is not None
+            _logger.info(text_values[step_in_run])
         elif log_type == "debug":
-            _logger.debug(value)
+            assert text_values is not None
+            _logger.debug(text_values[step_in_run])
         elif log_type == "print":
-            print(value)
+            assert text_values is not None
+            print(text_values[step_in_run])
 
         elapsed_ms = (time.perf_counter() - start) * 1000.0
-        times.append(elapsed_ms)
+        times[step_in_run] = elapsed_ms
 
         if delay > 0:
             time.sleep(delay)
@@ -256,37 +278,39 @@ def _run_one(
     return times
 
 
-def _report(times: list[float], label: str) -> None:
+def _report(times: np.ndarray, label: str) -> None:
     """Log min/median/p99/max/mean/stdev for a single benchmark run.
 
     Args:
         times: Per-call wall-clock times in milliseconds.
         label: Tag identifying the run (log_type, resolution, etc.).
     """
-    if not times:
+    if times.size == 0:
         return
 
+    times_list = times.tolist()
     p99 = (
-        quantiles(times, n=100, method="inclusive")[-1]
-        if len(times) > 1
-        else times[0]
+        quantiles(times_list, n=100, method="inclusive")[-1]
+        if times.size > 1
+        else times_list[0]
     )
     p999 = (
-        quantiles(times, n=1000, method="inclusive")[-1]
-        if len(times) >= 1000
-        else max(times)
+        quantiles(times_list, n=1000, method="inclusive")[-1]
+        if times.size >= 1000
+        else float(times.max())
     )
-    _logger.info(f"=== [{label}] Statistics over {len(times)} calls ===")
-    _logger.info(f"  Min    : {min(times):.6f} ms")
-    _logger.info(f"  Median : {median(times):.6f} ms")
-    _logger.info(f"  Mean   : {mean(times):.6f} ms")
+    total = float(times.sum())
+    _logger.info(f"=== [{label}] Statistics over {times.size} calls ===")
+    _logger.info(f"  Min    : {float(times.min()):.6f} ms")
+    _logger.info(f"  Median : {median(times_list):.6f} ms")
+    _logger.info(f"  Mean   : {float(times.mean()):.6f} ms")
     _logger.info(f"  p99    : {p99:.6f} ms")
     _logger.info(f"  p99.9  : {p999:.6f} ms")
-    _logger.info(f"  Max    : {max(times):.6f} ms")
+    _logger.info(f"  Max    : {float(times.max()):.6f} ms")
     _logger.info(
-        f"  Std    : {(stdev(times) if len(times) > 1 else 0.0):.6f} ms"
+        f"  Std    : {(stdev(times_list) if times.size > 1 else 0.0):.6f} ms"
     )
-    _logger.info(f"  Total  : {sum(times):.6f} ms ({sum(times) / 1000:.3f} s)")
+    _logger.info(f"  Total  : {total:.6f} ms ({total / 1000:.3f} s)")
 
 
 def _build_runs(cfg: DictConfig) -> list[tuple[str, dict]]:
@@ -461,7 +485,7 @@ def _kind_for_log_type(log_type: str) -> str:
     return log_type
 
 
-def _summary(all_results: list[tuple[str, list[float]]]) -> None:
+def _summary(all_results: list[tuple[str, np.ndarray]]) -> None:
     """Emit a concise across-run table with min/median/p99/max.
 
     Args:
@@ -475,28 +499,45 @@ def _summary(all_results: list[tuple[str, list[float]]]) -> None:
         f"{'p99(ms)':>10} {'max(ms)':>10}"
     )
     for label, timings in all_results:
-        if not timings:
+        if timings.size == 0:
             continue
+        timings_list = timings.tolist()
         p99 = (
-            quantiles(timings, n=100, method="inclusive")[-1]
-            if len(timings) > 1
-            else timings[0]
+            quantiles(timings_list, n=100, method="inclusive")[-1]
+            if timings.size > 1
+            else timings_list[0]
         )
         _logger.info(
-            f"{label:<22} {min(timings):>10.3f} "
-            f"{median(timings):>10.3f} {p99:>10.3f} "
-            f"{max(timings):>10.3f}"
+            f"{label:<22} {float(timings.min()):>10.3f} "
+            f"{median(timings_list):>10.3f} {p99:>10.3f} "
+            f"{float(timings.max()):>10.3f}"
         )
 
 
-@hydra.main(version_base=None, config_path="conf", config_name="config")
-def main(cfg: DictConfig) -> None:
-    """Hydra entry point: attach handlers, run benchmark(s), report.
+def _run_benchmark(cfg: DictConfig) -> None:
+    """Execute the benchmark end-to-end for a single resolved config.
+
+    This function is designed to run inside a fresh subprocess spawned by
+    :func:`main`. Each Hydra sweep point gets its own Python interpreter,
+    so the goggles transport, wandb handler, and any module-level state
+    are constructed from scratch and torn down cleanly at process exit.
+    Running multiple presets in one interpreter previously leaked a
+    shutdown transport into subsequent presets, silently dropping 100% of
+    their events.
 
     Args:
-        cfg: Resolved config, composed from ``conf/config.yaml`` plus any
-            selected presets and CLI overrides.
+        cfg: Resolved config for this sweep point.
     """
+    # Rebind the module-level placeholder so helpers (``_run_one``,
+    # ``_report``, ``_summary``) that reference ``_logger`` at call time
+    # pick up the live instance for this subprocess.
+    global _logger  # noqa: PLW0603
+    _logger = gg.get_logger(
+        "goggles.benchmark",
+        scope="goggles.benchmark",
+        with_metrics=True,
+    )
+
     gg.attach(
         gg.ConsoleHandler(
             name="goggles.benchmark.console",
@@ -541,7 +582,7 @@ def main(cfg: DictConfig) -> None:
     _logger.info(f"Config:\n{OmegaConf.to_yaml(cfg)}")
     _logger.info(f"Runs: {[label for label, _ in runs]}")
 
-    all_results: list[tuple[str, list[float]]] = []
+    all_results: list[tuple[str, np.ndarray]] = []
     # Global monotonic step counter. Every sweep point + the replay phase
     # advances it, so wandb (which tracks one global step per run) never
     # sees a regression. Prior versions let each sweep reuse step=0..N-1,
@@ -570,13 +611,13 @@ def main(cfg: DictConfig) -> None:
             # past all main-loop runs so the wandb monotonicity check
             # keeps accepting values.
             for label, timings in all_results:
-                for idx, log_time in enumerate(timings):
+                for idx, log_time in enumerate(timings.tolist()):
                     _logger.scalar(
                         name=f"logger_call_time_ms_{label}",
                         value=log_time,
                         step=next_step + idx,
                     )
-                next_step += len(timings)
+                next_step += int(timings.size)
             expected_wandb_rows = next_step
 
         # Capture run identifiers while the wandb handler is still live;
@@ -625,6 +666,57 @@ def main(cfg: DictConfig) -> None:
         # the backend's row count against what we emitted.
         if wandb_runs:
             _verify_wandb_history(wandb_runs, expected_rows=expected_wandb_rows)
+
+
+def _subprocess_entry(cfg_dict: Any, cwd: str) -> None:
+    """Subprocess target: rebuild cfg and run one benchmark sweep point.
+
+    Args:
+        cfg_dict: Plain-Python copy of the Hydra config (picklable).
+        cwd: Hydra's per-run working directory; inherited so relative
+            paths in the config resolve consistently with the parent.
+    """
+    os.chdir(cwd)
+    cfg = cast(DictConfig, OmegaConf.create(cfg_dict))
+    _run_benchmark(cfg)
+
+
+@hydra.main(version_base=None, config_path="conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """Hydra entry point: run each sweep point in its own subprocess.
+
+    We spawn via ``multiprocessing`` with the ``spawn`` start method so
+    every preset (including every point in a Hydra ``--multirun``) gets
+    a fresh Python interpreter. The previous in-process loop left the
+    goggles transport shut down between sweep points, causing 100%
+    delivery loss from the second preset onward. Running in a subprocess
+    guarantees that ``gg.finish()`` tears everything down cleanly via
+    process exit, and the next preset starts from a clean slate.
+
+    Args:
+        cfg: Resolved config, composed from ``conf/config.yaml`` plus any
+            selected presets and CLI overrides.
+
+    Raises:
+        KeyboardInterrupt: Re-raised after terminating the child process.
+        SystemExit: Raised with the child's non-zero exit code so Hydra
+            multiruns surface failures instead of silently continuing.
+    """
+    cfg_dict = cast(Any, OmegaConf.to_container(cfg, resolve=True))
+    ctx = mp.get_context("spawn")
+    proc = ctx.Process(
+        target=_subprocess_entry,
+        args=(cfg_dict, os.getcwd()),
+    )
+    proc.start()
+    try:
+        proc.join()
+    except KeyboardInterrupt:
+        proc.terminate()
+        proc.join(timeout=5.0)
+        raise
+    if proc.exitcode not in (0, None):
+        raise SystemExit(proc.exitcode)
 
 
 if __name__ == "__main__":
