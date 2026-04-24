@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
+from multiprocessing import shared_memory
 from pathlib import Path
 from typing import ClassVar, cast
 
@@ -19,9 +20,12 @@ import goggles as gg
 from goggles import Event, Kind
 from goggles._core.transport import (
     _IS_WINDOWS,
+    _SHM_NAME_PREFIX,
     LocalTransport,
     _default_socket_path,
+    _next_shm_name,
     _pack_small,
+    _reap_orphan_shm,
     _try_unlink_shm,
     _unpack_small,
     _user_tag,
@@ -978,3 +982,56 @@ def test_cross_process_twenty_clients(socket_path: str, tmp_path: Path) -> None:
 def test_try_unlink_shm_tolerates_missing_name() -> None:
     # Should be a no-op, not raise.
     _try_unlink_shm("this-name-does-not-exist-12345")
+
+
+def test_next_shm_name_is_unique_and_prefixed() -> None:
+    a = _next_shm_name()
+    b = _next_shm_name()
+    assert a.startswith(_SHM_NAME_PREFIX)
+    assert b.startswith(_SHM_NAME_PREFIX)
+    assert a != b
+
+
+@pytest.mark.skipif(
+    not Path("/dev/shm").is_dir(),
+    reason="Linux-only: /dev/shm is the visible POSIX-shm mount",
+)
+def test_reap_orphan_shm_removes_only_old_goggles_segments(
+    tmp_path: Path,
+) -> None:
+    del tmp_path  # unused; pytest fixture kept for parity with neighbours
+    fresh = shared_memory.SharedMemory(
+        create=True, name=f"goggles_{os.getpid()}_freshxxx", size=8
+    )
+    stale = shared_memory.SharedMemory(
+        create=True, name=f"goggles_{os.getpid()}_stalexxx", size=8
+    )
+    other = shared_memory.SharedMemory(
+        create=True, name=f"not_goggles_{os.getpid()}_xxx", size=8
+    )
+    try:
+        # Backdate the stale one well past the cutoff.
+        stale_path = Path("/dev/shm") / stale.name
+        old = time.time() - 10_000
+        os.utime(stale_path, (old, old))
+
+        reaped = _reap_orphan_shm(max_age_s=600.0)
+        assert reaped >= 1
+        assert not stale_path.exists(), "stale segment must be unlinked"
+        assert (Path("/dev/shm") / fresh.name).exists(), (
+            "fresh segment must not be touched"
+        )
+        assert (Path("/dev/shm") / other.name).exists(), (
+            "non-goggles segment must not be touched"
+        )
+    finally:
+        for shm in (fresh, other):
+            try:
+                shm.close()
+                shm.unlink()
+            except (FileNotFoundError, OSError):
+                pass
+        try:
+            stale.close()
+        except OSError:
+            pass

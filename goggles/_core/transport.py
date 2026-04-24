@@ -25,6 +25,7 @@ import logging
 import os
 import pickle
 import queue
+import secrets
 import socket
 import struct
 import sys
@@ -255,6 +256,66 @@ def _unpack_large(payload: bytes) -> Event:
         time=stripped.time,
         extra=stripped.extra,
     )
+
+
+_SHM_NAME_PREFIX = "goggles_"
+_SHM_REAP_AGE_S = 300.0
+_LINUX_SHM_DIR = "/dev/shm"
+
+
+def _next_shm_name() -> str:
+    """Return a uniquely-prefixed shared-memory name for this process.
+
+    The ``goggles_`` prefix lets the host opportunistically reap blocks
+    that survived a crash without the consumer ever processing them.
+
+    Returns:
+        A name suitable for ``SharedMemory(create=True, name=...)``.
+    """
+    return f"{_SHM_NAME_PREFIX}{os.getpid()}_{secrets.token_hex(8)}"
+
+
+def _reap_orphan_shm(max_age_s: float = _SHM_REAP_AGE_S) -> int:
+    """Best-effort sweep of stale ``goggles_*`` shared-memory blocks.
+
+    The :mod:`multiprocessing.shared_memory` resource tracker covers
+    in-process leaks, but a host that crashes between receiving a
+    LARGE frame and unlinking the named segment leaves the block
+    behind. This sweep runs at host startup and unlinks any
+    ``goggles_*`` segment older than ``max_age_s`` seconds. Linux only
+    (``/dev/shm`` is the visible mount); a no-op elsewhere.
+
+    Args:
+        max_age_s: Reap blocks whose mtime is older than this many
+            seconds. The default leaves enough headroom that a busy
+            client's just-allocated segments are never touched.
+
+    Returns:
+        Count of segments unlinked (zero on non-Linux or empty dir).
+    """
+    if not os.path.isdir(_LINUX_SHM_DIR):
+        return 0
+    try:
+        names = os.listdir(_LINUX_SHM_DIR)
+    except OSError:
+        return 0
+    cutoff = time.time() - max_age_s
+    reaped = 0
+    for name in names:
+        if not name.startswith(_SHM_NAME_PREFIX):
+            continue
+        path = os.path.join(_LINUX_SHM_DIR, name)
+        try:
+            if os.path.getmtime(path) >= cutoff:
+                continue
+        except OSError:
+            continue
+        try:
+            os.unlink(path)
+            reaped += 1
+        except OSError:
+            pass
+    return reaped
 
 
 def _try_unlink_shm(name: str) -> None:
@@ -728,7 +789,23 @@ class LocalTransport:
         return False
 
     def _start_host_workers(self) -> None:
-        """Start the accept thread and the drain thread on the host side."""
+        """Start the accept thread and the drain thread on the host side.
+
+        Sweeps ``/dev/shm`` for ``goggles_*`` segments left behind by a
+        prior crashed host before spawning workers (Linux only; no-op
+        elsewhere). The cutoff is conservative so live clients are
+        never affected.
+        """
+        try:
+            reaped = _reap_orphan_shm()
+            if reaped:
+                _log.info(
+                    "Reaped %d stale goggles_* shm segment(s) at host startup",
+                    reaped,
+                )
+        except Exception:
+            _log.exception("Orphan-shm sweep raised; continuing")
+
         self._drain_thread = threading.Thread(
             target=self._drain_loop,
             daemon=True,
@@ -949,10 +1026,10 @@ class LocalTransport:
             and isinstance(payload, np.ndarray)
             and payload.nbytes >= self._shm_threshold
         ):
+            shm_name = _next_shm_name()
             shm = shared_memory.SharedMemory(
-                create=True, size=max(1, payload.nbytes)
+                create=True, name=shm_name, size=max(1, payload.nbytes)
             )
-            shm_name = shm.name
             with self._pending_shm_lock:
                 self._pending_shm.add(shm_name)
             try:
