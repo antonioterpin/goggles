@@ -331,6 +331,56 @@ def test_host_emit_sync_dispatches_inline(socket_path: str) -> None:
         transport.shutdown(timeout=2.0)
 
 
+def test_empty_string_log_payload_survives_transport(socket_path: str) -> None:
+    # Regression for #79: empty-string payloads used to blow up portal's
+    # non-empty-buffer assertion. The new transport goes through
+    # pickle+socket, so they must round-trip without raising.
+    transport = LocalTransport(socket_path=socket_path)
+    try:
+        collector = _CollectingHandler()
+        _install_collector(transport, collector)
+
+        transport.emit_sync(
+            Event(
+                kind="log",
+                scope="global",
+                payload="",
+                filepath="t.py",
+                lineno=1,
+            )
+        )
+        assert len(collector.events) == 1
+        assert collector.events[0].payload == ""
+    finally:
+        transport.shutdown(timeout=2.0)
+
+
+def test_empty_string_in_artifact_payload_survives_transport(
+    socket_path: str,
+) -> None:
+    # Regression for #79: empty-string values inside a mapping payload.
+    transport = LocalTransport(socket_path=socket_path)
+    try:
+        collector = _CollectingHandler()
+        _install_collector(transport, collector)
+
+        transport.emit_sync(
+            Event(
+                kind="artifact",
+                scope="global",
+                payload={"empty": "", "non_empty": "x"},
+                filepath="t.py",
+                lineno=1,
+                step=0,
+                extra={"name": "empty_string_dict", "format": "json"},
+            )
+        )
+        assert len(collector.events) == 1
+        assert collector.events[0].payload == {"empty": "", "non_empty": "x"}
+    finally:
+        transport.shutdown(timeout=2.0)
+
+
 def test_handler_exception_does_not_kill_drain(socket_path: str) -> None:
     transport = LocalTransport(socket_path=socket_path)
     try:
