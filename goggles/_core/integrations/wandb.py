@@ -398,13 +398,13 @@ class WandBHandler:
         """Normalize video tensors to (F, 3, H, W) for W&B.
 
         Accepted shapes:
-        - (F, H, W)
-        - (F, C, H, W)
-        - (F, T, C, H, W)
+        - (F, H, W) — implicit grayscale
+        - (F, C, H, W) — channels-first
+        - (F, H, W, C) — channels-last (C in {1, 3, 4})
+        - (F, T, C, H, W) — batched, channels-first
 
         Args:
             value: The input video tensor.
-                shape is either (F, H, W), (F, C, H, W), or (F, T, C, H, W).
 
         Returns:
             The processed video tensor in shape (F, 3, H, W) or (F, T, 3, H, W).
@@ -412,10 +412,13 @@ class WandBHandler:
         if value.ndim == 3:
             # (F, H, W) → (F, 1, H, W)
             value = value[:, None, :, :]
+        elif value.ndim == 4 and value.shape[-1] in (1, 3, 4):
+            # (F, H, W, C) → (F, C, H, W)
+            value = np.moveaxis(value, -1, 1)
         elif value.ndim not in (4, 5):
             self._logger.error(
                 f"Video has invalid shape {value.shape}; "
-                "expected (F,H,W), (F,C,H,W), or (F,T,C,H,W)."
+                "expected (F,H,W), (F,C,H,W), (F,H,W,C), or (F,T,C,H,W)."
             )
 
         if value.shape[1] == 1 and value.ndim == 4:

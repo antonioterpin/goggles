@@ -214,3 +214,35 @@ def test_handle_vector_field_unknown_mode_warns_and_skips(mock_wandb):
     ), "Should log a warning about the unknown visualization mode"
     run = mock_wandb.init.return_value
     run.log.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "shape, expected_channels",
+    [((5, 8, 12, 1), 3), ((5, 8, 12, 3), 3), ((5, 8, 12, 4), 4)],
+    ids=["channels_last_gray", "channels_last_rgb", "channels_last_rgba"],
+)
+def test_prepare_video_channels_last(shape, expected_channels):
+    h = WandBHandler(project="proj")
+    F, H, W, _ = shape
+    value = np.full(shape, 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, expected_channels, H, W), (
+        f"Expected (F, {expected_channels}, H, W) for input {shape},"
+        f" got {out.shape}"
+    )
+
+
+def test_prepare_video_channels_first_preserved():
+    h = WandBHandler(project="proj")
+    F, C, H, W = 5, 3, 8, 12
+    value = np.full((F, C, H, W), 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, 3, H, W)
+
+
+def test_prepare_video_channels_first_grayscale_repeated():
+    h = WandBHandler(project="proj")
+    F, H, W = 5, 8, 12
+    value = np.full((F, 1, H, W), 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, 3, H, W)
