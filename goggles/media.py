@@ -8,8 +8,8 @@ import imageio
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import yaml
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from ruamel.yaml import YAML
 
 
 class _FrameWriter(Protocol):
@@ -523,57 +523,39 @@ def create_numpy_trajectories_visualization(
         matplotlib.use(original_backend)
 
 
-class NumpyDumper(yaml.SafeDumper):
-    """YAML Dumper that handles NumPy data types."""
+def _to_python(obj: Any) -> Any:
+    """Recursively convert NumPy types to their native Python equivalents.
 
-    pass
+    Args:
+        obj: Arbitrary Python value, possibly nested, possibly containing
+            NumPy scalars or arrays.
 
-
-def _represent_numpy_scalar(dumper, value):
-    # Order matters: bool first (bool is a subclass of integer in Python)
-    if isinstance(value, np.bool_):
-        return dumper.represent_bool(bool(value))
-    if isinstance(value, np.integer):
-        return dumper.represent_int(int(value))
-    if isinstance(value, np.floating):
-        return dumper.represent_float(float(value))
-    # Handle Python built-in types that come from .item()
-    if isinstance(value, bool):
-        return dumper.represent_bool(value)
-    if isinstance(value, int):
-        return dumper.represent_int(value)
-    if isinstance(value, float):
-        return dumper.represent_float(value)
-    # Fallback: just stringify
-    return dumper.represent_str(str(value))
+    Returns:
+        A value composed solely of ``dict``/``list``/``tuple``/builtin
+        scalars, safe to hand to a plain YAML dumper.
+    """
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, dict):
+        return {k: _to_python(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_python(x) for x in obj]
+    return obj
 
 
-def _represent_ndarray(dumper, data: np.ndarray):
-    if data.ndim == 0:
-        # 0-D array -> scalar
-        return _represent_numpy_scalar(dumper, data.item())
-    # Higher-D -> nested lists
-    return dumper.represent_list(data.tolist())
-
-
-def _represent_numpy_generic(dumper, data: np.generic):
-    # Handles np.int64, np.float32, np.bool_, etc.
-    return _represent_numpy_scalar(dumper, data)
-
-
-# Register representers
-NumpyDumper.add_representer(np.ndarray, _represent_ndarray)
-NumpyDumper.add_multi_representer(np.generic, _represent_numpy_generic)
-
-
-def yaml_dump(obj: Any, **kwargs: Any) -> str:
+def yaml_dump(obj: Any) -> str:
     """Dump an object to a YAML string, handling NumPy types.
 
     Args:
-        obj: The object to dump.
-        **kwargs: Additional keyword arguments to pass to `yaml.dump`.
+        obj: The object to dump. NumPy arrays/scalars are normalized to
+            native Python types before serialization.
 
     Returns:
         YAML string representation of the object.
     """
-    return yaml.dump(obj, Dumper=NumpyDumper, **kwargs)
+    yaml = YAML(typ="safe", pure=True)
+    buf = io.StringIO()
+    yaml.dump(_to_python(obj), buf)
+    return buf.getvalue()
