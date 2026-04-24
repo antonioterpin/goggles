@@ -11,7 +11,7 @@ External code should not import from this module. Instead, depend on:
 import inspect
 import logging
 import os
-from typing import Any
+from typing import Any, TypeGuard
 
 import numpy as np
 from typing_extensions import Self
@@ -376,31 +376,69 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
-        """Emit a batch of scalar metrics.
+        """Emit a batch of metrics and/or images in one call.
+
+        Values that look like images (2-D arrays, or 3-D arrays with a
+        trailing channel dim in ``{1, 3, 4}``) are promoted to individual
+        image events; every other value is batched into a single metric
+        event. Scalars and images can be mixed freely in the same call.
 
         Args:
-            metrics: (Name,value) pairs.
+            metrics: Mapping of ``name -> value``. Values may be scalars,
+                arrays used as metrics, or image-shaped numpy arrays.
             step: Global step index.
             time: Optional global timestamp.
             async_mode: If True, do not block waiting for delivery.
-            **extra: Additional routing metadata (e.g., split="train").
-
+            **extra: Additional routing metadata (e.g. ``split="train"``)
+                forwarded both to the batched metric event and to each
+                promoted image event.
         """
         filepath, lineno = _caller_id()
-        self._dispatch(
-            Event(
-                kind="metric",
-                scope=self._scope,
-                payload=metrics,
-                level=None,
-                filepath=filepath,
-                lineno=lineno,
-                step=step,
-                time=time,
-                extra={**self._bound, **extra},
-            ),
-            async_mode=async_mode,
-        )
+        bound_extra = {**self._bound, **extra}
+
+        scalars: dict[str, Any] = {}
+        images: dict[str, np.ndarray] = {}
+        for name, value in metrics.items():
+            if _is_push_image(value):
+                images[name] = value
+            else:
+                scalars[name] = value
+
+        if scalars:
+            self._dispatch(
+                Event(
+                    kind="metric",
+                    scope=self._scope,
+                    payload=scalars,
+                    level=None,
+                    filepath=filepath,
+                    lineno=lineno,
+                    step=step,
+                    time=time,
+                    extra=bound_extra,
+                ),
+                async_mode=async_mode,
+            )
+
+        for img_name, img in images.items():
+            self._dispatch(
+                Event(
+                    kind="image",
+                    scope=self._scope,
+                    payload=img,
+                    level=None,
+                    filepath=filepath,
+                    lineno=lineno,
+                    step=step,
+                    time=time,
+                    extra={
+                        **bound_extra,
+                        "name": img_name,
+                        "format": "png",
+                    },
+                ),
+                async_mode=async_mode,
+            )
 
     def scalar(
         self,
@@ -807,6 +845,26 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 self.vector_field(value, name=name_log, **kw)
                 return True
         return False
+
+
+def _is_push_image(value: Any) -> TypeGuard[np.ndarray]:
+    """Return whether ``value`` should be promoted from metric to image.
+
+    Args:
+        value: Candidate payload from a :meth:`CoreGogglesLogger.push`
+            mapping.
+
+    Returns:
+        ``True`` when the value is a 2-D numpy array, or a 3-D numpy
+        array whose trailing axis is ``1``, ``3``, or ``4`` channels.
+        Anything else (scalars, 1-D vectors, higher-rank tensors, other
+        channel counts) stays on the metric path.
+    """
+    if not isinstance(value, np.ndarray):
+        return False
+    if value.ndim == 2:
+        return True
+    return value.ndim == 3 and value.shape[-1] in (1, 3, 4)
 
 
 def _caller_id() -> tuple[str, int]:

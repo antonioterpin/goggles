@@ -7,9 +7,9 @@ from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
+import wandb
 from typing_extensions import Self
 
-import wandb
 from goggles.media import (
     create_numpy_trajectories_visualization,
     create_numpy_vector_field_visualization,
