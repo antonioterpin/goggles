@@ -1,4 +1,6 @@
+import tempfile
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -69,9 +71,18 @@ for t in range(15):
     rgba_video[t, :, :, 3] = alpha_value
 logger.video(rgba_video, name="Random RGBA Video", fps=5, step=100)
 
-# Load and log artifact
-artifact = np.random.rand(100, 100, 3)
-logger.artifact(artifact, name="Random Artifact", step=100)
+# Load and log artifact: WandBHandler expects {path, name, type} where
+# `path` points to a file on disk to be uploaded as a W&B artifact.
+artifact_file = Path(tempfile.mkdtemp()) / "random_artifact.npy"
+np.save(artifact_file, np.random.rand(100, 100, 3))
+logger.artifact(
+    {
+        "path": str(artifact_file),
+        "name": "random_artifact",
+        "type": "misc",
+    },
+    step=100,
+)
 
 
 def make_lamb_oseen_vortices(

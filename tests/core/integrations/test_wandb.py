@@ -98,6 +98,58 @@ def test_get_or_create_run_creates_new(mock_wandb):
     )
 
 
+def test_handle_artifact_uploads_file(mock_wandb, tmp_path):
+    artifact_file = tmp_path / "random_artifact.npy"
+    artifact_file.write_bytes(b"dummy")
+
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="artifact",
+        scope="global",
+        payload={
+            "path": str(artifact_file),
+            "name": "random_artifact",
+            "type": "misc",
+        },
+        step=1,
+        extra={},
+    )
+
+    h.handle(event)
+
+    mock_wandb.Artifact.assert_called_once_with(
+        name="random_artifact", type="misc", metadata={}
+    )
+    mock_wandb.Artifact.return_value.add_file.assert_called_once_with(
+        str(artifact_file)
+    )
+    mock_wandb.init.return_value.log_artifact.assert_called_once_with(
+        mock_wandb.Artifact.return_value
+    )
+
+
+def test_handle_artifact_non_mapping_warns(mock_wandb):
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="artifact",
+        scope="global",
+        payload=np.zeros((4, 4)),
+        step=0,
+        extra={},
+    )
+
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(event)
+    finally:
+        h._logger.removeHandler(collector)
+
+    assert any("must be a mapping" in m.lower() for m in messages), (
+        "Should warn when artifact payload is not a mapping"
+    )
+    mock_wandb.Artifact.assert_not_called()
+
+
 def test_handle_vector_field_logs_image(mock_wandb, monkeypatch):
     h = WandBHandler(project="proj")
     event = SimpleNamespace(
