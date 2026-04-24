@@ -68,9 +68,11 @@ def clean_registry(monkeypatch):
 def test_get_logger_returns_text_and_goggles(monkeypatch):
     dummy_text = object()
     dummy_metrics = object()
-    monkeypatch.setattr(gg, "_make_text_logger", lambda n, s, **t: dummy_text)
     monkeypatch.setattr(
-        gg, "_make_goggles_logger", lambda n, s, **t: dummy_metrics
+        gg, "_make_text_logger", lambda n, s, level, **t: dummy_text
+    )
+    monkeypatch.setattr(
+        gg, "_make_goggles_logger", lambda n, s, level, **t: dummy_metrics
     )
 
     assert gg.get_logger("x") is dummy_text, (
