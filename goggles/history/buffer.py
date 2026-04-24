@@ -98,6 +98,65 @@ def create_history(
     return history
 
 
+def _validate_update_entry(name: str, hist: Array, new: Array) -> None:
+    """Validate that ``new`` can be appended to ``hist`` for field ``name``.
+
+    Args:
+        name: Field name (used in error messages).
+        hist: Existing history array ``(B, T, *shape)``.
+        new: New entry array ``(B, 1, *shape)``.
+
+    Raises:
+        ValueError: If rank, append length, or dtype mismatch the existing
+            history.
+    """
+    if new.ndim != hist.ndim:
+        raise ValueError(
+            f"Dim mismatch for field '{name}': {new.shape} vs {hist.shape}"
+        )
+    if new.shape[1] != 1:
+        raise ValueError(f"Append length must be 1 for field '{name}'")
+    if new.dtype != hist.dtype:
+        raise ValueError(f"Dtype mismatch for field '{name}'")
+
+
+def _resolve_reset_keys(
+    name: str, rng: jax.Array | None, init_mode: str, batch_size: int
+) -> Array:
+    """Return per-batch PRNG keys for reset initialization.
+
+    Args:
+        name: Field name (used in error messages).
+        rng: Either a single PRNGKey of shape ``(2,)`` or per-batch keys of
+            shape ``(B, 2)``.
+        init_mode: Field init mode; randomized modes (``"randn"``) require
+            a non-``None`` ``rng``.
+        batch_size: Leading batch dimension ``B`` of the target history.
+
+    Returns:
+        A ``(B, 2)`` uint32 array of PRNG keys. Dummy zeros are returned
+        when ``init_mode`` is not randomized — callers pass the result to
+        ``jax.vmap`` for uniformity.
+
+    Raises:
+        ValueError: If ``rng`` is missing for a randomized init or has an
+            unsupported shape.
+    """
+    if init_mode != "randn":
+        return jnp.zeros((batch_size, 2), dtype=jnp.uint32)
+    if rng is None:
+        raise ValueError(f"Field '{name}' requires rng for randn reset")
+    rng_arr = jnp.asarray(rng)
+    if rng_arr.ndim == 1:
+        return jax.random.split(rng_arr, batch_size)
+    if rng_arr.ndim == 2 and rng_arr.shape[0] == batch_size:
+        return rng_arr
+    raise ValueError(
+        "rng must be a PRNGKey (shape (2,)) or per-batch keys "
+        f"with shape (B, 2); got {tuple(rng_arr.shape)}"
+    )
+
+
 def update_history(
     history: History,
     new_data: dict[str, Array],
@@ -133,60 +192,31 @@ def update_history(
         if name not in new_data:
             raise ValueError(f"Missing new data for field '{name}'")
         new = new_data[name]
+        _validate_update_entry(name, hist, new)
 
-        # Validate shapes/dtypes
-        if new.ndim != hist.ndim:
-            raise ValueError(
-                f"Dim mismatch for field '{name}': {new.shape} vs {hist.shape}"
-            )
-        if new.shape[1] != 1:
-            raise ValueError(f"Append length must be 1 for field '{name}'")
-        if new.dtype != hist.dtype:
-            raise ValueError(f"Dtype mismatch for field '{name}'")
-
-        # Determine init mode for resets
-        if spec is not None and hasattr(spec, "fields") and name in spec.fields:
-            init_mode = spec.fields[name].init
-        else:
-            init_mode = "zeros"
-
-        # Fast path: no reset handling requested.
         if reset_mask is None:
-            updated_field = jnp.concatenate([hist[:, 1:, ...], new], axis=1)
-            updated[name] = updated_field
+            updated[name] = jnp.concatenate([hist[:, 1:, ...], new], axis=1)
             continue
 
-        # Validate reset mask shape.
         if reset_mask.ndim != 1 or reset_mask.shape[0] != hist.shape[0]:
             raise ValueError(
                 f"Invalid reset_mask shape {reset_mask.shape}, expected (B,)"
             )
 
-        # Prepare per-batch keys when needed.
-        if init_mode == "randn":
-            if rng is None:
-                raise ValueError(f"Field '{name}' requires rng for randn reset")
-            rng_arr = jnp.asarray(rng)
-            if rng_arr.ndim == 1:  # single key (2,)
-                keys = jax.random.split(rng_arr, hist.shape[0])
-            elif rng_arr.ndim == 2 and rng_arr.shape[0] == hist.shape[0]:
-                keys = rng_arr
-            else:
-                raise ValueError(
-                    "rng must be a PRNGKey (shape (2,)) or per-batch keys "
-                    f"with shape (B, 2); got {tuple(rng_arr.shape)}"
-                )
-        else:
-            # Dummy keys; ignored unless init_mode == 'randn'.
-            keys = jnp.zeros((hist.shape[0], 2), dtype=jnp.uint32)
+        init_mode = (
+            spec.fields[name].init
+            if spec is not None
+            and hasattr(spec, "fields")
+            and name in spec.fields
+            else "zeros"
+        )
+        keys = _resolve_reset_keys(name, rng, init_mode, hist.shape[0])
 
-        # Vmap over batch. Keep new with time-dim = 1 for concat in helper.
         def apply(h, n, r, k, init_mode=init_mode):
             return _apply_reset(h, n, r, init_mode, k)
 
-        updated_field = jax.vmap(apply)(
+        updated[name] = jax.vmap(apply)(
             hist, new[:, 0:1, ...], reset_mask, keys
         )
-        updated[name] = updated_field
 
     return updated
