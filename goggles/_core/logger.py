@@ -75,8 +75,13 @@ class CoreTextLogger(TextLogger):
 
         Args:
             event: Event to dispatch.
-            async_mode: If True, fire-and-forget. Otherwise block until
-                the transport has routed the event.
+            async_mode: If True, fire-and-forget. Otherwise perform a
+                synchronous handoff to the configured transport before
+                returning. This does not imply cross-process delivery,
+                remote routing completion, or acknowledgement for
+                transports that do not provide those guarantees (for
+                example, ``LocalTransport`` in client mode, where
+                "sync" is a best-effort local-queue flush).
         """
         if async_mode:
             self._client.emit(event)

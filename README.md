@@ -299,6 +299,8 @@ for step in range(steps):
 
 `gg.freeze()` wraps `gc.freeze()`; the collector still runs on churn allocated after the call, but it stops rescanning the long-lived startup state.
 
+> **Why this is opt-in (not automatic).** `gc.freeze()` is process-global, not goggles-scoped: it promotes **every** currently-tracked Python object — including whatever your code has built so far — into a permanent generation that the GC will skip on subsequent collections. If goggles called it from inside `attach()` or `get_logger()`, we'd be making that decision on objects you haven't finished allocating yet. The right call site is "after *your* setup is done, before *your* hot loop starts" — and only you know where that line is.
+
 ### W&B online vs offline
 
 The W&B upload runs on a background thread that W&B's own SDK manages; Goggles' producer thread only calls `wandb.log({...})`, which enqueues locally and returns quickly. Online vs offline mode therefore **does not change the hot-path latency** your training loop sees — only *where the data ends up* changes.

@@ -99,20 +99,36 @@ bus.
 
 ### 4. Transport (`_core/transport.py`)
 
-Goggles uses a Unix-domain-socket transport (`LocalTransport`) to
-route events within a machine. The first process to bind the socket
-path (default `${XDG_RUNTIME_DIR:-/tmp}/goggles-<uid>.sock`, override
-via `GOGGLES_SOCKET`) becomes the host: it owns an `EventBus`, runs
-an accept thread, and dispatches events via a background drain
-thread. Subsequent processes connect as clients; their events are
-serialized with pickle protocol 5 (with out-of-band `PickleBuffer` for
-numpy zero-copy) and forwarded over the socket.
+Goggles uses a local-machine transport (`LocalTransport`) to route
+events within a machine. The first process to bind the configured
+endpoint becomes the host: it owns an `EventBus`, runs an accept
+thread, and dispatches events via a background drain thread.
+Subsequent processes connect as clients; their events are serialized
+with pickle protocol 5 (with out-of-band `PickleBuffer` for numpy
+zero-copy on the wire) and forwarded over the endpoint.
+
+The endpoint is platform-dependent. On Unix (Linux, macOS) it is an
+`AF_UNIX` stream socket at the path indicated by `GOGGLES_SOCKET`,
+protected at `0o600` (owner-only). On Windows, where `AF_UNIX` is
+unreliable across Python versions, the host binds a TCP loopback
+socket on `127.0.0.1:<random-port>` and writes the chosen port to a
+sidecar discovery file at the same logical `GOGGLES_SOCKET` path; the
+file itself is not a socket. Both paths share the same framing
+protocol.
+
+The transport is designed for **trusted local processes only**. The
+host unpickles bytes received from connected peers, so the on-disk
+permissions (Unix) or loopback isolation (Windows) are the security
+boundary; do not share the socket with untrusted users.
 
 Payloads whose numpy `.nbytes` is at or above `GOGGLES_SHM_THRESHOLD`
-(default 64 KiB) take a zero-copy shared-memory side-channel: the
-client writes the buffer into a `multiprocessing.shared_memory.SharedMemory`
-block and sends only metadata over the socket; the host maps the
-block, passes the event to handlers, then closes and unlinks it.
+(default 64 KiB) take a shared-memory side-channel: the client writes
+the buffer into a `multiprocessing.shared_memory.SharedMemory` block
+and sends only metadata over the socket; the host maps the same
+block, copies it into a private `numpy.ndarray`, then unlinks the
+block before dispatching the event to handlers. The wire side is
+zero-copy; the handler-visible array is a private copy so the segment
+can be released immediately.
 
 Cross-machine logging is out of scope for the built-in transport. To
 add it, implement the `Transport` protocol in a new module and have
@@ -145,8 +161,10 @@ and close all handlers with a configurable timeout
 
 - **Environment variables**:
   - `GOGGLES_SOCKET` (default
-    `${XDG_RUNTIME_DIR:-/tmp}/goggles-<uid>.sock`) -- Unix-socket path
-    used by `LocalTransport` to elect a host.
+    `${XDG_RUNTIME_DIR:-<tempdir>}/goggles-<user>.sock`) -- endpoint
+    path used by `LocalTransport` to elect a host. On Unix this is
+    the AF_UNIX socket; on Windows it is the sidecar discovery file
+    that records the TCP loopback port (see §4).
   - `GOGGLES_SHM_THRESHOLD` (default `65536`, bytes) -- numpy payload
     size at or above which events take the shared-memory side-channel.
     Set to `0` to disable the shm path.
@@ -155,7 +173,11 @@ and close all handlers with a configurable timeout
 
 - **Tests mirror this layout** (`tests/core/`, `tests/core/integrations/`,
   `tests/history/`). Performance benchmarks live in
-  [examples/105_benchmark.py](../../examples/105_benchmark.py).
+  [examples/105_benchmark.py](../../examples/105_benchmark.py) rather
+  than under `tests/`: they take seconds to minutes per run, depend on
+  the optional `hydra-core` dev extra, and produce a report rather
+  than a pass/fail assertion, so they don't belong in the default
+  `pytest` run.
 
 ## Where to make changes
 
