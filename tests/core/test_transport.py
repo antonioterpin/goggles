@@ -331,52 +331,76 @@ def test_host_emit_sync_dispatches_inline(socket_path: str) -> None:
         transport.shutdown(timeout=2.0)
 
 
-def test_empty_string_log_payload_survives_transport(socket_path: str) -> None:
-    # Regression for #79: empty-string payloads used to blow up portal's
-    # non-empty-buffer assertion. The new transport goes through
-    # pickle+socket, so they must round-trip without raising.
-    transport = LocalTransport(socket_path=socket_path)
-    try:
-        collector = _CollectingHandler()
-        _install_collector(transport, collector)
-
-        transport.emit_sync(
-            Event(
-                kind="log",
-                scope="global",
-                payload="",
-                filepath="t.py",
-                lineno=1,
-            )
-        )
-        assert len(collector.events) == 1
-        assert collector.events[0].payload == ""
-    finally:
-        transport.shutdown(timeout=2.0)
-
-
-def test_empty_string_in_artifact_payload_survives_transport(
-    socket_path: str,
+@pytest.mark.parametrize(
+    "kind, payload, extra",
+    [
+        ("log", "", None),
+        ("artifact", {"empty": "", "non_empty": "x"}, {"name": "d", "format": "json"}),
+    ],
+    ids=["log_empty_string", "artifact_with_empty_string_value"],
+)
+def test_empty_string_payloads_roundtrip_through_framing(
+    kind: str, payload: object, extra: dict | None
 ) -> None:
-    # Regression for #79: empty-string values inside a mapping payload.
+    """Regression for #79: empty-string payloads must survive the wire layer.
+
+    Portal's non-empty-buffer assertion used to blow up on ``""``. The new
+    transport goes through ``_pack_small_frame`` → socket → ``_unpack_small``,
+    so we assert the framing round-trip directly (covers the failure mode
+    regardless of host/client dispatch mode).
+    """
+    event_kwargs: dict = {
+        "kind": kind,
+        "scope": "global",
+        "payload": payload,
+        "filepath": "t.py",
+        "lineno": 1,
+    }
+    if extra is not None:
+        event_kwargs["step"] = 0
+        event_kwargs["extra"] = extra
+    event = Event(**event_kwargs)
+    restored = _unpack_small(_frame_body(event))
+    assert restored.kind == kind
+    assert restored.payload == payload
+    if extra is not None:
+        assert restored.extra == extra
+
+
+@pytest.mark.parametrize(
+    "kind, payload, extra",
+    [
+        ("log", "", None),
+        ("artifact", {"empty": "", "non_empty": "x"}, {"name": "d", "format": "json"}),
+    ],
+    ids=["log_empty_string", "artifact_with_empty_string_value"],
+)
+def test_empty_string_payloads_survive_host_emit_sync(
+    socket_path: str, kind: str, payload: object, extra: dict | None
+) -> None:
+    """Integration-level smoke for #79: host-mode emit_sync preserves data.
+
+    This exercises dispatch (not framing), to confirm the inline path
+    doesn't eat empty strings. The wire-level regression lives in
+    :func:`test_empty_string_payloads_roundtrip_through_framing`.
+    """
     transport = LocalTransport(socket_path=socket_path)
     try:
         collector = _CollectingHandler()
         _install_collector(transport, collector)
-
-        transport.emit_sync(
-            Event(
-                kind="artifact",
-                scope="global",
-                payload={"empty": "", "non_empty": "x"},
-                filepath="t.py",
-                lineno=1,
-                step=0,
-                extra={"name": "empty_string_dict", "format": "json"},
-            )
-        )
+        event_kwargs: dict = {
+            "kind": kind,
+            "scope": "global",
+            "payload": payload,
+            "filepath": "t.py",
+            "lineno": 1,
+        }
+        if extra is not None:
+            event_kwargs["step"] = 0
+            event_kwargs["extra"] = extra
+        transport.emit_sync(Event(**event_kwargs))
         assert len(collector.events) == 1
-        assert collector.events[0].payload == {"empty": "", "non_empty": "x"}
+        assert collector.events[0].payload == payload
     finally:
         transport.shutdown(timeout=2.0)
 
