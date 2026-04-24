@@ -285,6 +285,39 @@ def test_prepare_video_5d_valid_channel_dim_passes(c):
     assert out.shape == (2, 4, expected_c, 8, 12)
 
 
+@pytest.mark.parametrize(
+    "kind, payload",
+    [
+        ("image", np.zeros((4, 4, 3), dtype=np.uint8)),
+        ("video", np.zeros((2, 4, 4, 3), dtype=np.uint8)),
+        ("histogram", np.zeros(32, dtype=np.float32)),
+    ],
+    ids=["image", "video", "histogram"],
+)
+def test_handle_does_not_mutate_event_extra(mock_wandb, kind, payload):
+    h = WandBHandler(project="proj")
+    extra = {
+        "name": "thing",
+        "format": "png",
+        "fps": 10,
+        "config_wandb": {"x": 1},
+        "tag": "viz",
+    }
+    snapshot = dict(extra)
+    event = SimpleNamespace(
+        kind=kind,
+        scope="global",
+        payload=payload,
+        step=0,
+        extra=extra,
+    )
+    h.handle(event)
+    assert extra == snapshot, (
+        f"Handler mutated event.extra for kind={kind!r}: "
+        f"before={snapshot}, after={extra}"
+    )
+
+
 def test_prepare_video_channels_first_grayscale_repeated():
     h = WandBHandler(project="proj")
     F, H, W = 5, 8, 12
