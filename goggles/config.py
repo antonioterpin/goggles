@@ -82,13 +82,16 @@ class PrettyConfig(dict):
         """Create an instance from a config dict.
 
         For dataclass subclasses:
-            - Only dataclass fields are accepted.
+            - Only declared public fields (no leading ``_``) may be set.
             - Missing values fall back to the dataclass defaults.
-            - Extra keys are ignored.
-            - Keys starting with '_' are ignored.
+            - Unknown keys raise ``ValueError``.
+            - Keys matching a declared private (``_``-prefixed) field raise
+              ``ValueError`` with a distinct "private fields cannot be
+              overridden" message; private fields are never configurable
+              from a config dict by design.
 
         For non-dataclass usage:
-            - Behaves like `cls(config)`.
+            - Behaves like ``cls(config)``.
 
         Args:
             config: Source configuration mapping.
@@ -96,17 +99,32 @@ class PrettyConfig(dict):
         Returns:
             A configuration instance of `cls`.
 
+        Raises:
+            ValueError: If ``config`` contains keys that name private
+                dataclass fields, or keys that are not declared on the
+                dataclass at all.
         """
         if not is_dataclass(cls):
             return cls(config)
 
-        # Keep only known dataclass fields.
-        allowed = {f.name for f in fields(cls) if not f.name.startswith("_")}
+        declared = {f.name for f in fields(cls)}
+        private_hits = {
+            k for k in config if k in declared and k.startswith("_")
+        }
+        if private_hits:
+            raise ValueError(
+                f"Private fields cannot be overridden via from_config: "
+                f"{private_hits}."
+            )
+        unknown = {k for k in config if k not in declared}
+        if unknown:
+            public = {name for name in declared if not name.startswith("_")}
+            raise ValueError(
+                f"Unknown config keys for {cls.__name__}: {unknown}. "
+                f"Declared: {public}."
+            )
 
-        filtered = {k: v for k, v in config.items() if k in allowed}
-
-        # Instantiating the dataclass will apply defaults automatically.
-        return cls(**filtered)  # type: ignore[misc]
+        return cls(**config)  # type: ignore[misc]
 
     def to_yaml(self, file_path: str) -> None:
         """Save configuration to a YAML file.

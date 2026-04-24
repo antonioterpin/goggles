@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from goggles.config import PrettyConfig, load_configuration
 
 
@@ -56,38 +58,27 @@ def test_typed_config_defaults_and_post_init_dict_shape() -> None:
     }, "Dict payload should match dataclass fields."
 
 
-def test_from_config_ignores_unknown_keys() -> None:
-    """Extra keys in input to from_config are ignored for typed configs."""
-    cfg = DummyTypedConfig.from_config(
-        {
-            "name": "custom.name",
-            "port": "/dev/ttyUSB9",
-            "extra_key": 123,
-            "another": "ignored",
-        }
-    )
-
-    # Known fields set
-    assert cfg.name == "custom.name", "Name should be set from config."
-    assert cfg.port == "/dev/ttyUSB9", "Port should be set from config."
-    assert cfg.baud_rate == 115200, "Baud rate should be set from config."
-    assert cfg._secret == "dont-serialize", (
-        "Private field should keep default value."
-    )
-
-    # Unknown keys are NOT stored in the dict
-    assert "extra_key" not in cfg, "Extra keys should not be in the dict."
-    assert "another" not in cfg, "Extra keys should not be in the dict."
-
-    # Unknown keys are NOT attributes
-    assert not hasattr(cfg, "extra_key"), "Extra keys should not be attributes."
-    assert not hasattr(cfg, "another"), "Extra keys should not be attributes."
+def test_from_config_rejects_unknown_keys() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        DummyTypedConfig.from_config(
+            {
+                "name": "custom.name",
+                "port": "/dev/ttyUSB9",
+                "extra_key": 123,
+                "another": "ignored",
+            }
+        )
+    msg = str(exc_info.value)
+    assert "Unknown config keys" in msg
+    assert "DummyTypedConfig" in msg
+    assert "extra_key" in msg
+    assert "another" in msg
 
 
 def test_to_dict_and_from_config_roundtrip_same() -> None:
     """to_dict + from_config returns an equivalent config."""
     cfg1 = DummyTypedConfig.from_config(
-        {"name": "a", "port": "b", "baud_rate": 115200, "ignored": True}
+        {"name": "a", "port": "b", "baud_rate": 115200}
     )
 
     d = cfg1.to_dict()
@@ -114,7 +105,6 @@ def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(
             "name": "n",
             "port": "/dev/ttyUSB0",
             "baud_rate": 115200,
-            "junk": "nope",
         }
     )
 
@@ -142,24 +132,28 @@ def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(
     )
 
 
-def test_private_fields_are_not_overwritten_by_from_config() -> None:
-    """Keys starting with '_' must be ignored by from_config."""
-    cfg = DummyTypedConfig.from_config(
-        {
-            "_secret": "hacked",
-            "name": "x",
-            "port": "y",
-        }
-    )
+def test_private_fields_cannot_be_overridden_by_from_config() -> None:
+    """Attempting to set a `_`-prefixed declared field raises ValueError."""
+    with pytest.raises(ValueError) as exc_info:
+        DummyTypedConfig.from_config(
+            {
+                "_secret": "hacked",
+                "name": "x",
+                "port": "y",
+            }
+        )
+    msg = str(exc_info.value)
+    assert "Private fields cannot be overridden" in msg
+    assert "_secret" in msg
 
-    assert cfg.name == "x", "Public field must be set from config."
-    assert cfg.port == "y", "Public field must be set from config."
-    assert cfg._secret == "dont-serialize", (
-        "Private field must keep default value."
-    )
-    assert "_secret" not in cfg, (
-        "Private field must not appear in dict payload."
-    )
+
+def test_from_config_reports_both_categories_distinctly() -> None:
+    """Undeclared `_`-prefixed keys are unknown-keys, not private-field hits."""
+    with pytest.raises(ValueError) as exc_info:
+        DummyTypedConfig.from_config({"_not_declared": 1})
+    msg = str(exc_info.value)
+    assert "Unknown config keys" in msg
+    assert "_not_declared" in msg
 
 
 def test_private_fields_not_serialized_yaml_json_roundtrip(
