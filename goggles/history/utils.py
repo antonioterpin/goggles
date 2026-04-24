@@ -25,7 +25,7 @@ class Device(Protocol):
 
 
 def _resolve_history_fields(
-    history: History, fields: Sequence[str] | None
+    history: History, fields: str | list[str] | tuple[str, ...] | None
 ) -> list[str]:
     """Normalize ``fields`` into a concrete, validated key list.
 
@@ -67,7 +67,7 @@ def slice_history(
     history: History,
     start: int,
     length: int,
-    fields: Sequence[str] | None = None,
+    fields: str | list[str] | tuple[str, ...] | None = None,
 ) -> History:
     """Return a temporal slice [start : start+length] for selected fields.
 

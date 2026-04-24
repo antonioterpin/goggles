@@ -107,17 +107,33 @@ def _validate_update_entry(name: str, hist: Array, new: Array) -> None:
         new: New entry array ``(B, 1, *shape)``.
 
     Raises:
-        ValueError: If rank, append length, or dtype mismatch the existing
-            history.
+        ValueError: If rank, append length, batch shape, payload shape, or
+            dtype mismatch the existing history.
     """
     if new.ndim != hist.ndim:
         raise ValueError(
             f"Dim mismatch for field '{name}': {new.shape} vs {hist.shape}"
         )
     if new.shape[1] != 1:
-        raise ValueError(f"Append length must be 1 for field '{name}'")
+        raise ValueError(
+            f"Append length must be 1 for field '{name}': "
+            f"{new.shape} vs {hist.shape}"
+        )
+    if new.shape[0] != hist.shape[0]:
+        raise ValueError(
+            f"Batch dimension mismatch for field '{name}': "
+            f"{new.shape} vs {hist.shape}"
+        )
+    if new.shape[2:] != hist.shape[2:]:
+        raise ValueError(
+            f"Payload shape mismatch for field '{name}': "
+            f"{new.shape} vs {hist.shape}"
+        )
     if new.dtype != hist.dtype:
-        raise ValueError(f"Dtype mismatch for field '{name}'")
+        raise ValueError(
+            f"Dtype mismatch for field '{name}': "
+            f"{new.dtype} vs {hist.dtype}; shapes {new.shape} vs {hist.shape}"
+        )
 
 
 def _resolve_reset_keys(
