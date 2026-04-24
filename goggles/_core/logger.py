@@ -743,111 +743,70 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         for topic, value in data.items():
-            topic_str = str(topic)  # Ensure str
+            topic_str = str(topic)
             name_log = (
                 f"{name}{topic_str}"
                 if topic_str.startswith("/")
                 else f"{name}/{topic_str}"
             )
 
+            kw = {
+                "step": step,
+                "time": time,
+                "async_mode": async_mode,
+                **extra,
+            }
+
             if isinstance(value, (int, float, np.number)):
-                self.scalar(
-                    name_log,
-                    float(value),
-                    step=step,
-                    time=time,
-                    async_mode=async_mode,
-                    **extra,
-                )
+                self.scalar(name_log, float(value), **kw)
                 continue
 
-            if isinstance(value, np.ndarray):
-                if value.size == 1:
-                    self.scalar(
-                        name_log,
-                        float(value.item()),
-                        step=step,
-                        time=time,
-                        async_mode=async_mode,
-                        **extra,
-                    )
-                    continue
-
-                elif value.ndim == 1:
-                    for i, v in enumerate(value):
-                        self.scalar(
-                            f"{name_log}_{i}",
-                            float(v),
-                            step=step,
-                            time=time,
-                            async_mode=async_mode,
-                            **extra,
-                        )
-                    continue
-
-                elif value.ndim == 2:
-                    self.image(
-                        value,
-                        step=step,
-                        name=name_log,
-                        time=time,
-                        async_mode=async_mode,
-                        **extra,
-                    )
-                    continue
-
-                elif value.ndim == 3:
-                    if value.shape[2] in (1, 3, 4):
-                        self.image(
-                            value,
-                            step=step,
-                            name=name_log,
-                            time=time,
-                            async_mode=async_mode,
-                            **extra,
-                        )
-                        continue
-                    elif value.shape[2] == 2:
-                        self.vector_field(
-                            value,
-                            step=step,
-                            name=name_log,
-                            time=time,
-                            async_mode=async_mode,
-                            **extra,
-                        )
-                        continue
-
-                elif value.ndim == 4:
-                    if value.shape[2] in (1, 3, 4):
-                        self.image(
-                            value,
-                            step=step,
-                            name=name_log,
-                            time=time,
-                            async_mode=async_mode,
-                            **extra,
-                        )
-                        continue
-                    elif value.shape[2] == 2:
-                        self.vector_field(
-                            value,
-                            step=step,
-                            name=name_log,
-                            time=time,
-                            async_mode=async_mode,
-                            **extra,
-                        )
-                        continue
+            if isinstance(value, np.ndarray) and self._emit_dict_ndarray(
+                name_log, value, kw
+            ):
+                continue
 
             self.error(
                 f"Unsupported type for dictionary logging: topic={topic}, "
                 f"type={type(value)}",
-                time=time,
-                step=step,
-                async_mode=async_mode,
-                **extra,
+                **kw,
             )
+
+    def _emit_dict_ndarray(
+        self, name_log: str, value: np.ndarray, kw: dict[str, Any]
+    ) -> bool:
+        """Route a numpy value emitted by :meth:`dictionary` to the right API.
+
+        Args:
+            name_log: Fully-qualified metric/artifact name.
+            value: Numpy array payload.
+            kw: Pre-built kwargs (``step``, ``time``, ``async_mode``, extras)
+                forwarded to the target emit method.
+
+        Returns:
+            ``True`` if a matching emit path was dispatched, ``False`` if
+            the array shape is not supported (caller should surface an
+            error).
+        """
+        if value.size == 1:
+            self.scalar(name_log, float(value.item()), **kw)
+            return True
+        if value.ndim == 1:
+            for i, v in enumerate(value):
+                self.scalar(f"{name_log}_{i}", float(v), **kw)
+            return True
+        if value.ndim == 2:
+            self.image(value, name=name_log, **kw)
+            return True
+        if value.ndim in (3, 4):
+            channels = value.shape[2]
+            if channels in (1, 3, 4):
+                self.image(value, name=name_log, **kw)
+                return True
+            if channels == 2:
+                self.vector_field(value, name=name_log, **kw)
+                return True
+        return False
 
 
 def _caller_id() -> tuple[str, int]:

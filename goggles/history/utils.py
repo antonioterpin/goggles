@@ -24,47 +24,24 @@ class Device(Protocol):
     platform: str
 
 
-def slice_history(
-    history: History,
-    start: int,
-    length: int,
-    fields: Sequence[str] | None = None,
-) -> History:
-    """Return a temporal slice [start : start+length] for selected fields.
+def _resolve_history_fields(
+    history: History, fields: Sequence[str] | None
+) -> list[str]:
+    """Normalize ``fields`` into a concrete, validated key list.
 
     Args:
-        history: Mapping field -> array of shape (B, T, ...).
-        start: Starting timestep (0-based).
-        length: Number of timesteps to include (> 0).
-        fields: One or more field names to slice.
-            If a single string is provided, only that field is sliced.
-            If a list or tuple is provided, all listed fields are sliced.
-            If None, all fields in `history` are sliced.
+        history: Source history mapping.
+        fields: Field selector (``None`` / string / list-or-tuple of strings).
 
     Returns:
-        Mapping of sliced arrays with shape (B, length, ...).
+        The list of concrete field keys to operate on.
 
     Raises:
-        ValueError: If `length` <= 0, `start` out of bounds, or slice exceeds T.
-        KeyError: If `fields` is not present in `history`.
-        TypeError: If `history` is empty or contains tensors with rank < 2.
-
+        TypeError: If ``fields`` is neither ``None``, a string, nor a
+            list/tuple of strings.
+        ValueError: If ``fields`` is an empty list.
+        KeyError: If any requested field is absent from ``history``.
     """
-    # Validate length and history
-    if length <= 0:
-        raise ValueError("length must be > 0")
-    if not history:
-        raise TypeError("history must be a non-empty mapping")
-
-    # Validate reference array and slice bounds
-    any_arr = next(iter(history.values()))
-    if any_arr.ndim < 2:
-        raise TypeError("history arrays must have rank >= 2 (B, T, ...)")
-    T = any_arr.shape[1]
-    if start < 0 or start + length > T:
-        raise ValueError(f"Invalid slice [{start}:{start + length}] for T={T}")
-
-    # Normalize and validate `fields`
     if fields is None:
         keys = list(history.keys())
     elif isinstance(fields, str):
@@ -80,12 +57,53 @@ def slice_history(
             "fields must be a string, list/tuple of strings, or None"
         )
 
-    # Check that all requested fields exist
     missing = set(keys) - set(history)
     if missing:
         raise KeyError(f"Unknown fields: {missing}")
+    return keys
 
-    # Validate ranks for selected fields
+
+def slice_history(
+    history: History,
+    start: int,
+    length: int,
+    fields: Sequence[str] | None = None,
+) -> History:
+    """Return a temporal slice [start : start+length] for selected fields.
+
+    May propagate ``KeyError`` from :func:`_resolve_history_fields` when
+    a requested field is absent from ``history``.
+
+    Args:
+        history: Mapping field -> array of shape (B, T, ...).
+        start: Starting timestep (0-based).
+        length: Number of timesteps to include (> 0).
+        fields: One or more field names to slice.
+            If a single string is provided, only that field is sliced.
+            If a list or tuple is provided, all listed fields are sliced.
+            If None, all fields in `history` are sliced.
+
+    Returns:
+        Mapping of sliced arrays with shape (B, length, ...).
+
+    Raises:
+        ValueError: If `length` <= 0, `start` out of bounds, or slice exceeds T.
+        TypeError: If `history` is empty or contains tensors with rank < 2.
+
+    """
+    if length <= 0:
+        raise ValueError("length must be > 0")
+    if not history:
+        raise TypeError("history must be a non-empty mapping")
+
+    any_arr = next(iter(history.values()))
+    if any_arr.ndim < 2:
+        raise TypeError("history arrays must have rank >= 2 (B, T, ...)")
+    T = any_arr.shape[1]
+    if start < 0 or start + length > T:
+        raise ValueError(f"Invalid slice [{start}:{start + length}] for T={T}")
+
+    keys = _resolve_history_fields(history, fields)
     for k in keys:
         if history[k].ndim < 2:
             raise TypeError(f"Field {k!r} must have rank >= 2 (B, T, ...)")

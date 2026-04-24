@@ -120,17 +120,14 @@ select = [
     "RUF",    # ruff-specific rules (includes RUF100 for unused noqa)
 ]
 
-# NOTE: #117 tracks the remaining "too many" ignores.
-# PLR0913 (too many arguments) is kept on purpose — the public logger
-# protocol methods are kwarg-heavy by design. PLR0912 (too many
-# branches) still has a few violators in goggles/history/ and will be
-# removed in a follow-up.
+# NOTE: PLR0913 (too many arguments) is kept on purpose — the public
+# logger protocol methods are kwarg-heavy by design. PLR0911/PLR0912/
+# PLR0915 from #117 have been cleared.
 ignore = [
     "PLR2004", # Magic value used in comparison
     "PLR0913", # Too many arguments in function definition
     "N803",    # Argument name should be lowercase (CV standard Ix, Iy, ecc.)
     "N806",    # Variable in function should be lowercase (CV standard Ix, Iy, ecc.)
-    "PLR0912", # Too many branches
     "D100",    # Missing docstring in public module
     "D104",    # Missing docstring in public package
     "D105",    # Missing docstring in magic method
