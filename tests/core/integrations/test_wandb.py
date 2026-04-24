@@ -240,6 +240,24 @@ def test_prepare_video_channels_first_preserved():
     assert out.shape == (F, 3, H, W)
 
 
+@pytest.mark.parametrize("W", [1, 3, 4])
+def test_prepare_video_channels_first_ambiguous_width_preserved(W):
+    h = WandBHandler(project="proj")
+    F, C, H = 5, 3, 8
+    value = np.full((F, C, H, W), 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, C, H, W), (
+        "Channels-first input with W in {1, 3, 4} must not be "
+        "misdetected as channels-last"
+    )
+
+
+def test_prepare_video_invalid_ndim_raises():
+    h = WandBHandler(project="proj")
+    with pytest.raises(ValueError, match="invalid shape"):
+        h._prepare_video_for_wandb(np.zeros((2, 3), dtype=np.uint8))
+
+
 def test_prepare_video_channels_first_grayscale_repeated():
     h = WandBHandler(project="proj")
     F, H, W = 5, 8, 12
