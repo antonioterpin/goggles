@@ -600,15 +600,16 @@ def _to_python(obj: Any) -> Any:
             NumPy scalars or arrays.
 
     Returns:
-        A value composed solely of ``dict``/``list``/``tuple``/builtin
-        scalars, safe to hand to a plain YAML dumper.
+        A value composed solely of ``dict``/``list``/builtin scalars,
+        safe to hand to a plain YAML dumper. Sequence inputs such as
+        tuples are normalized to lists.
     """
     if isinstance(obj, np.ndarray):
-        return obj.tolist()
+        return _to_python(obj.tolist())
     if isinstance(obj, np.generic):
         return obj.item()
     if isinstance(obj, dict):
-        return {k: _to_python(v) for k, v in obj.items()}
+        return {_to_python(k): _to_python(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_to_python(x) for x in obj]
     return obj
