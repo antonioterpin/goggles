@@ -33,4 +33,12 @@ logger.debug("This is a synchronous debug message.", async_mode=False)
 # if both are eligible.
 logger.info("This message will be logged by both handlers.")
 
+# Per-logger severity gate — useful to turn DEBUG on in a single module
+# without flooding the rest of the app. Also available at construction:
+# `gg.get_logger(__name__, level=gg.DEBUG)`.
+noisy = gg.get_logger("examples.basic.noisy")
+noisy.set_level(gg.WARNING)
+noisy.debug("dropped — below the gate")
+noisy.warning("shown — at/above the gate")
+
 gg.finish()

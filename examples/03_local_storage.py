@@ -52,6 +52,21 @@ logger.push(
     step=2,
 )
 
+# `push` also accepts image-shaped arrays (2-D, or 3-D with trailing
+# channel axis in {1, 3, 4}) and promotes them to individual image
+# events, so scalars + figures can land in a single call.
+logger.push(
+    {
+        "train/loss": 0.120,
+        "val/loss": 0.190,
+        "eval/confusion": np.random.randint(
+            0, 255, (32, 32, 3), dtype=np.uint8
+        ),
+        "eval/attention": np.random.randint(0, 255, (32, 32), dtype=np.uint8),
+    },
+    step=2,
+)
+
 # Image logging
 logger.info("Logging sample image...")
 dummy_image = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
@@ -194,6 +209,31 @@ logger.vector_field(
     step=8,
 )
 
+# Trajectories logging
+# `logger.trajectories` accepts arrays shaped (N, L, dim) with dim in {2, 3};
+# set `store_visualization=True` to also save a PNG preview alongside the .npy.
+logger.info("Logging sample trajectories (2D + 3D)...")
+rng = np.random.default_rng(0)
+N, L = 6, 40
+
+# 2-D random walk per trajectory
+trajectories_2d = np.cumsum(rng.normal(size=(N, L, 2), scale=0.1), axis=1)
+logger.trajectories(
+    trajectories_2d,
+    name="random_walk_2d",
+    store_visualization=True,
+    step=9,
+)
+
+# 3-D random walk per trajectory (matplotlib picks a 3D projection)
+trajectories_3d = np.cumsum(rng.normal(size=(N, L, 3), scale=0.1), axis=1)
+logger.trajectories(
+    trajectories_3d,
+    name="random_walk_3d",
+    store_visualization=True,
+    step=9,
+)
+
 # Histogram logging
 logger.info("Logging sample histogram...")
 histogram_data = np.random.randn(1000)
@@ -208,6 +248,7 @@ print("- examples/logs/images/ (contains saved image files)")
 print("- examples/logs/videos/ (contains saved video files)")
 print("- examples/logs/artifacts/ (contains saved artifact files)")
 print("- examples/logs/vector_fields/ (contains saved vector field files)")
+print("- examples/logs/trajectories/ (contains saved trajectory files)")
 print("- examples/logs/histograms/ (contains saved histogram files)")
 print("- Media files are referenced by relative paths in the JSONL log")
 
