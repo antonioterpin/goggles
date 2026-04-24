@@ -271,10 +271,6 @@ class WandBHandler:
 
         Args:
             event: The Goggles event to process.
-
-        Raises:
-            ValueError: If the event kind is unsupported or if the payload is
-                malformed for the given kind.
         """
         scope = getattr(event, "scope", None) or self.GLOBAL_SCOPE
         kind = getattr(event, "kind", None) or "metric"
@@ -285,220 +281,249 @@ class WandBHandler:
         extra = dict(getattr(event, "extra", {}) or {})
         extra_config = extra.pop("config_wandb", {})
 
-        # Get or create the W&B run for the given scope
         run = self._get_or_create_run(scope, extra_config)
 
         if kind == "metric":
-            if not isinstance(payload, Mapping):
-                raise ValueError(
-                    "Metric event payload must be a mapping of name→value."
-                )
-            payload = {k: v for k, v in payload.items() if v is not None}
-            if not payload:
-                self._logger.warning(
-                    "Skipping metric log with empty payload (scope=%s).", scope
-                )
-                return
-            for k, v in extra.items():
-                payload[k] = v
-            run.log(payload, step=step)
-            return
+            self._handle_metric(run, payload, step, extra, scope)
+        elif kind in {"image", "video"}:
+            self._handle_media(run, kind, payload, step, extra, scope)
+        elif kind == "artifact":
+            self._handle_artifact(run, payload, extra)
+        elif kind == "histogram":
+            self._handle_histogram(run, payload, step, extra, scope)
+        elif kind == "vector_field":
+            self._handle_vector_field(run, payload, step, extra, scope)
+        elif kind == "trajectories":
+            self._handle_trajectories(run, payload, step, extra, scope)
+        else:
+            self._logger.warning("Unsupported event kind: %s", kind)
 
-        if kind in {"image", "video"}:
-            # Preferred key name comes from event.extra["name"],
-            # else "image"/"video"
-            key_name = extra.pop("name", kind)
-
-            # Allow payload to be either a mapping {name: data}
-            # or a single datum
-            items = (
-                payload.items()
-                if isinstance(payload, Mapping)
-                else [(key_name, payload)]
+    def _handle_metric(
+        self,
+        run: Run,
+        payload: Any,
+        step: int | None,
+        extra: dict[str, Any],
+        scope: str,
+    ) -> None:
+        if not isinstance(payload, Mapping):
+            raise ValueError(
+                "Metric event payload must be a mapping of name->value."
             )
-            logs = {}
-            for name, value in items:
-                if value is None:
-                    self._logger.warning(
-                        "Skipping %s '%s' with None payload (scope=%s).",
-                        kind,
-                        name,
-                        scope,
-                    )
-                    continue
-                if kind == "image":
-                    logs[name] = wandb.Image(value)
-                else:
-                    fps = int(extra.get("fps", 20))
-                    fmt = str(extra.get("format", "mp4"))
-                    if fmt not in {"mp4", "gif"}:
-                        self._logger.warning(
-                            "Unsupported video format '%s' for '%s'; "
-                            "defaulting to 'mp4'.",
-                            fmt,
-                            name,
-                        )
-                        fmt = "mp4"
-                    new_value = self._prepare_video_for_wandb(value)
-                    logs[name] = wandb.Video(new_value, fps=fps, format=fmt)  # pyright: ignore[reportArgumentType]
-            # Add the extra fields to the logged object
-            for k, v in extra.items():
-                logs[k] = v
+        payload = {k: v for k, v in payload.items() if v is not None}
+        if not payload:
+            self._logger.warning(
+                "Skipping metric log with empty payload (scope=%s).", scope
+            )
+            return
+        for k, v in extra.items():
+            payload[k] = v
+        run.log(payload, step=step)
 
-            if logs:
-                # Use a single API across kinds for consistency
-                run.log(logs, step=step)
+    def _handle_media(
+        self,
+        run: Run,
+        kind: str,
+        payload: Any,
+        step: int | None,
+        extra: dict[str, Any],
+        scope: str,
+    ) -> None:
+        key_name = extra.pop("name", kind)
+        items = (
+            payload.items()
+            if isinstance(payload, Mapping)
+            else [(key_name, payload)]
+        )
+        logs: dict[str, Any] = {}
+        for name, value in items:
+            if value is None:
+                self._logger.warning(
+                    "Skipping %s '%s' with None payload (scope=%s).",
+                    kind,
+                    name,
+                    scope,
+                )
+                continue
+            logs[name] = (
+                wandb.Image(value)
+                if kind == "image"
+                else self._build_wandb_video(name, value, extra)
+            )
+        for k, v in extra.items():
+            logs[k] = v
+        if logs:
+            run.log(logs, step=step)
+
+    def _build_wandb_video(
+        self, name: str, value: Any, extra: Mapping[str, Any]
+    ) -> Any:
+        fps = int(extra.get("fps", 20))
+        fmt = str(extra.get("format", "mp4"))
+        if fmt not in {"mp4", "gif"}:
+            self._logger.warning(
+                "Unsupported video format '%s' for '%s'; defaulting to 'mp4'.",
+                fmt,
+                name,
+            )
+            fmt = "mp4"
+        prepared = self._prepare_video_for_wandb(value)
+        return wandb.Video(prepared, fps=fps, format=fmt)  # pyright: ignore[reportArgumentType]
+
+    def _handle_artifact(
+        self, run: Run, payload: Any, extra: dict[str, Any]
+    ) -> None:
+        if not isinstance(payload, Mapping):
+            self._logger.warning(
+                "Artifact payload must be a mapping; got %r", type(payload)
+            )
+            return
+        path = payload.get("path")
+        name = payload.get("name", "artifact")
+        art_type = payload.get("type", "misc")
+        if not isinstance(path, str):
+            self._logger.warning(
+                "Artifact missing valid 'path' field; skipping."
+            )
+            return
+        artifact = wandb.Artifact(name=name, type=art_type, metadata=extra)
+        artifact.add_file(path)
+        run.log_artifact(artifact)
+
+    def _handle_histogram(
+        self,
+        run: Run,
+        payload: Any,
+        step: int | None,
+        extra: dict[str, Any],
+        scope: str,
+    ) -> None:
+        name = extra.pop("name", "histogram")
+        static = extra.pop("static", False)
+        num_bins = int(extra.pop("num_bins", extra.pop("bins", 64)))
+
+        if not isinstance(payload, (Sequence, np.ndarray)):
+            self._logger.warning(
+                "Invalid histogram payload for '%s' (scope=%s): "
+                "must be a sequence or tuple.",
+                name,
+                scope,
+            )
             return
 
-        if kind == "artifact":
-            if not isinstance(payload, Mapping):
-                self._logger.warning(
-                    "Artifact payload must be a mapping; got %r", type(payload)
+        logs: dict[str, Any] = {}
+        try:
+            if static:
+                payload_list = list(payload)
+                data = [[v] for v in payload_list]
+                table = wandb.Table(data=data, columns=["values"])
+                logs[name] = wandb.plot.histogram(
+                    table, "values", title="Histogram of Random Values"
                 )
-                return
-            path = payload.get("path")
-            name = payload.get("name", "artifact")
-            art_type = payload.get("type", "misc")
-            if not isinstance(path, str):
-                self._logger.warning(
-                    "Artifact missing valid 'path' field; skipping."
+            else:
+                logs[name] = wandb.Histogram(
+                    np_histogram=np.histogram(payload, bins=num_bins)
                 )
-                return
-            artifact = wandb.Artifact(name=name, type=art_type, metadata=extra)
-            artifact.add_file(path)
-            run.log_artifact(artifact)
+        except Exception as exc:
+            self._logger.warning(
+                f"Invalid histogram payload for '{name}' "
+                f"(scope={scope}): {exc}",
+            )
             return
 
-        if kind == "histogram":
-            # Support a vector of samples or an (hist, bin_edges) tuple
-            # via `np_hist`.
-            # Name defaults to "histogram" unless provided in extra.
-            name = extra.pop("name", "histogram")
-            static = extra.pop("static", False)
-            # `num_bins` can be overridden through extra; default to 64 like W&B
-            num_bins = int(
-                extra.pop("num_bins", extra.pop("bins", 64))
-            )  # TODO: check if bins is needed
+        for k, v in extra.items():
+            logs[k] = v
+        if logs:
+            run.log(logs, step=step)
 
-            logs: dict[str, Any] = {}
+    def _handle_vector_field(
+        self,
+        run: Run,
+        payload: Any,
+        step: int | None,
+        extra: dict[str, Any],
+        scope: str,
+    ) -> None:
+        name = extra.pop("name", "vector_field")
+        mode = str(extra.pop("mode", "magnitude"))
+        add_colorbar = bool(extra.pop("add_colorbar", False))
 
+        if mode not in {"vorticity", "magnitude"}:
+            self._logger.warning(
+                f"Unknown vector field visualization mode '{mode}'. "
+                "Supported modes are: 'vorticity', 'magnitude'. "
+                "The vector field visualization will not be sent to W&B.",
+            )
+            return
+        mode_literal = cast(Literal["vorticity", "magnitude"], mode)
+
+        logs: dict[str, Any] = {}
+        items = (
+            payload.items()
+            if isinstance(payload, Mapping)
+            else [(name, payload)]
+        )
+        for field_name, value in items:
+            if value is None:
+                self._logger.warning(
+                    f"Skipping vector field '{field_name}' with None "
+                    f"payload (scope={scope}).",
+                )
+                continue
             try:
-                if not isinstance(payload, (Sequence, np.ndarray)):
-                    self._logger.warning(
-                        "Invalid histogram payload for '%s' (scope=%s): "
-                        "must be a sequence or tuple.",
-                        name,
-                        scope,
-                    )
-                    return
-
-                if static:
-                    payload_list = list(payload)
-                    data = [[v] for v in payload_list]
-                    table = wandb.Table(data=data, columns=["values"])
-                    # Treat payload as a 1D sequence of samples.
-                    logs[name] = wandb.plot.histogram(
-                        table, "values", title="Histogram of Random Values"
-                    )
-                else:
-                    logs[name] = wandb.Histogram(
-                        np_histogram=np.histogram(payload, bins=num_bins)
-                    )
-
+                image = create_numpy_vector_field_visualization(
+                    value,
+                    mode=mode_literal,
+                    add_colorbar=add_colorbar,
+                )
+                logs[field_name] = wandb.Image(image)
             except Exception as exc:
                 self._logger.warning(
-                    f"Invalid histogram payload for '{name}' "
+                    f"Invalid vector field payload for '{field_name}' "
                     f"(scope={scope}): {exc}",
                 )
-                return
-            for k, v in extra.items():
-                logs[k] = v
 
-            if logs:
-                run.log(logs, step=step)
-            return
+        for k, v in extra.items():
+            logs[k] = v
+        if logs:
+            run.log(logs, step=step)
 
-        if kind == "vector_field":
-            name = extra.pop("name", "vector_field")
-            mode = str(extra.pop("mode", "magnitude"))
-            add_colorbar = bool(extra.pop("add_colorbar", False))
+    def _handle_trajectories(
+        self,
+        run: Run,
+        payload: Any,
+        step: int | None,
+        extra: dict[str, Any],
+        scope: str,
+    ) -> None:
+        name = extra.pop("name", "trajectories")
 
-            if mode not in {"vorticity", "magnitude"}:
+        logs: dict[str, Any] = {}
+        items = (
+            payload.items()
+            if isinstance(payload, Mapping)
+            else [(name, payload)]
+        )
+        for field_name, value in items:
+            if value is None:
                 self._logger.warning(
-                    f"Unknown vector field visualization mode '{mode}'. "
-                    "Supported modes are: 'vorticity', 'magnitude'. "
-                    "The vector field visualization will not be sent to W&B.",
+                    f"Skipping trajectories '{field_name}' with None "
+                    f"payload (scope={scope}).",
                 )
-                return
-            mode_literal = cast(Literal["vorticity", "magnitude"], mode)
+                continue
+            try:
+                fig = create_plotly_trajectories_figure(value)
+                logs[field_name] = wandb.Plotly(fig)
+            except Exception as exc:
+                self._logger.warning(
+                    f"Invalid trajectories payload for '{field_name}' "
+                    f"(scope={scope}): {exc}",
+                )
 
-            logs = {}
-            items = (
-                payload.items()
-                if isinstance(payload, Mapping)
-                else [(name, payload)]
-            )
-            for field_name, value in items:
-                if value is None:
-                    self._logger.warning(
-                        f"Skipping vector field '{field_name}' with None "
-                        f"payload (scope={scope}).",
-                    )
-                    continue
-
-                try:
-                    image = create_numpy_vector_field_visualization(
-                        value,
-                        mode=mode_literal,
-                        add_colorbar=add_colorbar,
-                    )
-                    logs[field_name] = wandb.Image(image)
-                except Exception as exc:
-                    self._logger.warning(
-                        f"Invalid vector field payload for '{field_name}' "
-                        f"(scope={scope}): {exc}",
-                    )
-
-            for k, v in extra.items():
-                logs[k] = v
-
-            if logs:
-                run.log(logs, step=step)
-            return
-
-        if kind == "trajectories":
-            name = extra.pop("name", "trajectories")
-
-            logs = {}
-            items = (
-                payload.items()
-                if isinstance(payload, Mapping)
-                else [(name, payload)]
-            )
-            for field_name, value in items:
-                if value is None:
-                    self._logger.warning(
-                        f"Skipping trajectories '{field_name}' with None "
-                        f"payload (scope={scope}).",
-                    )
-                    continue
-                try:
-                    fig = create_plotly_trajectories_figure(value)
-                    logs[field_name] = wandb.Plotly(fig)
-                except Exception as exc:
-                    self._logger.warning(
-                        f"Invalid trajectories payload for '{field_name}' "
-                        f"(scope={scope}): {exc}",
-                    )
-
-            for k, v in extra.items():
-                logs[k] = v
-
-            if logs:
-                run.log(logs, step=step)
-            return
-
-        self._logger.warning("Unsupported event kind: %s", kind)
+        for k, v in extra.items():
+            logs[k] = v
+        if logs:
+            run.log(logs, step=step)
 
     def close(self) -> None:
         """Finish all active W&B runs."""
