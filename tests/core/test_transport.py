@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -19,17 +20,32 @@ import pytest
 import goggles as gg
 from goggles import Event, Kind
 from goggles._core.transport import (
+    _HEADER_FMT,
+    _HEADER_SIZE,
     _IS_WINDOWS,
+    _MSG_SMALL,
     _SHM_NAME_PREFIX,
     LocalTransport,
     _default_socket_path,
     _next_shm_name,
-    _pack_small,
+    _pack_small_frame,
     _reap_orphan_shm,
     _try_unlink_shm,
     _unpack_small,
     _user_tag,
 )
+
+
+def _frame_body(event: Event) -> bytes:
+    """Return only the body half of a SMALL wire frame for unit tests.
+
+    Args:
+        event: Event to pack into a SMALL frame.
+
+    Returns:
+        The frame body (everything after the 5-byte header).
+    """
+    return bytes(_pack_small_frame(event)[_HEADER_SIZE:])
 
 
 @pytest.fixture
@@ -180,8 +196,7 @@ def test_pack_unpack_small_roundtrip_scalar() -> None:
         lineno=1,
         step=7,
     )
-    data = _pack_small(event)
-    restored = _unpack_small(data)
+    restored = _unpack_small(_frame_body(event))
     assert restored.kind == "metric"
     assert restored.payload == {"loss": 0.42}
     assert restored.step == 7
@@ -197,11 +212,29 @@ def test_pack_unpack_small_roundtrip_numpy() -> None:
         filepath="test.py",
         lineno=2,
     )
-    data = _pack_small(event)
-    restored = _unpack_small(data)
+    restored = _unpack_small(_frame_body(event))
     assert isinstance(restored.payload, np.ndarray)
     assert restored.payload.shape == (16, 16)
     np.testing.assert_array_equal(restored.payload, arr)
+
+
+def test_pack_small_frame_header_layout() -> None:
+    """Frame layout must be ``[1-byte kind][4-byte body_len][body]``
+    so the host's reader (which pulls the header with ``_recvall``)
+    can decode without changes."""
+    arr = np.arange(8 * 8, dtype=np.uint8).reshape(8, 8)
+    event = Event(
+        kind="image",
+        scope="global",
+        payload=arr,
+        filepath="test.py",
+        lineno=3,
+    )
+    frame = _pack_small_frame(event)
+    assert isinstance(frame, bytearray)
+    kind, body_len = struct.unpack_from(_HEADER_FMT, frame, 0)
+    assert kind == _MSG_SMALL
+    assert body_len == len(frame) - _HEADER_SIZE
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1002,132 @@ def test_cross_process_twenty_clients(socket_path: str, tmp_path: Path) -> None:
         proc.terminate()
         try:
             proc.wait(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
+# ---------------------------------------------------------------------------
+# Long-form soak (resilience-marked, off the default test path)
+# ---------------------------------------------------------------------------
+
+
+PACED_CLIENT_WORKER_SRC = """
+import os
+import sys
+import time
+
+from goggles import Event
+from goggles._core.transport import LocalTransport
+
+
+socket_path = os.environ["GOGGLES_SOCKET"]
+tag = os.environ["CLIENT_TAG"]
+n = int(os.environ["N_EVENTS"])
+duration = float(os.environ["DURATION_S"])
+period = duration / max(1, n)
+
+client = LocalTransport(socket_path=socket_path)
+try:
+    assert not client.is_host, "client subprocess must not become host"
+    next_tick = time.monotonic()
+    for i in range(n):
+        client.emit(Event(
+            kind="log", scope="global", payload=f"{tag}-{i}",
+            filepath="client.py", lineno=i,
+        ))
+        next_tick += period
+        sleep_for = next_tick - time.monotonic()
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+finally:
+    client.shutdown(timeout=60.0)
+"""
+
+
+@pytest.mark.resilience
+@pytest.mark.skipif(
+    not os.environ.get("GOGGLES_SOAK"),
+    reason="opt-in via GOGGLES_SOAK=1; this test runs for ~60 s",
+)
+def test_cross_process_sustained_soak(socket_path: str, tmp_path: Path) -> None:
+    """Sustained multi-minute load across host + 4 paced clients.
+
+    Each client emits at ~250 Hz for 60 s (~15 000 events / client,
+    60 000 total). Catches slow leaks and steady-state regressions
+    that the bulk-send tests miss because they finish in seconds.
+    Opt-in via ``GOGGLES_SOAK=1`` so it doesn't slow the default
+    ``pytest`` run.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+        tmp_path: pytest's per-test temporary directory.
+    """
+    duration_s = 60.0
+    rate_hz = 250
+    n_clients = 4
+    n_per_client = int(duration_s * rate_hz)
+    total = n_clients * n_per_client
+    host_deadline = duration_s + 60.0
+
+    proc, out_path = _launch_host_subprocess(
+        socket_path, tmp_path, expected=total, deadline=host_deadline
+    )
+    client_script = tmp_path / "paced_client.py"
+    client_script.write_text(PACED_CLIENT_WORKER_SRC)
+
+    try:
+        clients: list[subprocess.Popen] = []
+        for i in range(n_clients):
+            env = os.environ.copy()
+            env["GOGGLES_SOCKET"] = socket_path
+            env["CLIENT_TAG"] = f"paced{i:02d}"
+            env["N_EVENTS"] = str(n_per_client)
+            env["DURATION_S"] = str(duration_s)
+            clients.append(
+                subprocess.Popen(
+                    [sys.executable, str(client_script)],
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            )
+
+        try:
+            for c in clients:
+                try:
+                    c.wait(timeout=duration_s + 60.0)
+                except subprocess.TimeoutExpired:
+                    c.kill()
+                    c.wait()
+                    err = c.stderr.read().decode() if c.stderr else ""
+                    pytest.fail(
+                        f"paced client did not exit in time; stderr: {err}"
+                    )
+                if c.returncode != 0:
+                    stderr = c.stderr.read().decode() if c.stderr else ""
+                    pytest.fail(
+                        f"client exited with code {c.returncode}: {stderr}"
+                    )
+        finally:
+            for c in clients:
+                if c.stdout is not None:
+                    c.stdout.close()
+                if c.stderr is not None:
+                    c.stderr.close()
+
+        assert _wait_until(
+            lambda: out_path.exists() and out_path.read_text() == str(total),
+            timeout=60.0,
+        ), (
+            f"host recorded "
+            f"{out_path.read_text() if out_path.exists() else '<no file>'}/"
+            f"{total}"
+        )
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=15.0)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()

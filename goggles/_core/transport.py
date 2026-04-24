@@ -126,39 +126,58 @@ def _recvall(sock: socket.socket, n: int) -> bytes | None:
     return bytes(buf)
 
 
-def _pack_small(event: Event) -> bytes:
-    """Serialize an Event for the small inline path.
+def _pack_small_frame(event: Event) -> bytearray:
+    """Build the full MSG_SMALL wire frame in a single allocation.
 
-    Uses pickle protocol 5 with ``buffer_callback`` to avoid copying numpy
-    array bytes into the main pickle stream. The out-of-band buffers are
-    concatenated into the returned ``bytes`` with a single intermediate
-    ``bytearray`` (one memcpy per buffer rather than two).
+    The total frame size (5-byte header + body) is computed up front,
+    the bytearray is sized once, and every part (header, length
+    prefixes, main pickle, each out-of-band buffer) is written via
+    ``struct.pack_into`` / slice-assign — one memcpy per part. The send
+    loop then hands this bytearray straight to ``sendall``, so there is
+    no intermediate ``bytes(...)`` cast and no header concatenation.
 
     Args:
         event: Event to serialize.
 
     Returns:
-        A single byte string containing the main pickle + out-of-band
-        buffers, framed so :func:`_unpack_small` can reverse the operation.
+        A complete wire frame (header + body), ready for ``sendall``.
     """
     buffers: list[pickle.PickleBuffer] = []
     main = pickle.dumps(event, protocol=5, buffer_callback=buffers.append)
-    out = bytearray()
-    out += struct.pack("!I", len(main))
-    out += main
-    out += struct.pack("!I", len(buffers))
-    for buf in buffers:
-        mv = buf.raw()
-        out += struct.pack("!I", len(mv))
-        out += mv  # bytearray += memoryview is a single memcpy
-    return bytes(out)
+    raws = [buf.raw() for buf in buffers]
+
+    body_len = 4 + len(main) + 4 + sum(4 + len(r) for r in raws)
+    out = bytearray(_HEADER_SIZE + body_len)
+
+    struct.pack_into(_HEADER_FMT, out, 0, _MSG_SMALL, body_len)
+    offset = _HEADER_SIZE
+
+    struct.pack_into("!I", out, offset, len(main))
+    offset += 4
+    out[offset : offset + len(main)] = main
+    offset += len(main)
+
+    struct.pack_into("!I", out, offset, len(buffers))
+    offset += 4
+
+    for raw in raws:
+        n = len(raw)
+        struct.pack_into("!I", out, offset, n)
+        offset += 4
+        out[offset : offset + n] = raw
+        offset += n
+
+    return out
 
 
 def _unpack_small(payload: bytes) -> Event:
-    """Reverse :func:`_pack_small`.
+    """Reverse the body half of :func:`_pack_small_frame`.
+
+    The reader strips the 5-byte header and passes the remaining body
+    to this function.
 
     Args:
-        payload: Bytes produced by :func:`_pack_small`.
+        payload: Frame body (everything after ``_HEADER_SIZE``).
 
     Returns:
         The deserialized Event.
@@ -601,11 +620,19 @@ class _SendItem:
 
     __slots__ = ("frame", "shm_name")
 
-    def __init__(self, frame: bytes, shm_name: str | None = None) -> None:
+    def __init__(
+        self,
+        frame: bytes | bytearray,
+        shm_name: str | None = None,
+    ) -> None:
         """Initialise the send item.
 
         Args:
-            frame: Framed bytes to send on the wire.
+            frame: Framed bytes to send on the wire. ``bytes`` for the
+                low-frequency control frames built by
+                :meth:`LocalTransport._frame` (ATTACH/DETACH/BYE,
+                LARGE), ``bytearray`` for the SMALL hot-path frame
+                produced by :func:`_pack_small_frame`.
             shm_name: Name of the associated shared-memory block, if any.
         """
         self.frame = frame
@@ -1052,7 +1079,7 @@ class LocalTransport:
             return _SendItem(
                 frame=self._frame(_MSG_LARGE, body), shm_name=shm_name
             )
-        return _SendItem(frame=self._frame(_MSG_SMALL, _pack_small(event)))
+        return _SendItem(frame=_pack_small_frame(event))
 
     # ----- public API ------------------------------------------------------
 
