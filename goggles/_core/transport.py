@@ -20,6 +20,7 @@ any that never made it to the host (e.g. because shutdown dropped them).
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import pickle
@@ -635,34 +636,74 @@ class LocalTransport:
     # ----- setup -----------------------------------------------------------
 
     def _connect_or_host(self) -> None:
-        """Try to connect to the socket; otherwise bind and become host.
+        """Bind first; fall back to client mode; only unlink stale files.
+
+        On Unix we attempt :meth:`bind` before :meth:`connect`, so a live
+        host always wins (its socket path is taken — our bind fails with
+        ``EADDRINUSE``) and we never risk clobbering it on a transient
+        connect failure (``PermissionError``, accept-queue pressure,
+        etc.). Only when both ``bind`` and ``connect`` fail do we treat
+        the file as stale and unlink it.
+
+        On Windows the endpoint is a sidecar discovery file, not a
+        bound name, so ``bind()`` always succeeds (it acquires a fresh
+        ephemeral port). We therefore probe with ``connect`` first and
+        bind iff there is no listener.
 
         Raises:
             OSError: If neither connecting nor binding succeed (for
                 example, no write permission on the endpoint path).
         """
-        if self._try_connect():
-            self._start_send_worker()
+        if _IS_WINDOWS:
+            self._connect_or_host_windows()
             return
-
-        # Probe failed: safe to claim the path. If a stale file exists,
-        # clean it up. On Windows the discovery-file rewrite is idempotent
-        # so we don't need a separate unlink step.
-        if not _IS_WINDOWS:
-            if os.path.exists(self._socket_path):
-                # Attempt one last probe before clobbering; the bind race is
-                # handled below by falling back to client mode if bind fails.
-                self._endpoint.cleanup(self._socket_path)
 
         try:
             server = self._endpoint.bind(self._socket_path)
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                # Anything other than "path already taken" is a real
+                # failure (no permission, no parent dir, ...) — don't
+                # touch the existing file.
+                raise
+            # Path exists. A live host? Try to connect.
+            if self._try_connect():
+                self._start_send_worker()
+                return
+            # Bind said taken, connect said no listener: the file is
+            # stale. Unlink and retry the bind exactly once.
+            self._endpoint.cleanup(self._socket_path)
+            try:
+                server = self._endpoint.bind(self._socket_path)
+            except OSError:
+                # Another process raced us to the now-empty path.
+                if self._try_connect(retries=5, backoff=0.02):
+                    self._start_send_worker()
+                    return
+                raise
+
+        self._server_sock = server
+        self._is_host = True
+        self._start_host_workers()
+
+    def _connect_or_host_windows(self) -> None:
+        """Windows variant: probe the discovery file, then bind if dead.
+
+        Raises:
+            OSError: If binding fails for non-recoverable reasons.
+        """
+        if self._try_connect():
+            self._start_send_worker()
+            return
+        try:
+            server = self._endpoint.bind(self._socket_path)
         except OSError:
-            # Another process won the bind race. Retry connect.
+            # Race: another process became host between our probe and
+            # bind. Try one more time as client.
             if self._try_connect(retries=5, backoff=0.02):
                 self._start_send_worker()
                 return
             raise
-
         self._server_sock = server
         self._is_host = True
         self._start_host_workers()
@@ -1100,11 +1141,22 @@ class LocalTransport:
         """Client-side shutdown: enqueue BYE, drain, then close socket.
 
         BYE is placed on the send queue rather than sent out-of-band so
-        it is ordered after every previously-enqueued frame. The sentinel
-        that follows terminates the sender loop *after* it has drained.
+        it is ordered after every previously-enqueued frame, and so the
+        send thread is the only one ever touching the socket (no lock
+        contention with the caller). The sentinel that follows
+        terminates the sender loop *after* it has drained.
+
+        If the host is wedged (e.g. its receive buffer is full and it
+        isn't draining), ``sendall`` would otherwise block the send
+        thread forever. We install a finite socket timeout right before
+        joining so a wedged ``sendall`` raises ``socket.timeout`` (an
+        ``OSError``), the send loop's existing error handler treats it
+        as a transport failure, and shutdown can complete in bounded
+        time.
 
         Args:
             timeout: Max seconds to wait for the send queue to drain.
+                ``None`` means wait indefinitely (no socket timeout).
         """
         # Enqueue a graceful BYE followed by the stop sentinel.
         try:
@@ -1112,6 +1164,16 @@ class LocalTransport:
         except Exception:
             _log.exception("Failed to enqueue BYE frame")
         self._send_queue.put(_SENTINEL)
+
+        if (
+            self._client_sock is not None
+            and timeout is not None
+            and timeout > 0
+        ):
+            try:
+                self._client_sock.settimeout(timeout)
+            except OSError:
+                pass
 
         if self._send_thread is not None:
             self._send_thread.join(timeout=timeout)
