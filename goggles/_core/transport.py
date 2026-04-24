@@ -101,7 +101,15 @@ def _default_shm_threshold() -> int:
     raw = os.getenv("GOGGLES_SHM_THRESHOLD")
     if raw is None:
         return _DEFAULT_SHM_THRESHOLD
-    return max(0, int(raw))
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        _log.warning(
+            "Invalid GOGGLES_SHM_THRESHOLD=%r; using default %d",
+            raw,
+            _DEFAULT_SHM_THRESHOLD,
+        )
+        return _DEFAULT_SHM_THRESHOLD
 
 
 def _recvall(sock: socket.socket, n: int) -> bytes | None:

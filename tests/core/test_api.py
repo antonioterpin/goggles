@@ -241,7 +241,7 @@ def test_goggles_socket_env_picked_up_by_transport(
         monkeypatch: Fixture used to set the GOGGLES_SOCKET env var.
         tmp_path: Fixture used to derive a unique socket path per test.
     """
-    sock = f"/tmp/gg-api-{tmp_path.name}-test.sock"
+    sock = str(tmp_path / "gg-api-test.sock")
     monkeypatch.setenv("GOGGLES_SOCKET", sock)
     from goggles._core.transport import _default_socket_path  # noqa: PLC0415
 
