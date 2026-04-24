@@ -60,7 +60,16 @@ from ._core.decorators import trace_on_error as _trace_on_error
 from ._core.integrations import ConsoleHandler, LocalStorageHandler
 from .config import PrettyConfig, load_configuration, save_configuration
 from .shutdown import GracefulShutdown
-from .types import Event, Image, Kind, Metrics, Vector, VectorField, Video
+from .types import (
+    Event,
+    Image,
+    Kind,
+    Metrics,
+    Trajectories,
+    Vector,
+    VectorField,
+    Video,
+)
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -589,6 +598,30 @@ class DataLogger(Protocol):
         """
         ...
 
+    def trajectories(
+        self,
+        trajectories: Trajectories,
+        step: int,
+        *,
+        name: str | None = None,
+        time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
+        **extra: Any,
+    ) -> None:
+        """Emit a batch of particle trajectories.
+
+        Args:
+            trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
+                ``{2, 3}``.
+            step: Global step index.
+            name: Optional artifact name.
+            time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
+            **extra: Additional routing metadata (e.g.
+                ``store_visualization=True`` to also save a PNG preview).
+        """
+        ...
+
     def histogram(
         self,
         histogram: Vector,
@@ -1031,6 +1064,7 @@ __all__ = [
     "Metrics",
     "PrettyConfig",
     "TextLogger",
+    "Trajectories",
     "Vector",
     "VectorField",
     "Video",

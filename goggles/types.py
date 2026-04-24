@@ -16,6 +16,7 @@ Kind = Literal[
     "histogram",
     "vector",
     "vector_field",
+    "trajectories",
 ]
 
 Metrics = Mapping[str, float | int | np.ndarray]
@@ -23,6 +24,7 @@ Image: TypeAlias = np.ndarray
 Video: TypeAlias = np.ndarray
 Vector: TypeAlias = np.ndarray
 VectorField: TypeAlias = np.ndarray
+Trajectories: TypeAlias = np.ndarray
 
 
 @dataclass(frozen=True)

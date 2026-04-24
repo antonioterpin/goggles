@@ -415,6 +415,114 @@ def _build_vector_field_figure(
     return fig, bbox_setting, pad_setting
 
 
+def _build_trajectories_figure(
+    trajectories: np.ndarray,
+    dpi: int,
+) -> Any:
+    """Build a matplotlib figure visualizing a batch of trajectories.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
+            ``{2, 3}``.
+        dpi: Resolution used by matplotlib while rendering.
+
+    Returns:
+        The matplotlib figure.
+
+    Raises:
+        ValueError: If the input shape or dimension is invalid.
+    """
+    if trajectories.ndim != 3:
+        raise ValueError(
+            "Trajectories must have shape (N, L, dim); "
+            f"got {trajectories.shape}."
+        )
+    N, _, dim = trajectories.shape
+    if dim not in (2, 3):
+        raise ValueError(f"Trajectories dim must be 2 or 3; got {dim}.")
+
+    subplot_kw: dict[str, Any] = {"projection": "3d"} if dim == 3 else {}
+    fig, ax = plt.subplots(dpi=dpi, subplot_kw=subplot_kw)
+    for n in range(N):
+        ax.plot(
+            *(trajectories[n, :, i] for i in range(dim)),
+            linestyle="-",
+            marker=".",
+            markersize=2,
+            linewidth=0.8,
+        )
+    if dim == 2:
+        ax.set_aspect("equal")
+    return fig
+
+
+def save_numpy_trajectories_visualization(
+    trajectories: np.ndarray,
+    dir: Path,
+    name: str,
+    dpi: int = 200,
+) -> None:
+    """Save a trajectories visualization as a PNG image.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)``.
+        dir: Output directory.
+        name: Base name for the output PNG file (no extension).
+        dpi: Rendering resolution.
+    """
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+    try:
+        fig = _build_trajectories_figure(trajectories, dpi=dpi)
+        dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(
+            str(dir / f"{name}.png"),
+            dpi=dpi,
+            bbox_inches="tight",
+            pad_inches=0.05,
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+    finally:
+        matplotlib.use(original_backend)
+
+
+def create_numpy_trajectories_visualization(
+    trajectories: np.ndarray,
+    dpi: int = 200,
+) -> np.ndarray:
+    """Render a trajectories visualization to a uint8 RGB image.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)``.
+        dpi: Rendering resolution.
+
+    Returns:
+        Rendered image as a ``uint8`` array with shape ``(H, W, 3)``.
+    """
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+    try:
+        fig = _build_trajectories_figure(trajectories, dpi=dpi)
+        buf = io.BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=dpi,
+            bbox_inches="tight",
+            pad_inches=0.05,
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+        buf.seek(0)
+        rgba = imageio.imread(buf)
+        return np.ascontiguousarray(rgba[..., :3])
+    finally:
+        matplotlib.use(original_backend)
+
+
 class NumpyDumper(yaml.SafeDumper):
     """YAML Dumper that handles NumPy data types."""
 
