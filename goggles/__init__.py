@@ -160,23 +160,25 @@ def freeze() -> None:
 def _make_text_logger(
     name: str | None,
     scope: str,
+    level: int,
     **to_bind: Any,
 ) -> TextLogger:
     # Importing here to avoid circular imports
     from ._core.logger import CoreTextLogger  # noqa: PLC0415
 
-    return CoreTextLogger(name=name, scope=scope, **to_bind)
+    return CoreTextLogger(name=name, scope=scope, level=level, **to_bind)
 
 
 def _make_goggles_logger(
     name: str | None,
     scope: str,
+    level: int,
     **to_bind: Any,
 ) -> GogglesLogger:
     # Importing here to avoid circular imports
     from ._core.logger import CoreGogglesLogger  # noqa: PLC0415
 
-    return CoreGogglesLogger(name=name, scope=scope, **to_bind)
+    return CoreGogglesLogger(name=name, scope=scope, level=level, **to_bind)
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +193,7 @@ def get_logger(
     *,
     with_metrics: Literal[False] = False,
     scope: str = "global",
+    level: int = logging.NOTSET,
     **to_bind: Any,
 ) -> TextLogger: ...
 
@@ -202,6 +205,7 @@ def get_logger(
     *,
     with_metrics: Literal[True],
     scope: str = "global",
+    level: int = logging.NOTSET,
     **to_bind: Any,
 ) -> GogglesLogger: ...
 
@@ -212,6 +216,7 @@ def get_logger(
     *,
     with_metrics: bool = False,
     scope: str = "global",
+    level: int = logging.NOTSET,
     **to_bind: Any,
 ) -> TextLogger | GogglesLogger:
     """Return a structured logger.
@@ -229,6 +234,11 @@ def get_logger(
         name: Logger name. If None, the root logger is used.
         with_metrics: If True, return a logger exposing `.metrics`.
         scope: The logging scope, e.g., "global" or "run".
+        level: Minimum severity this logger will emit. Defaults to
+            ``logging.NOTSET`` (emit everything); pass
+            ``logging.DEBUG`` / ``logging.INFO`` / etc. to drop
+            lower-severity records at the source. Also settable later
+            via ``logger.set_level(...)``.
         **to_bind: Fields persisted and injected into every record.
 
     Returns:
@@ -243,12 +253,16 @@ def get_logger(
         >>> # Explicit metrics surface
         >>> tlog = get_logger("train", with_metrics=True, seed=0)
         >>> tlog.scalar("loss", 0.42, step=1)
+        >>>
+        >>> # Per-file DEBUG without flooding the rest of the app.
+        >>> dbg = get_logger(__name__, level=logging.DEBUG)
+        >>> dbg.debug("detailed trace")
 
     """
     if with_metrics:
-        return _make_goggles_logger(name, scope, **to_bind)
+        return _make_goggles_logger(name, scope, level, **to_bind)
     else:
-        return _make_text_logger(name, scope, **to_bind)
+        return _make_text_logger(name, scope, level, **to_bind)
 
 
 @runtime_checkable
@@ -279,6 +293,19 @@ class TextLogger(Protocol):
         Returns:
             New logger instance with persistent fields.
 
+        """
+        ...
+
+    def set_level(self, level: int) -> None:
+        """Set the minimum severity this logger will emit.
+
+        Calls below ``level`` are dropped before reaching the transport.
+        Only affects this logger instance; sibling loggers obtained via
+        separate ``get_logger(...)`` calls are unaffected.
+
+        Args:
+            level: Standard ``logging`` level (e.g. ``logging.DEBUG``).
+                ``logging.NOTSET`` (the default) forwards every call.
         """
         ...
 
