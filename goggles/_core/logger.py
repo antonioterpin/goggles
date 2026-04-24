@@ -58,6 +58,7 @@ class CoreTextLogger(TextLogger):
         self,
         scope: str,
         name: str | None = None,
+        level: int = logging.NOTSET,
         **to_bind: Any,
     ):
         """Initialize the CoreTextLogger.
@@ -65,6 +66,10 @@ class CoreTextLogger(TextLogger):
         Args:
             scope: Scope to bind the logger to (e.g., "global", "run", etc.).
             name: Optional name of the logger.
+            level: Minimum severity (standard ``logging`` levels) that this
+                logger will emit. Calls below this threshold are dropped
+                before touching the transport. ``logging.NOTSET`` (the
+                default) forwards every call.
             **to_bind:
                 Optional initial persistent context to bind.
 
@@ -74,8 +79,32 @@ class CoreTextLogger(TextLogger):
 
         self.name = name
         self._scope = scope
+        self._level = int(level)
         self._bound: dict[str, Any] = dict(**to_bind or {})
         self._client = get_bus()
+
+    def set_level(self, level: int) -> None:
+        """Set the minimum severity this logger will emit.
+
+        Calls below this threshold are dropped before touching the
+        transport. Only affects this logger instance — sibling loggers
+        obtained via separate ``get_logger(...)`` calls are untouched.
+
+        Args:
+            level: Standard ``logging`` level (e.g. ``logging.DEBUG``).
+        """
+        self._level = int(level)
+
+    def _below_level(self, severity: int) -> bool:
+        """Return whether ``severity`` is below the configured gate.
+
+        Args:
+            severity: Standard ``logging`` level of the call being made.
+
+        Returns:
+            ``True`` if the call should be dropped, ``False`` otherwise.
+        """
+        return self._level != logging.NOTSET and severity < self._level
 
     def _dispatch(self, event: Event, *, async_mode: bool) -> None:
         """Route ``event`` through the transport.
@@ -118,6 +147,7 @@ class CoreTextLogger(TextLogger):
         return self.__class__(
             scope=scope,
             name=self.name,
+            level=self._level,
             **{**self._bound, **fields},
         )
 
@@ -150,6 +180,8 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.DEBUG):
+            return
         filepath, lineno = _caller_id()
         self._dispatch(
             Event(
@@ -186,6 +218,8 @@ class CoreTextLogger(TextLogger):
             **extra: Additional structured key-value pairs for this record.
 
         """
+        if self._below_level(logging.INFO):
+            return
         filepath, lineno = _caller_id()
         self._dispatch(
             Event(
@@ -222,6 +256,8 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.WARNING):
+            return
         filepath, lineno = _caller_id()
         self._dispatch(
             Event(
@@ -258,6 +294,8 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.ERROR):
+            return
         filepath, lineno = _caller_id()
         self._dispatch(
             Event(
@@ -294,6 +332,8 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.CRITICAL):
+            return
         filepath, lineno = _caller_id()
         self._dispatch(
             Event(

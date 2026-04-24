@@ -195,3 +195,74 @@ def test_async_mode_uses_emit(patch_bus: MagicMock) -> None:
     g.scalar("metric", 1.0)
     patch_bus.emit.assert_called_once()
     patch_bus.emit_sync.assert_not_called()
+
+
+def test_default_level_emits_all_severities(
+    text_logger: CoreTextLogger, patch_bus: MagicMock
+) -> None:
+    for method in ("debug", "info", "warning", "error", "critical"):
+        getattr(text_logger, method)("x")
+    assert patch_bus.emit.call_count == 5
+
+
+def test_set_level_drops_below_threshold(patch_bus: MagicMock) -> None:
+    logger = CoreTextLogger(name="t", scope="global")
+    logger.set_level(logging.INFO)
+
+    logger.debug("drop")
+    assert patch_bus.emit.call_count == 0
+
+    logger.info("keep")
+    logger.warning("keep")
+    assert patch_bus.emit.call_count == 2
+
+
+def test_set_level_warning_drops_info_and_debug(
+    patch_bus: MagicMock,
+) -> None:
+    logger = CoreTextLogger(name="t", scope="global")
+    logger.set_level(logging.WARNING)
+
+    logger.debug("drop")
+    logger.info("drop")
+    assert patch_bus.emit.call_count == 0
+
+    logger.warning("keep")
+    logger.error("keep")
+    logger.critical("keep")
+    assert patch_bus.emit.call_count == 3
+
+
+def test_level_via_constructor(patch_bus: MagicMock) -> None:
+    logger = CoreTextLogger(name="t", scope="global", level=logging.WARNING)
+    logger.info("drop")
+    logger.warning("keep")
+    assert patch_bus.emit.call_count == 1
+
+
+def test_bind_preserves_level(patch_bus: MagicMock) -> None:
+    logger = CoreTextLogger(name="t", scope="global", level=logging.WARNING)
+    child = logger.bind(scope="run", k=1)
+    child.info("drop")
+    child.warning("keep")
+    assert patch_bus.emit.call_count == 1
+
+
+def test_set_level_is_logger_local(patch_bus: MagicMock) -> None:
+    quiet = CoreTextLogger(name="quiet", scope="global")
+    quiet.set_level(logging.WARNING)
+
+    loud = CoreTextLogger(name="loud", scope="global")
+
+    quiet.debug("drop")
+    loud.debug("keep")
+    assert patch_bus.emit.call_count == 1
+
+
+def test_get_logger_level_kwarg(patch_bus: MagicMock) -> None:
+    import goggles as gg  # noqa: PLC0415
+
+    logger = gg.get_logger("x", level=logging.WARNING)
+    logger.info("drop")
+    logger.warning("keep")
+    assert patch_bus.emit.call_count == 1
