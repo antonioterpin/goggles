@@ -14,6 +14,7 @@ from goggles.media import (
     save_numpy_gif,
     save_numpy_image,
     save_numpy_mp4,
+    save_numpy_trajectories_visualization,
     save_numpy_vector_field_visualization,
     yaml_dump,
 )
@@ -53,6 +54,7 @@ class LocalStorageHandler:
             "video",
             "artifact",
             "vector_field",
+            "trajectories",
             "histogram",
         }
     )
@@ -79,12 +81,14 @@ class LocalStorageHandler:
         self._videos_dir = self._base_path / "videos"
         self._artifacts_dir = self._base_path / "artifacts"
         self._vector_fields_dir = self._base_path / "vector_fields"
+        self._trajectories_dir = self._base_path / "trajectories"
         self._histograms_dir = self._base_path / "histograms"
         self._base_path.mkdir(parents=True, exist_ok=True)
         self._images_dir.mkdir(exist_ok=True)
         self._videos_dir.mkdir(exist_ok=True)
         self._artifacts_dir.mkdir(exist_ok=True)
         self._vector_fields_dir.mkdir(exist_ok=True)
+        self._trajectories_dir.mkdir(exist_ok=True)
         self._histograms_dir.mkdir(exist_ok=True)
 
         # Open log file
@@ -134,6 +138,8 @@ class LocalStorageHandler:
             event_dict = self._save_artifact_to_file(event_dict)
         elif kind == "vector_field":
             event_dict = self._save_vector_field_to_file(event_dict)
+        elif kind == "trajectories":
+            event_dict = self._save_trajectories_to_file(event_dict)
         elif kind == "histogram":
             event_dict = self._save_histogram_to_file(event_dict)
 
@@ -388,6 +394,36 @@ class LocalStorageHandler:
         np.save(vector_field_path, event["payload"])
 
         event["payload"] = str(vector_field_path.relative_to(self._base_path))
+        return event
+
+    def _save_trajectories_to_file(self, event: dict) -> dict | None:
+        """Save trajectories data to file and update event with file path.
+
+        Args:
+            event: Event dictionary.
+
+        Returns:
+            dict | None: Updated event with file path instead of raw data.
+        """
+        trajectories_path = self._make_media_name(
+            event, self._trajectories_dir, "npy"
+        )
+
+        if event.get("extra.store_visualization"):
+            try:
+                save_numpy_trajectories_visualization(
+                    event["payload"],
+                    dir=trajectories_path.parent / Path("visualizations"),
+                    name=trajectories_path.stem,
+                )
+            except ValueError as exc:
+                self._logger.warning(
+                    "Skipping trajectories visualization: %s", exc
+                )
+
+        np.save(trajectories_path, event["payload"])
+
+        event["payload"] = str(trajectories_path.relative_to(self._base_path))
         return event
 
     def _save_histogram_to_file(self, event: dict) -> dict | None:

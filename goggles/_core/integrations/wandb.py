@@ -10,7 +10,10 @@ import numpy as np
 from typing_extensions import Self
 
 import wandb
-from goggles.media import create_numpy_vector_field_visualization
+from goggles.media import (
+    create_numpy_trajectories_visualization,
+    create_numpy_vector_field_visualization,
+)
 from goggles.types import Kind
 
 Run = Any  # wandb.sdk.wandb_run.Run
@@ -44,6 +47,7 @@ class WandBHandler:
             "artifact",
             "histogram",
             "vector_field",
+            "trajectories",
         }
     )
     GLOBAL_SCOPE: ClassVar[str] = "global"
@@ -305,6 +309,38 @@ class WandBHandler:
                 except Exception as exc:
                     self._logger.warning(
                         f"Invalid vector field payload for '{field_name}' "
+                        f"(scope={scope}): {exc}",
+                    )
+
+            for k, v in extra.items():
+                logs[k] = v
+
+            if logs:
+                run.log(logs, step=step)
+            return
+
+        if kind == "trajectories":
+            name = extra.pop("name", "trajectories")
+
+            logs = {}
+            items = (
+                payload.items()
+                if isinstance(payload, Mapping)
+                else [(name, payload)]
+            )
+            for field_name, value in items:
+                if value is None:
+                    self._logger.warning(
+                        f"Skipping trajectories '{field_name}' with None "
+                        f"payload (scope={scope}).",
+                    )
+                    continue
+                try:
+                    image = create_numpy_trajectories_visualization(value)
+                    logs[field_name] = wandb.Image(image)
+                except Exception as exc:
+                    self._logger.warning(
+                        f"Invalid trajectories payload for '{field_name}' "
                         f"(scope={scope}): {exc}",
                     )
 

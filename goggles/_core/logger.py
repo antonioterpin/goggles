@@ -17,7 +17,14 @@ import numpy as np
 from typing_extensions import Self
 
 from goggles import GOGGLES_ASYNC, Event, GogglesLogger, TextLogger
-from goggles.types import Image, Metrics, Vector, VectorField, Video
+from goggles.types import (
+    Image,
+    Metrics,
+    Trajectories,
+    Vector,
+    VectorField,
+    Video,
+)
 
 # Walking the call stack via `inspect.currentframe` is ~5-15 μs and
 # allocates. At 10 kHz that's measurable on the producer hot path. Set
@@ -562,6 +569,49 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 kind="vector_field",
                 scope=self._scope,
                 payload=vector_field,
+                level=None,
+                filepath=filepath,
+                lineno=lineno,
+                step=step,
+                time=time,
+                extra=extra,
+            ),
+            async_mode=async_mode,
+        )
+
+    def trajectories(
+        self,
+        trajectories: Trajectories,
+        step: int,
+        *,
+        name: str | None = None,
+        time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
+        **extra: Any,
+    ) -> None:
+        """Emit a batch of particle trajectories.
+
+        Args:
+            trajectories: Array of shape ``(N, L, dim)`` where ``N`` is the
+                number of trajectories, ``L`` their length, and ``dim`` the
+                spatial dimension (2 or 3).
+            step: Global step index.
+            name: Optional artifact name.
+            time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
+            **extra: Additional routing metadata (e.g.
+                ``store_visualization=True`` to also save a PNG preview).
+        """
+        filepath, lineno = _caller_id()
+        extra = {**self._bound, **extra}
+        if name is not None:
+            extra["name"] = name
+
+        self._dispatch(
+            Event(
+                kind="trajectories",
+                scope=self._scope,
+                payload=trajectories,
                 level=None,
                 filepath=filepath,
                 lineno=lineno,
