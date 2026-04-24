@@ -73,7 +73,8 @@ logger.video(rgba_video, name="Random RGBA Video", fps=5, step=100)
 
 # Load and log artifact: WandBHandler expects {path, name, type} where
 # `path` points to a file on disk to be uploaded as a W&B artifact.
-artifact_file = Path(tempfile.mkdtemp()) / "random_artifact.npy"
+artifact_dir = tempfile.TemporaryDirectory(prefix="goggles-example-")
+artifact_file = Path(artifact_dir.name) / "random_artifact.npy"
 np.save(artifact_file, np.random.rand(100, 100, 3))
 logger.artifact(
     {
@@ -184,3 +185,4 @@ for i in range(10):
 time.sleep(2)
 # When using asynchronous logging (like wandb), make sure to finish
 gg.finish()
+artifact_dir.cleanup()
