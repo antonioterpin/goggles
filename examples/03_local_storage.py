@@ -210,8 +210,9 @@ logger.vector_field(
 )
 
 # Trajectories logging
-# `logger.trajectories` accepts arrays shaped (N, L, dim) with dim in {2, 3};
-# set `store_visualization=True` to also save a PNG preview alongside the .npy.
+# `logger.trajectories` accepts arrays shaped (N, L, dim) with dim in
+# {2, 3}. Set `store_visualization=True` to also save a PNG preview
+# alongside the .npy.
 logger.info("Logging sample trajectories (2D + 3D)...")
 rng = np.random.default_rng(0)
 N, L = 6, 40
