@@ -70,10 +70,28 @@ owns it, the rest connect as clients. The user-facing entry points are
 
 - Loggers carry a `scope` (free-form string, default `global`). Events
   are routed to handlers attached to matching scopes.
-- Scope matching supports hierarchy via dot notation: a handler on
-  `global` also receives events from `global.run1`.
 - Events include logs (text) and structured data (`scalar`, `image`,
   `video`, `vector_field`, `histogram`, ...).
+
+#### Namespaced scopes (dot notation)
+
+Scope matching is hierarchical: a handler attached to scope `S` also
+receives events emitted on any scope of the form `S.X`, `S.X.Y`, etc.
+The match is a strict prefix on dot-separated segments — `globalA` does
+**not** match a handler on `global`, but `global.run1` does.
+
+```python
+gg.attach(handler, scopes=["training"])
+
+gg.get_logger(scope="training").info("seen by handler")
+gg.get_logger(scope="training.epoch_3").info("also seen by handler")
+gg.get_logger(scope="eval").info("not seen")
+```
+
+This lets a single handler subscribe to a whole subtree (e.g. one
+`training` handler that captures every per-episode logger) without
+having to enumerate the children up front. Implementation:
+[goggles/__init__.py `EventBus.emit`](../../goggles/__init__.py).
 
 ### 2. Event model (`types.py`)
 
