@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import struct
 import subprocess
@@ -1062,11 +1063,72 @@ def _launch_host_subprocess(
     return proc, out_path
 
 
+def _terminate_subprocess(
+    proc: subprocess.Popen, *, timeout: float = 5.0
+) -> None:
+    """SIGTERM, then SIGKILL on timeout. Always wait for the child to exit.
+
+    Args:
+        proc: Process to terminate.
+        timeout: Seconds to wait for graceful exit before killing.
+    """
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+@contextlib.contextmanager
+def _host_subprocess(
+    socket_path: str,
+    tmp_path: Path,
+    *,
+    expected: int,
+    deadline: float = 30.0,
+    teardown_timeout: float = 5.0,
+) -> Iterator[tuple[subprocess.Popen, Path]]:
+    """Run a host worker for the duration of the ``with`` block.
+
+    Yields the launched ``Popen`` and the count file the worker writes
+    to. Always terminates (and kills, if needed) the subprocess on
+    exit so a hung host doesn't survive the test.
+
+    Args:
+        socket_path: Endpoint path forwarded as ``GOGGLES_SOCKET``.
+        tmp_path: pytest's per-test temp dir; the worker script and
+            count/ready files are placed here.
+        expected: Number of events the host should record before
+            considering itself done.
+        deadline: Seconds the host worker waits for ``expected``
+            events before exiting on its own.
+        teardown_timeout: Seconds to wait for graceful termination on
+            block exit.
+
+    Yields:
+        tuple[subprocess.Popen, Path]: ``(proc, out_path)``; ``out_path``
+            is the file the host worker increments as events arrive.
+    """
+    proc, out_path = _launch_host_subprocess(
+        socket_path, tmp_path, expected=expected, deadline=deadline
+    )
+    try:
+        yield proc, out_path
+    finally:
+        _terminate_subprocess(proc, timeout=teardown_timeout)
+
+
 def test_two_independent_processes_share_host(
     socket_path: str, tmp_path: Path
 ) -> None:
-    proc, out_path = _launch_host_subprocess(socket_path, tmp_path, expected=1)
-    try:
+    """Client in this process emits; host subprocess records exactly 1.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+        tmp_path: pytest's per-test temporary directory.
+    """
+    with _host_subprocess(socket_path, tmp_path, expected=1) as (_, out_path):
         client = LocalTransport(socket_path=socket_path)
         try:
             assert not client.is_host
@@ -1085,13 +1147,6 @@ def test_two_independent_processes_share_host(
             ), "host process should have recorded 1 event"
         finally:
             client.shutdown(timeout=5.0)
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
 
 
 def test_cross_process_no_loss_at_bulk_send(
@@ -1106,8 +1161,7 @@ def test_cross_process_no_loss_at_bulk_send(
         tmp_path: pytest's per-test temporary directory.
     """
     n = 500
-    proc, out_path = _launch_host_subprocess(socket_path, tmp_path, expected=n)
-    try:
+    with _host_subprocess(socket_path, tmp_path, expected=n) as (_, out_path):
         client = LocalTransport(socket_path=socket_path)
         try:
             assert not client.is_host
@@ -1134,13 +1188,6 @@ def test_cross_process_no_loss_at_bulk_send(
             f"{out_path.read_text() if out_path.exists() else '<no file>'}/"
             f"{n}"
         )
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
 
 
 def test_cross_process_multiple_concurrent_clients(
@@ -1154,10 +1201,10 @@ def test_cross_process_multiple_concurrent_clients(
     """
     n_per_client = 100
     total = n_per_client * 2
-    proc, out_path = _launch_host_subprocess(
-        socket_path, tmp_path, expected=total
-    )
-    try:
+    with _host_subprocess(socket_path, tmp_path, expected=total) as (
+        _,
+        out_path,
+    ):
         c1 = LocalTransport(socket_path=socket_path)
         c2 = LocalTransport(socket_path=socket_path)
         try:
@@ -1194,13 +1241,6 @@ def test_cross_process_multiple_concurrent_clients(
             f"{out_path.read_text() if out_path.exists() else '<no file>'}/"
             f"{total}"
         )
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
 
 
 @pytest.mark.resilience
@@ -1231,13 +1271,16 @@ def test_cross_process_twenty_clients(socket_path: str, tmp_path: Path) -> None:
     n_per_client = 50
     total = n_clients * n_per_client
 
-    proc, out_path = _launch_host_subprocess(
-        socket_path, tmp_path, expected=total, deadline=120.0
-    )
     client_script = tmp_path / "client_worker.py"
     client_script.write_text(CLIENT_WORKER_SRC)
 
-    try:
+    with _host_subprocess(
+        socket_path,
+        tmp_path,
+        expected=total,
+        deadline=120.0,
+        teardown_timeout=10.0,
+    ) as (_, out_path):
         clients: list[subprocess.Popen] = []
         for i in range(n_clients):
             env = os.environ.copy()
@@ -1284,13 +1327,6 @@ def test_cross_process_twenty_clients(socket_path: str, tmp_path: Path) -> None:
             f"{out_path.read_text() if out_path.exists() else '<no file>'}/"
             f"{total}"
         )
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10.0)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
 
 
 # ---------------------------------------------------------------------------
@@ -1356,13 +1392,16 @@ def test_cross_process_sustained_soak(socket_path: str, tmp_path: Path) -> None:
     total = n_clients * n_per_client
     host_deadline = duration_s + 60.0
 
-    proc, out_path = _launch_host_subprocess(
-        socket_path, tmp_path, expected=total, deadline=host_deadline
-    )
     client_script = tmp_path / "paced_client.py"
     client_script.write_text(PACED_CLIENT_WORKER_SRC)
 
-    try:
+    with _host_subprocess(
+        socket_path,
+        tmp_path,
+        expected=total,
+        deadline=host_deadline,
+        teardown_timeout=15.0,
+    ) as (_, out_path):
         clients: list[subprocess.Popen] = []
         for i in range(n_clients):
             env = os.environ.copy()
@@ -1410,13 +1449,6 @@ def test_cross_process_sustained_soak(socket_path: str, tmp_path: Path) -> None:
             f"{out_path.read_text() if out_path.exists() else '<no file>'}/"
             f"{total}"
         )
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=15.0)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
 
 
 # ---------------------------------------------------------------------------
