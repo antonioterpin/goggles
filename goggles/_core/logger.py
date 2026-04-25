@@ -391,7 +391,10 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata (e.g. ``split="train"``)
                 forwarded both to the batched metric event and to each
-                promoted image event.
+                promoted image event. For promoted image events, ``name`` is
+                always overridden with the metric key, and ``format``
+                defaults to ``"png"`` if not provided in ``extra`` or the
+                bound context.
         """
         filepath, lineno = _caller_id()
         bound_extra = {**self._bound, **extra}
@@ -432,9 +435,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                     step=step,
                     time=time,
                     extra={
+                        "format": "png",
                         **bound_extra,
                         "name": img_name,
-                        "format": "png",
                     },
                 ),
                 async_mode=async_mode,

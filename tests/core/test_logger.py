@@ -178,6 +178,7 @@ def test_push_promotes_image_shaped_ndarrays(
     event = patch_bus.emit.call_args_list[0].args[0]
     np.testing.assert_array_equal(event.payload, img)
     assert event.extra["name"] == "fig"
+    assert event.extra["format"] == "png"
     assert event.step == 3
 
 
