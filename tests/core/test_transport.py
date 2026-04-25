@@ -348,6 +348,12 @@ def test_empty_string_payloads_roundtrip_through_framing(
     transport goes through ``_pack_small_frame`` → socket → ``_unpack_small``,
     so we assert the framing round-trip directly (covers the failure mode
     regardless of host/client dispatch mode).
+
+    Args:
+        kind: Event kind to round-trip.
+        payload: Event payload (string or mapping containing empty strings).
+        extra: Optional event ``extra`` dict; when provided, ``step=0`` is
+            also set.
     """
     event_kwargs: dict = {
         "kind": kind,
@@ -383,6 +389,13 @@ def test_empty_string_payloads_survive_host_emit_sync(
     This exercises dispatch (not framing), to confirm the inline path
     doesn't eat empty strings. The wire-level regression lives in
     :func:`test_empty_string_payloads_roundtrip_through_framing`.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+        kind: Event kind to dispatch.
+        payload: Event payload (string or mapping containing empty strings).
+        extra: Optional event ``extra`` dict; when provided, ``step=0`` is
+            also set.
     """
     transport = LocalTransport(socket_path=socket_path)
     try:
