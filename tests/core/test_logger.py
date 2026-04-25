@@ -68,7 +68,12 @@ def goggles_logger(patch_bus: MagicMock) -> CoreGogglesLogger:
 # -------------------------------------------------------------------------
 
 
-def test_bind_creates_new_context(text_logger):
+def test_bind_creates_new_context(text_logger: CoreTextLogger) -> None:
+    """``bind`` returns a derived adapter with merged persistent fields.
+
+    Args:
+        text_logger: ``CoreTextLogger`` fixture.
+    """
     text_logger._bound = {"old": 1}
     bound_logger = text_logger.bind(scope="run", new=2)
     assert bound_logger.get_bound() == {
@@ -88,7 +93,20 @@ def test_bind_creates_new_context(text_logger):
         (logging.CRITICAL, "critical"),
     ],
 )
-def test_log_methods_emit_event(text_logger, patch_bus, level, method):
+def test_log_methods_emit_event(
+    text_logger: CoreTextLogger,
+    patch_bus: MagicMock,
+    level: int,
+    method: str,
+) -> None:
+    """Each severity method emits an event whose level matches.
+
+    Args:
+        text_logger: ``CoreTextLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+        level: Standard logging level the method should stamp on the event.
+        method: Name of the level method to invoke (``debug``, ``info``, ...).
+    """
     msg = f"message-{method}"
     getattr(text_logger, method)(msg, step=1, time=123.0, extra_field="x")
     assert patch_bus.emit.called, "patch_bus.emit should have been called"
@@ -100,7 +118,12 @@ def test_log_methods_emit_event(text_logger, patch_bus, level, method):
     assert event.extra["extra_field"] == "x", "Event extra field mismatch"
 
 
-def test_repr_includes_name_and_bound(text_logger):
+def test_repr_includes_name_and_bound(text_logger: CoreTextLogger) -> None:
+    """``repr`` carries the class, the logger name, and the bound keys.
+
+    Args:
+        text_logger: ``CoreTextLogger`` fixture.
+    """
     text_logger._bound = {"a": 1}
     rep = repr(text_logger)
     assert "CoreTextLogger" in rep, "repr should include class name"
@@ -113,7 +136,15 @@ def test_repr_includes_name_and_bound(text_logger):
 # -------------------------------------------------------------------------
 
 
-def test_push_emits_metric_event(goggles_logger, patch_bus):
+def test_push_emits_metric_event(
+    goggles_logger: CoreGogglesLogger, patch_bus: MagicMock
+) -> None:
+    """``push`` emits a metric event carrying the dict payload + step.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
     metrics = {"loss": 0.1, "acc": 0.9}
     goggles_logger.push(metrics, step=2)
     event = patch_bus.emit.call_args[0][0]
@@ -122,7 +153,15 @@ def test_push_emits_metric_event(goggles_logger, patch_bus):
     assert event.step == 2, "Event step mismatch"
 
 
-def test_scalar_emits_metric_event(goggles_logger, patch_bus):
+def test_scalar_emits_metric_event(
+    goggles_logger: CoreGogglesLogger, patch_bus: MagicMock
+) -> None:
+    """``scalar`` emits a metric event keyed by the metric name.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
     goggles_logger.scalar("loss", 0.42)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "metric", "Event kind should be 'metric' for scalar"
@@ -143,8 +182,22 @@ def test_scalar_emits_metric_event(goggles_logger, patch_bus):
     ],
 )
 def test_artifact_like_methods_emit_event(
-    goggles_logger, patch_bus, kind, method, arg_key
-):
+    goggles_logger: CoreGogglesLogger,
+    patch_bus: MagicMock,
+    kind: str,
+    method: str,
+    arg_key: str,
+) -> None:
+    """Each artifact-like method emits an event of the matching kind.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+        kind: Expected ``event.kind`` after the call.
+        method: Logger method to invoke.
+        arg_key: Unused — present for parametrize symmetry.
+    """
+    del arg_key
     fake_payload = SimpleNamespace(dummy=True)
     kwargs = {}
     if method == "video":
@@ -159,7 +212,15 @@ def test_artifact_like_methods_emit_event(
     assert event.extra["name"] == "foo", "Event extra 'name' mismatch"
 
 
-def test_histogram_adds_name_and_payload(goggles_logger, patch_bus):
+def test_histogram_adds_name_and_payload(
+    goggles_logger: CoreGogglesLogger, patch_bus: MagicMock
+) -> None:
+    """``histogram`` emits an event with ``extra['name']`` and payload set.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
     goggles_logger.histogram([1, 2, 3], name="hist", step=1)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "histogram", "Event kind should be 'histogram'"
@@ -200,12 +261,23 @@ def test_async_mode_uses_emit(patch_bus: MagicMock) -> None:
 def test_default_level_emits_all_severities(
     text_logger: CoreTextLogger, patch_bus: MagicMock
 ) -> None:
+    """With the default ``NOTSET`` gate every severity reaches the bus.
+
+    Args:
+        text_logger: ``CoreTextLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
     for method in ("debug", "info", "warning", "error", "critical"):
         getattr(text_logger, method)("x")
     assert patch_bus.emit.call_count == 5
 
 
 def test_set_level_drops_below_threshold(patch_bus: MagicMock) -> None:
+    """``set_level`` drops calls below the threshold and forwards the rest.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
     logger = CoreTextLogger(name="t", scope="global")
     logger.set_level(logging.INFO)
 
@@ -220,6 +292,11 @@ def test_set_level_drops_below_threshold(patch_bus: MagicMock) -> None:
 def test_set_level_warning_drops_info_and_debug(
     patch_bus: MagicMock,
 ) -> None:
+    """At ``WARNING`` only WARNING and above propagate.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
     logger = CoreTextLogger(name="t", scope="global")
     logger.set_level(logging.WARNING)
 
@@ -234,6 +311,11 @@ def test_set_level_warning_drops_info_and_debug(
 
 
 def test_level_via_constructor(patch_bus: MagicMock) -> None:
+    """Constructor-time ``level=`` is honoured the same as ``set_level``.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
     logger = CoreTextLogger(name="t", scope="global", level=logging.WARNING)
     logger.info("drop")
     logger.warning("keep")
@@ -241,6 +323,11 @@ def test_level_via_constructor(patch_bus: MagicMock) -> None:
 
 
 def test_bind_preserves_level(patch_bus: MagicMock) -> None:
+    """``bind`` carries the parent level into the derived adapter.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
     logger = CoreTextLogger(name="t", scope="global", level=logging.WARNING)
     child = logger.bind(scope="run", k=1)
     child.info("drop")
@@ -249,6 +336,11 @@ def test_bind_preserves_level(patch_bus: MagicMock) -> None:
 
 
 def test_set_level_is_logger_local(patch_bus: MagicMock) -> None:
+    """``set_level`` only mutates the logger it's called on.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
     quiet = CoreTextLogger(name="quiet", scope="global")
     quiet.set_level(logging.WARNING)
 
@@ -260,6 +352,11 @@ def test_set_level_is_logger_local(patch_bus: MagicMock) -> None:
 
 
 def test_get_logger_level_kwarg(patch_bus: MagicMock) -> None:
+    """``gg.get_logger(..., level=...)`` propagates to the logger gate.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
     import goggles as gg  # noqa: PLC0415
 
     logger = gg.get_logger("x", level=logging.WARNING)
