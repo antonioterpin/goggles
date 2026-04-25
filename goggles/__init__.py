@@ -35,6 +35,7 @@ import os
 import threading
 from collections import defaultdict
 from collections.abc import Callable
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -977,6 +978,55 @@ def attach(handler: Handler, scopes: list[str] | None = None) -> None:
         scopes = ["global"]
     bus = get_bus()
     bus.attach(handlers=[handler.to_dict()], scopes=scopes)
+
+
+def configure(
+    *,
+    enable_console: bool = False,
+    console_level: int = logging.INFO,
+    console_path_style: Literal["absolute", "relative"] = "relative",
+    project_root: str | os.PathLike[str] | None = None,
+    scopes: list[str] | None = None,
+) -> None:
+    """One-call shortcut for the common "I just want a console logger" setup.
+
+    Replaces the boilerplate
+
+        gg.attach(gg.ConsoleHandler(level=logging.INFO), scopes=["global"])
+
+    with
+
+        gg.configure(enable_console=True)
+
+    Power users should keep using ``attach`` / handler classes directly —
+    this helper only covers the standard cases. Calling it with no arguments
+    is a no-op so it is safe to invoke unconditionally during library
+    initialisation. See issue #43.
+
+    Args:
+        enable_console: When True, attach a default ``ConsoleHandler``
+            under ``scopes``. When False (the default), this argument
+            does nothing.
+        console_level: Minimum level for the auto-attached console
+            handler. Ignored when ``enable_console`` is False.
+        console_path_style: Whether the console handler prints absolute
+            or project-relative source paths. Ignored when
+            ``enable_console`` is False.
+        project_root: Root path used to compute relative paths. Defaults
+            to the current working directory.
+        scopes: Scopes under which to attach the console handler.
+            Defaults to ``["global"]``.
+    """
+    if not enable_console:
+        return
+    if scopes is None:
+        scopes = ["global"]
+    handler = ConsoleHandler(
+        level=console_level,
+        path_style=console_path_style,
+        project_root=Path(project_root) if project_root is not None else None,
+    )
+    attach(handler, scopes=scopes)
 
 
 def detach(handler_name: str, scope: str) -> None:

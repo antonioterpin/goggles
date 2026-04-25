@@ -70,9 +70,7 @@ def test_concurrent_check_is_safe():
         with lock:
             results.append(flagged)
 
-    threads = [
-        threading.Thread(target=worker, args=(i,)) for i in range(8)
-    ]
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
     for t in threads:
         t.start()
     for t in threads:
