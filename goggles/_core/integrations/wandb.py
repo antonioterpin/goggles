@@ -431,7 +431,24 @@ class WandBHandler:
                     "look like channel dimensions; preserving channels-first.",
                     value.shape,
                 )
-        elif value.ndim != 5:
+            elif not channels_first_like:
+                # Neither axis 1 nor axis -1 has a channel-shaped extent
+                # (1/3/4). We can't recover the intended layout — refuse
+                # rather than silently mislabel the data.
+                raise ValueError(
+                    f"4D video has shape {value.shape}; expected channel "
+                    "dim (size 1, 3, or 4) at axis 1 (channels-first) "
+                    "or axis -1 (channels-last)."
+                )
+        elif value.ndim == 5:
+            # (F, T, C, H, W): the channel dim is axis 2.
+            if value.shape[2] not in (1, 3, 4):
+                raise ValueError(
+                    f"5D video has shape {value.shape}; expected channel "
+                    "dim (size 1, 3, or 4) at axis 2 for the documented "
+                    "(F, T, C, H, W) layout."
+                )
+        else:
             raise ValueError(
                 f"Video has invalid shape {value.shape}; "
                 "expected (F,H,W), (F,C,H,W), (F,H,W,C), or (F,T,C,H,W)."
