@@ -882,7 +882,7 @@ class EventBus:
             except Exception:
                 logging.getLogger(__name__).exception(
                     "Handler '%s' raised while dispatching event",
-                    getattr(handler, "name", "?"),
+                    handler.name,
                 )
 
 
