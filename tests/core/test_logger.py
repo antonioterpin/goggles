@@ -342,7 +342,6 @@ def test_sync_mode_uses_emit_sync(patch_bus: MagicMock) -> None:
         patch_bus: Patched mock client fixture.
     """
     g = CoreGogglesLogger(name="sync", scope="run")
-    g._client = patch_bus
 
     g.scalar("metric", 1.0, async_mode=False)
     patch_bus.emit_sync.assert_called_once()
@@ -356,7 +355,6 @@ def test_async_mode_uses_emit(patch_bus: MagicMock) -> None:
         patch_bus: Patched mock client fixture.
     """
     g = CoreGogglesLogger(name="async", scope="run")
-    g._client = patch_bus
 
     g.scalar("metric", 1.0)
     patch_bus.emit.assert_called_once()
