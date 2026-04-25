@@ -183,14 +183,19 @@ def test_eventbus_detach_and_shutdown():
 
 
 def test_attach_detach_finish_call_bus(monkeypatch):
+    def _attach(*, handlers, scopes):
+        mock_bus.attached = (handlers, scopes)
+
+    def _detach(n, s):
+        mock_bus.detached = (n, s)
+
+    def _shutdown(timeout=None):
+        mock_bus.shut = True
+
     mock_bus = types.SimpleNamespace(
-        attach=lambda *, handlers, scopes: setattr(
-            mock_bus, "attached", (handlers, scopes)
-        ),
-        detach=lambda n, s: setattr(mock_bus, "detached", (n, s)),
-        shutdown=lambda timeout=None: types.SimpleNamespace(
-            result=lambda timeout=None: setattr(mock_bus, "shut", True)
-        ),
+        attach=_attach,
+        detach=_detach,
+        shutdown=_shutdown,
     )
     monkeypatch.setattr(cast(Any, gg), "get_bus", lambda: mock_bus)
 

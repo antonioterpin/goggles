@@ -67,8 +67,8 @@ Usage:
 
 .. code-block:: console
 
-    $ GOGGLES_PORT=8374 uv run python \
-        -m tests.benchmark.benchmark_logger \
-        --log-type scalar --num-logs 10000
+    $ GOGGLES_SOCKET=/tmp/goggles-bench.sock uv run python \
+        examples/105_benchmark.py \
+        log_type=scalar num_logs=10000
 """
 ```

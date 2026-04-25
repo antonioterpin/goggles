@@ -8,7 +8,7 @@ import goggles as gg
 from goggles._core.integrations import ConsoleHandler
 
 # Instantiate a TextLogger (No metrics)
-logger = gg.get_logger(name="examples.interrupt")
+logger = gg.get_logger("examples.interrupt")
 
 gg.attach(
     ConsoleHandler(name="examples.interrupt.info", level=gg.INFO), ["global"]

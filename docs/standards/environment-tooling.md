@@ -31,14 +31,14 @@
   3. Ensure the lockfile is updated (`uv lock` if needed).
   4. Commit both `pyproject.toml` and `uv.lock`.
 
-## Port isolation for multi-process tests
+## Socket isolation for multi-process tests
 
-- Goggles uses a shared TCP port (`GOGGLES_PORT`) for inter-process log
-  routing. When starting processes by hand (benchmarks, reproduction
-  scripts, manual experiments), pick a free port rather than reusing a
-  default -- otherwise a lingering server from a previous run will
-  capture the new connection.
+- Goggles uses a Unix domain socket (`GOGGLES_SOCKET`) for inter-process
+  log routing. When starting processes by hand (benchmarks, reproduction
+  scripts, manual experiments), pick a unique path rather than reusing
+  the default -- otherwise a lingering host from a previous run (or an
+  unrelated project) will capture the new connection.
   ```bash
-  GOGGLES_PORT="$(uv run python -c 'import socket; s=socket.socket(); s.bind((\"\", 0)); print(s.getsockname()[1]); s.close()')" \
-      uv run python -m tests.benchmark.benchmark_logger --log-type scalar
+  GOGGLES_SOCKET="/tmp/goggles-$$.sock" \
+      uv run python examples/105_benchmark.py log_type=scalar
   ```

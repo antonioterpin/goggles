@@ -10,10 +10,11 @@
   - `tests/core/` for `goggles/_core/`
   - `tests/core/integrations/` for `goggles/_core/integrations/`
   - `tests/history/` for `goggles/history/`
-  - `tests/benchmark/` for performance/regression benchmarks
+- Performance benchmarks live in
+  [`examples/105_benchmark.py`](../../examples/105_benchmark.py) (Hydra-
+  configured; presets under `examples/conf/preset/`).
 - **Keep test files small and focused.** One file per concern or layer --
-  for example `test_api.py`, `test_routing.py`, `test_logger.py`,
-  `test_hang_resilience.py`.
+  for example `test_api.py`, `test_transport.py`, `test_logger.py`.
 - Each test file should have a **module-level docstring** explaining
   what behavior it verifies.
 
@@ -42,11 +43,13 @@
 
 ## Multi-process tests
 
-- Goggles runs across processes. Tests that spawn subprocesses must use
-  a **unique `GOGGLES_PORT` per test run** (see `conftest.py` fixtures).
-  Never hardcode a port in a test module.
+- Goggles runs across processes on a single machine. Tests that spawn
+  subprocesses must use a **unique `GOGGLES_SOCKET` path per test run**
+  (prefer `/tmp/gg-<short-unique>.sock` -- the AF_UNIX path limit is
+  ~104 chars on macOS, so nested pytest `tmp_path` directories do not
+  fit). Never hardcode a socket path in a test module.
 - Use the `xdist_group` marker to force serial execution inside a group
-  when tests share a port or global state.
+  when tests share a socket or global state.
 
 ## Running tests
 
@@ -60,6 +63,7 @@ uv run pytest tests/core/integrations/
 # Skip slow/disruptive resilience tests
 uv run pytest -m "not resilience"
 
-# Benchmarks only
-uv run pytest tests/benchmark/
+# Hot-path benchmark (Hydra-configured; see examples/conf/preset/)
+uv run python examples/105_benchmark.py +preset=scalar_1khz
+uv run python examples/105_benchmark.py +preset=image_sweep
 ```

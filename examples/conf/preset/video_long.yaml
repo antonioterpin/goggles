@@ -1,0 +1,12 @@
+# @package _global_
+# Long-form video benchmark: 60 s at ~30 Hz.
+#
+# Exercises the shm side-channel under sustained load; the end-of-run
+# delivery check catches bugs where the host can't keep up and frames
+# are dropped during shutdown.
+log_type: video
+num_logs: 1800
+delay: 0.033
+video:
+  size: 128
+  frames: 10

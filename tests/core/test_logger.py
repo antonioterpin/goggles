@@ -9,15 +9,14 @@ from goggles._core.logger import CoreGogglesLogger, CoreTextLogger
 
 @pytest.fixture
 def mock_client() -> MagicMock:
-    """Mock EventBus client to capture emitted events.
+    """Mock transport to capture emitted events.
 
     Returns:
-        MagicMock: Client whose `emit` returns a completed future mock.
+        MagicMock: Transport whose ``emit`` / ``emit_sync`` record calls.
     """
     client = MagicMock()
-    future = MagicMock()
-    future.result = MagicMock(return_value=None)
-    client.emit = MagicMock(return_value=future)
+    client.emit = MagicMock(return_value=None)
+    client.emit_sync = MagicMock(return_value=None)
     return client
 
 
@@ -169,8 +168,8 @@ def test_histogram_adds_name_and_payload(goggles_logger, patch_bus):
     assert event.payload == [1, 2, 3], "Event payload mismatch for histogram"
 
 
-def test_all_emitters_call_future_result(patch_bus: MagicMock) -> None:
-    """Ensure synchronous mode calls future.result().
+def test_sync_mode_uses_emit_sync(patch_bus: MagicMock) -> None:
+    """Ensure ``async_mode=False`` routes through the transport's sync path.
 
     Args:
         patch_bus: Patched mock client fixture.
@@ -179,5 +178,19 @@ def test_all_emitters_call_future_result(patch_bus: MagicMock) -> None:
     g._client = patch_bus
 
     g.scalar("metric", 1.0, async_mode=False)
-    future = patch_bus.emit.return_value
-    future.result.assert_called_once()
+    patch_bus.emit_sync.assert_called_once()
+    patch_bus.emit.assert_not_called()
+
+
+def test_async_mode_uses_emit(patch_bus: MagicMock) -> None:
+    """Default (async) path should route through ``emit``.
+
+    Args:
+        patch_bus: Patched mock client fixture.
+    """
+    g = CoreGogglesLogger(name="async", scope="run")
+    g._client = patch_bus
+
+    g.scalar("metric", 1.0)
+    patch_bus.emit.assert_called_once()
+    patch_bus.emit_sync.assert_not_called()

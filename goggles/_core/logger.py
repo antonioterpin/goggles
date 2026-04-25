@@ -10,6 +10,7 @@ External code should not import from this module. Instead, depend on:
 
 import inspect
 import logging
+import os
 from typing import Any
 
 import numpy as np
@@ -17,6 +18,18 @@ from typing_extensions import Self
 
 from goggles import GOGGLES_ASYNC, Event, GogglesLogger, TextLogger
 from goggles.types import Image, Metrics, Vector, VectorField, Video
+
+# Walking the call stack via `inspect.currentframe` is ~5-15 μs and
+# allocates. At 10 kHz that's measurable on the producer hot path. Set
+# GOGGLES_CAPTURE_CALLER=0 to skip it — every event will carry
+# ("<unknown>", 0) for filepath/lineno, which matters only for the console
+# formatter (wandb and file handlers don't use it).
+_CAPTURE_CALLER: bool = os.getenv("GOGGLES_CAPTURE_CALLER", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+_UNKNOWN_CALLER: tuple[str, int] = ("<unknown>", 0)
 
 
 class CoreTextLogger(TextLogger):
@@ -56,6 +69,24 @@ class CoreTextLogger(TextLogger):
         self._scope = scope
         self._bound: dict[str, Any] = dict(**to_bind or {})
         self._client = get_bus()
+
+    def _dispatch(self, event: Event, *, async_mode: bool) -> None:
+        """Route ``event`` through the transport.
+
+        Args:
+            event: Event to dispatch.
+            async_mode: If True, fire-and-forget. Otherwise perform a
+                synchronous handoff to the configured transport before
+                returning. This does not imply cross-process delivery,
+                remote routing completion, or acknowledgement for
+                transports that do not provide those guarantees (for
+                example, ``LocalTransport`` in client mode, where
+                "sync" is a best-effort local-queue flush).
+        """
+        if async_mode:
+            self._client.emit(event)
+        else:
+            self._client.emit_sync(event)
 
     def bind(self, /, *, scope: str = "global", **fields: Any) -> Self:
         """Return a new logger with `fields` merged into persistent context.
@@ -113,7 +144,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -124,10 +155,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-        if not async_mode:
-            future.result()
 
     def info(
         self,
@@ -150,7 +180,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -161,11 +191,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def warning(
         self,
@@ -188,7 +216,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -199,11 +227,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def error(
         self,
@@ -226,7 +252,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -237,11 +263,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def critical(
         self,
@@ -264,7 +288,7 @@ class CoreTextLogger(TextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -275,11 +299,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
@@ -318,7 +340,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -329,11 +351,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def scalar(
         self,
@@ -357,7 +377,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -368,11 +388,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def image(
         self,
@@ -402,7 +420,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
         extra["format"] = format
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="image",
                 scope=self._scope,
@@ -413,11 +431,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def video(
         self,
@@ -456,7 +472,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         extra["fps"] = fps
         extra["format"] = format
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="video",
                 scope=self._scope,
@@ -467,11 +483,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def artifact(
         self,
@@ -502,7 +516,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             extra["name"] = name
         extra["format"] = format
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="artifact",
                 scope=self._scope,
@@ -513,11 +527,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def vector_field(
         self,
@@ -545,7 +557,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="vector_field",
                 scope=self._scope,
@@ -556,11 +568,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def histogram(
         self,
@@ -591,7 +601,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="histogram",
                 scope=self._scope,
@@ -602,11 +612,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def dictionary(
         self,
@@ -755,14 +763,19 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
 def _caller_id() -> tuple[str, int]:
     """Get the caller's filepath and line number for logging purposes.
 
+    Honours the ``GOGGLES_CAPTURE_CALLER`` env var: when disabled, returns
+    a constant tuple and skips the frame walk entirely — relevant for
+    producers logging at 10 kHz+ where the 5-15 μs stack walk is visible
+    in p99 latency.
+
     Returns:
         A tuple of (file path, line number).
 
     """
+    if not _CAPTURE_CALLER:
+        return _UNKNOWN_CALLER
     frame = inspect.currentframe()
     if frame is None or frame.f_back is None or frame.f_back.f_back is None:
-        return ("<unknown>", 0)
+        return _UNKNOWN_CALLER
     caller_frame = frame.f_back.f_back
-    filename = caller_frame.f_code.co_filename
-    line_number = caller_frame.f_lineno
-    return (filename, line_number)
+    return (caller_frame.f_code.co_filename, caller_frame.f_lineno)

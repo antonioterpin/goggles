@@ -30,9 +30,7 @@ classifiers = [
 dependencies = [
     "ruamel.yaml",
     "rich",
-    "portal>=3.7.3",
     "typing-extensions>=4.15.0",
-    "netifaces>=0.11.0",
     "pyyaml>=6.0.3",
     "numpy>=1.23",
     "imageio>=2.37.0",
@@ -63,6 +61,7 @@ dev = [
     "tomli",
     "pyupgrade>=3.19.0",
     "psutil",
+    "hydra-core>=1.3.2",
 ]
 # Optional JAX-based GPU history subsystem
 jax = [
@@ -189,3 +188,4 @@ reportUnusedVariable = false
 enableTypeIgnoreComments = false
 reportIgnoreCommentWithoutRule = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
+

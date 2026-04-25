@@ -13,6 +13,7 @@ User-facing usage lives in the top-level [README](../README.md). This hub is aim
 | [contributing.md](guides/contributing.md) | Development setup, branch workflow, PR preparation, commit style |
 | [agent-development.md](guides/agent-development.md) | Using Goggles with Claude Code, GitHub Copilot, and custom agents |
 | [architecture.md](guides/architecture.md) | Package layout, public surface, and subsystem responsibilities |
+| [environment-variables.md](guides/environment-variables.md) | Runtime knobs (`GOGGLES_ASYNC`, `GOGGLES_SOCKET`, `GOGGLES_SHM_THRESHOLD`, ...) |
 
 ---
 
