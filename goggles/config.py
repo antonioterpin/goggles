@@ -108,17 +108,19 @@ class PrettyConfig(dict):
             return cls(config)
 
         declared = {f.name for f in fields(cls)}
-        private_hits = {
+        private_hits = sorted(
             k for k in config if k in declared and k.startswith("_")
-        }
+        )
         if private_hits:
             raise ValueError(
                 f"Private fields cannot be overridden via from_config: "
                 f"{private_hits}."
             )
-        unknown = {k for k in config if k not in declared}
+        unknown = sorted(k for k in config if k not in declared)
         if unknown:
-            public = {name for name in declared if not name.startswith("_")}
+            public = sorted(
+                name for name in declared if not name.startswith("_")
+            )
             raise ValueError(
                 f"Unknown config keys for {cls.__name__}: {unknown}. "
                 f"Declared: {public}."
