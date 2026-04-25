@@ -20,17 +20,21 @@ import pytest
 import goggles as gg
 from goggles import Event, Kind
 from goggles._core.transport import (
+    _DEFAULT_SHM_THRESHOLD,
     _HEADER_FMT,
     _HEADER_SIZE,
     _IS_WINDOWS,
     _MSG_SMALL,
     _SHM_NAME_PREFIX,
     LocalTransport,
+    _default_shm_threshold,
     _default_socket_path,
     _next_shm_name,
+    _pack_large,
     _pack_small_frame,
     _reap_orphan_shm,
     _try_unlink_shm,
+    _unpack_large,
     _unpack_small,
     _user_tag,
 )
@@ -180,6 +184,27 @@ def test_default_socket_path_uses_tempdir_fallback(
     path = _default_socket_path()
     assert path.endswith(".sock")
     assert os.path.isabs(path)
+
+
+def test_default_shm_threshold_env_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GOGGLES_SHM_THRESHOLD should support overrides and safe fallback.
+
+    Args:
+        monkeypatch: pytest helper for environment isolation.
+    """
+    monkeypatch.delenv("GOGGLES_SHM_THRESHOLD", raising=False)
+    assert _default_shm_threshold() == _DEFAULT_SHM_THRESHOLD
+
+    monkeypatch.setenv("GOGGLES_SHM_THRESHOLD", "1234")
+    assert _default_shm_threshold() == 1234
+
+    monkeypatch.setenv("GOGGLES_SHM_THRESHOLD", "-1")
+    assert _default_shm_threshold() == 0
+
+    monkeypatch.setenv("GOGGLES_SHM_THRESHOLD", "not-an-int")
+    assert _default_shm_threshold() == _DEFAULT_SHM_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +489,64 @@ def test_client_numpy_payload_roundtrip(socket_path: str) -> None:
         host.shutdown(timeout=2.0)
 
 
+@pytest.mark.parametrize(
+    ("shm_threshold", "path_label"),
+    [
+        (10**9, "SMALL inline pickle"),
+        (1024, "LARGE shared memory"),
+    ],
+)
+def test_client_numpy_payload_is_snapshotted_before_mutation(
+    socket_path: str,
+    shm_threshold: int,
+    path_label: str,
+) -> None:
+    """Client emits must snapshot ndarray bytes before returning.
+
+    The benchmark hot path reuses payload buffers across calls; correctness
+    depends on the transport copying the array into its wire representation
+    before user code can mutate the original buffer.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+        shm_threshold: Threshold that selects SMALL or LARGE encoding.
+        path_label: Human-readable encoding path for assertion messages.
+    """
+    host = LocalTransport(socket_path=socket_path, shm_threshold=shm_threshold)
+    try:
+        client = LocalTransport(
+            socket_path=socket_path,
+            shm_threshold=shm_threshold,
+        )
+        try:
+            collector = _CollectingHandler()
+            _install_collector(host, collector)
+
+            arr = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)
+            expected = arr.copy()
+            client.emit(
+                Event(
+                    kind="image",
+                    scope="global",
+                    payload=arr,
+                    filepath="t.py",
+                    lineno=1,
+                )
+            )
+            arr.fill(-1.0)
+
+            assert _wait_until(lambda: len(collector.events) == 1), (
+                f"{path_label} client event should be delivered"
+            )
+            got = collector.events[0].payload
+            assert isinstance(got, np.ndarray)
+            np.testing.assert_array_equal(got, expected)
+        finally:
+            client.shutdown(timeout=2.0)
+    finally:
+        host.shutdown(timeout=2.0)
+
+
 def test_shm_side_channel_for_large_payload(socket_path: str) -> None:
     host = LocalTransport(socket_path=socket_path, shm_threshold=1024)
     try:
@@ -494,6 +577,113 @@ def test_shm_side_channel_for_large_payload(socket_path: str) -> None:
             assert _wait_until(
                 lambda: not client._pending_shm,  # type: ignore[attr-defined]
                 timeout=1.0,
+            )
+        finally:
+            client.shutdown(timeout=2.0)
+    finally:
+        host.shutdown(timeout=2.0)
+
+
+def test_shm_threshold_zero_disables_side_channel(
+    socket_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A threshold of 0 should force ndarray payloads onto SMALL frames.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+        monkeypatch: pytest helper used to fail fast if shm allocation starts.
+    """
+
+    def fail_next_shm_name() -> str:
+        raise AssertionError("threshold=0 must not allocate shared memory")
+
+    monkeypatch.setattr(
+        "goggles._core.transport._next_shm_name",
+        fail_next_shm_name,
+    )
+    host = LocalTransport(socket_path=socket_path, shm_threshold=0)
+    try:
+        client = LocalTransport(socket_path=socket_path, shm_threshold=0)
+        try:
+            collector = _CollectingHandler()
+            _install_collector(host, collector)
+
+            arr = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)
+            client.emit(
+                Event(
+                    kind="image",
+                    scope="global",
+                    payload=arr,
+                    filepath="t.py",
+                    lineno=1,
+                )
+            )
+
+            assert _wait_until(lambda: len(collector.events) == 1)
+            got = collector.events[0].payload
+            assert isinstance(got, np.ndarray)
+            np.testing.assert_array_equal(got, arr)
+        finally:
+            client.shutdown(timeout=2.0)
+    finally:
+        host.shutdown(timeout=2.0)
+
+
+def test_client_attach_and_detach_control_frames(socket_path: str) -> None:
+    """Client-mode ATTACH/DETACH frames must update the host EventBus.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+    """
+    gg.register_handler(_CollectingHandler)
+    host = LocalTransport(socket_path=socket_path)
+    try:
+        client = LocalTransport(socket_path=socket_path)
+        try:
+            assert not client.is_host
+            bus = host._bus  # type: ignore[attr-defined]
+            client.attach(
+                handlers=[_CollectingHandler().to_dict()],
+                scopes=["global"],
+            )
+            assert _wait_until(
+                lambda: (
+                    "collector" in bus.handlers
+                    and "collector" in bus.scopes.get("global", set())
+                )
+            ), "client ATTACH should install handler on host"
+            collector = cast(_CollectingHandler, bus.handlers["collector"])
+
+            client.emit(
+                Event(
+                    kind="log",
+                    scope="global",
+                    payload="before-detach",
+                    filepath="t.py",
+                    lineno=1,
+                )
+            )
+            assert _wait_until(lambda: len(collector.events) == 1)
+            assert collector.events[0].payload == "before-detach"
+
+            client.detach("collector", "global")
+            assert _wait_until(
+                lambda: "collector" not in bus.handlers
+            ), "client DETACH should remove handler from host"
+
+            client.emit(
+                Event(
+                    kind="log",
+                    scope="global",
+                    payload="after-detach",
+                    filepath="t.py",
+                    lineno=2,
+                )
+            )
+            assert not _wait_until(
+                lambda: len(collector.events) > 1,
+                timeout=0.2,
             )
         finally:
             client.shutdown(timeout=2.0)
@@ -1149,6 +1339,50 @@ def test_next_shm_name_is_unique_and_prefixed() -> None:
     assert a.startswith(_SHM_NAME_PREFIX)
     assert b.startswith(_SHM_NAME_PREFIX)
     assert a != b
+
+
+def test_pack_unpack_large_roundtrip_and_unlinks_shm() -> None:
+    """LARGE frame metadata should preserve Event fields and reap shm."""
+    arr = np.arange(10 * 10, dtype=np.float32).reshape(10, 10)
+    event = Event(
+        kind="image",
+        scope="global",
+        payload=arr,
+        filepath="test.py",
+        lineno=9,
+        step=3,
+        time=12.5,
+        extra={"name": "image"},
+    )
+    shm_name = _next_shm_name()
+    shm = shared_memory.SharedMemory(
+        create=True,
+        name=shm_name,
+        size=arr.nbytes,
+    )
+    try:
+        view = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm.buf)
+        view[...] = arr
+
+        restored = _unpack_large(_pack_large(event, shm_name))
+
+        assert restored.kind == event.kind
+        assert restored.scope == event.scope
+        assert restored.filepath == event.filepath
+        assert restored.lineno == event.lineno
+        assert restored.step == event.step
+        assert restored.time == event.time
+        assert restored.extra == event.extra
+        assert isinstance(restored.payload, np.ndarray)
+        np.testing.assert_array_equal(restored.payload, arr)
+        with pytest.raises(FileNotFoundError):
+            shared_memory.SharedMemory(name=shm_name)
+    finally:
+        try:
+            shm.close()
+        except OSError:
+            pass
+        _try_unlink_shm(shm_name)
 
 
 @pytest.mark.skipif(
