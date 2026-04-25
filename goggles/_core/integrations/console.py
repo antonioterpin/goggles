@@ -8,6 +8,8 @@ from typing_extensions import Self
 
 from goggles.types import Event, Kind
 
+from ._step_guard import StepGuard
+
 
 class ConsoleHandler:
     """Handle 'log' events and output them to console using Python's logging.
@@ -44,6 +46,11 @@ class ConsoleHandler:
         self.path_style = path_style
         self.project_root = Path(project_root or Path.cwd())
         self._logger: logging.Logger
+        # Same monotonic-step tracker as LocalStorage / wandb, but with
+        # warn-only policy: out-of-order events are *still printed*, just
+        # flagged. Console output is meant for humans to read in arrival
+        # order. See issue #70.
+        self._step_guard = StepGuard()
 
     def can_handle(self, kind: Kind) -> bool:
         """Return whether this handler can process the given kind.
@@ -59,6 +66,11 @@ class ConsoleHandler:
     def handle(self, event: Event) -> None:
         """Forward a log event to Python's logging system.
 
+        Out-of-order steps (``event.step`` strictly less than the highest
+        step previously seen on the same scope) trigger a warning but
+        the event is still emitted — console output is for humans to
+        read in arrival order, not for downstream replay. See #70.
+
         Args:
             event: The log event to handle.
 
@@ -69,6 +81,14 @@ class ConsoleHandler:
         """
         if event.kind != "log":
             raise ValueError(f"Unsupported event kind '{event.kind}'")
+
+        if self._step_guard.check(event.scope, event.step):
+            self._logger.warning(
+                "Out-of-order event (scope=%s, step=%s) — "
+                "step regressed below previously seen max",
+                event.scope,
+                event.step,
+            )
 
         level = int(event.level) if event.level else logging.NOTSET
         message = str(event.payload)

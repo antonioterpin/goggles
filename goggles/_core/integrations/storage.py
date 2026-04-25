@@ -20,6 +20,8 @@ from goggles.media import (
 )
 from goggles.types import Event, Kind
 
+from ._step_guard import StepGuard
+
 JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
@@ -70,6 +72,10 @@ class LocalStorageHandler:
         """
         self.name = name
         self._base_path = Path(path)
+        # Match wandb's per-scope monotonic-step contract: backward step
+        # values are dropped (with a warning) instead of being recorded
+        # out of order. See issue #70.
+        self._step_guard = StepGuard()
 
     def open(self) -> None:
         """Create directory structure and open the JSONL file for appending."""
@@ -122,10 +128,24 @@ class LocalStorageHandler:
     def handle(self, event: Event) -> None:
         """Write a single event to the JSONL file.
 
+        Out-of-order steps (``event.step`` strictly less than the highest
+        step previously seen on the same scope) are dropped with a
+        warning, matching the wandb handler's monotonicity contract.
+        Events without a step are always written.
+
         Args:
             event: The event to serialize.
 
         """
+        if self._step_guard.check(event.scope, event.step):
+            self._logger.warning(
+                "Dropping out-of-order event (scope=%s, step=%s) — "
+                "step regressed below previously seen max",
+                event.scope,
+                event.step,
+            )
+            return
+
         event_dict = event.to_dict()
 
         # Handle media events by saving files and updating payload
