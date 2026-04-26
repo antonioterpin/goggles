@@ -1,8 +1,9 @@
 """Public Transport protocol.
 
-The contract every transport implementation must satisfy. ``runtime_checkable``
-so ``isinstance(x, Transport)`` works for the singleton-rebuild check in
-``goggles._core.routing``.
+The contract every transport implementation must satisfy. The ``Transport``
+class is decorated ``@runtime_checkable`` so user code outside this package
+can do ``isinstance(x, Transport)``; the routing singleton itself does not
+rely on it (it gates on the ``is_running`` attribute directly).
 """
 
 from __future__ import annotations
