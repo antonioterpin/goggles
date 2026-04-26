@@ -63,12 +63,14 @@ video = np.random.randint(
 )  # 30 frames of 64x64 RGB
 logger.video(video, name="Random Video", fps=10, step=100)
 
-# Generate and log an RGBA video (with alpha channel)
+# Generate and log an RGBA video (with alpha channel).
+# Layout is channels-first: (frames, channels, H, W) = (15, 4, 64, 64).
+# The alpha channel is axis 1 index 3 — index that, not the trailing dim.
 rgba_video = np.random.randint(0, 255, (15, 4, 64, 64), dtype=np.uint8)
 # Create a fading effect over time
 for t in range(15):
     alpha_value = int(255 * (1 - t / 14))  # Fade out over time
-    rgba_video[t, :, :, 3] = alpha_value
+    rgba_video[t, 3, :, :] = alpha_value
 logger.video(rgba_video, name="Random RGBA Video", fps=5, step=100)
 
 # Load and log artifact: WandBHandler expects {path, name, type} where
