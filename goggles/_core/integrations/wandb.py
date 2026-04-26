@@ -76,6 +76,20 @@ def create_plotly_trajectories_figure(trajectories: np.ndarray) -> Any:
     }
     line = {"color": "rgba(110,110,110,0.45)", "width": 2}
 
+    starts = trajectories[:, 0]
+    ends = trajectories[:, -1]
+    start_marker = {
+        "symbol": "circle-open",
+        "size": 6 if dim == 2 else 4,
+        "color": "black",
+        "line": {"width": 1.2, "color": "black"},
+    }
+    end_marker = {
+        "symbol": "circle",
+        "size": 6 if dim == 2 else 4,
+        "color": "black",
+    }
+
     if dim == 3:
         trace = go.Scatter3d(
             x=pts[:, 0],
@@ -85,6 +99,23 @@ def create_plotly_trajectories_figure(trajectories: np.ndarray) -> Any:
             line=line,
             marker=marker,
             connectgaps=False,
+            showlegend=False,
+        )
+        starts_trace = go.Scatter3d(
+            x=starts[:, 0],
+            y=starts[:, 1],
+            z=starts[:, 2],
+            mode="markers",
+            marker=start_marker,
+            name="start",
+        )
+        ends_trace = go.Scatter3d(
+            x=ends[:, 0],
+            y=ends[:, 1],
+            z=ends[:, 2],
+            mode="markers",
+            marker=end_marker,
+            name="end",
         )
         layout = {
             "scene": {
@@ -94,7 +125,8 @@ def create_plotly_trajectories_figure(trajectories: np.ndarray) -> Any:
                 "aspectmode": "data",
             },
             "margin": {"l": 0, "r": 0, "t": 30, "b": 0},
-            "showlegend": False,
+            "showlegend": True,
+            "legend": {"x": 0.0, "y": 1.0},
         }
     else:
         trace = go.Scatter(
@@ -104,15 +136,31 @@ def create_plotly_trajectories_figure(trajectories: np.ndarray) -> Any:
             line=line,
             marker=marker,
             connectgaps=False,
+            showlegend=False,
+        )
+        starts_trace = go.Scatter(
+            x=starts[:, 0],
+            y=starts[:, 1],
+            mode="markers",
+            marker=start_marker,
+            name="start",
+        )
+        ends_trace = go.Scatter(
+            x=ends[:, 0],
+            y=ends[:, 1],
+            mode="markers",
+            marker=end_marker,
+            name="end",
         )
         layout = {
             "xaxis": {"scaleanchor": "y", "scaleratio": 1, "title": "x"},
             "yaxis": {"title": "y"},
             "margin": {"l": 40, "r": 10, "t": 30, "b": 40},
-            "showlegend": False,
+            "showlegend": True,
+            "legend": {"x": 0.0, "y": 1.0},
         }
 
-    return go.Figure(data=[trace], layout=layout)
+    return go.Figure(data=[trace, starts_trace, ends_trace], layout=layout)
 
 
 Run = Any  # wandb.sdk.wandb_run.Run
