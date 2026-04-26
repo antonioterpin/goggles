@@ -395,27 +395,63 @@ class WandBHandler:
         return run
 
     def _prepare_video_for_wandb(self, value: np.ndarray) -> np.ndarray:
-        """Normalize video tensors to (F, 3, H, W) for W&B.
+        """Normalize video tensors to channels-first layout for W&B.
 
         Accepted shapes:
-        - (F, H, W)
-        - (F, C, H, W)
-        - (F, T, C, H, W)
+        - (F, H, W) — implicit grayscale
+        - (F, C, H, W) — channels-first
+        - (F, H, W, C) — channels-last (C in {1, 3, 4})
+        - (F, T, C, H, W) — batched, channels-first
 
         Args:
             value: The input video tensor.
-                shape is either (F, H, W), (F, C, H, W), or (F, T, C, H, W).
 
         Returns:
-            The processed video tensor in shape (F, 3, H, W) or (F, T, 3, H, W).
+            Channels-first video, with 3 or 4 channels preserved: shape
+            (F, 3|4, H, W) or (F, T, 3|4, H, W). Grayscale inputs are
+            repeated to 3 channels.
+
+        Raises:
+            ValueError: If the input has an unsupported dimensionality.
         """
         if value.ndim == 3:
             # (F, H, W) → (F, 1, H, W)
             value = value[:, None, :, :]
-        elif value.ndim not in (4, 5):
-            self._logger.error(
+        elif value.ndim == 4:
+            channels_first_like = value.shape[1] in (1, 3, 4)
+            channels_last_like = value.shape[-1] in (1, 3, 4)
+            if channels_last_like and not channels_first_like:
+                # (F, H, W, C) → (F, C, H, W)
+                value = np.moveaxis(value, -1, 1)
+            elif channels_first_like and channels_last_like:
+                # Ambiguous (e.g. W in {1,3,4}); prefer channels-first,
+                # which is the documented canonical layout.
+                self._logger.warning(
+                    "Ambiguous 4D video shape %s: both axis 1 and axis -1 "
+                    "look like channel dimensions; preserving channels-first.",
+                    value.shape,
+                )
+            elif not channels_first_like:
+                # Neither axis 1 nor axis -1 has a channel-shaped extent
+                # (1/3/4). We can't recover the intended layout — refuse
+                # rather than silently mislabel the data.
+                raise ValueError(
+                    f"4D video has shape {value.shape}; expected channel "
+                    "dim (size 1, 3, or 4) at axis 1 (channels-first) "
+                    "or axis -1 (channels-last)."
+                )
+        elif value.ndim == 5:
+            # (F, T, C, H, W): the channel dim is axis 2.
+            if value.shape[2] not in (1, 3, 4):
+                raise ValueError(
+                    f"5D video has shape {value.shape}; expected channel "
+                    "dim (size 1, 3, or 4) at axis 2 for the documented "
+                    "(F, T, C, H, W) layout."
+                )
+        else:
+            raise ValueError(
                 f"Video has invalid shape {value.shape}; "
-                "expected (F,H,W), (F,C,H,W), or (F,T,C,H,W)."
+                "expected (F,H,W), (F,C,H,W), (F,H,W,C), or (F,T,C,H,W)."
             )
 
         if value.shape[1] == 1 and value.ndim == 4:

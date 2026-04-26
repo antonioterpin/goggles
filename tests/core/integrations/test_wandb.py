@@ -214,3 +214,80 @@ def test_handle_vector_field_unknown_mode_warns_and_skips(mock_wandb):
     ), "Should log a warning about the unknown visualization mode"
     run = mock_wandb.init.return_value
     run.log.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "shape, expected_channels",
+    [((5, 8, 12, 1), 3), ((5, 8, 12, 3), 3), ((5, 8, 12, 4), 4)],
+    ids=["channels_last_gray", "channels_last_rgb", "channels_last_rgba"],
+)
+def test_prepare_video_channels_last(shape, expected_channels):
+    h = WandBHandler(project="proj")
+    F, H, W, _ = shape
+    value = np.full(shape, 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, expected_channels, H, W), (
+        f"Expected (F, {expected_channels}, H, W) for input {shape},"
+        f" got {out.shape}"
+    )
+
+
+def test_prepare_video_channels_first_preserved():
+    h = WandBHandler(project="proj")
+    F, C, H, W = 5, 3, 8, 12
+    value = np.full((F, C, H, W), 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, 3, H, W)
+
+
+@pytest.mark.parametrize("W", [1, 3, 4])
+def test_prepare_video_channels_first_ambiguous_width_preserved(W):
+    h = WandBHandler(project="proj")
+    F, C, H = 5, 3, 8
+    value = np.full((F, C, H, W), 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, C, H, W), (
+        "Channels-first input with W in {1, 3, 4} must not be "
+        "misdetected as channels-last"
+    )
+
+
+def test_prepare_video_invalid_ndim_raises():
+    h = WandBHandler(project="proj")
+    with pytest.raises(ValueError, match="invalid shape"):
+        h._prepare_video_for_wandb(np.zeros((2, 3), dtype=np.uint8))
+
+
+def test_prepare_video_4d_neither_channel_axis_raises():
+    # 4D input with no plausible channel dim must raise rather than guess.
+    h = WandBHandler(project="proj")
+    # F=5, axis-1 size 7, axis-(-1) size 9 — neither is 1/3/4.
+    bad = np.zeros((5, 7, 8, 9), dtype=np.uint8)
+    with pytest.raises(ValueError, match="expected channel dim"):
+        h._prepare_video_for_wandb(bad)
+
+
+def test_prepare_video_5d_bad_channel_dim_raises():
+    # 5D (F,T,C,H,W) with axis-2 not in {1,3,4} must raise.
+    h = WandBHandler(project="proj")
+    bad = np.zeros((2, 4, 5, 8, 12), dtype=np.uint8)  # C=5
+    with pytest.raises(ValueError, match="expected channel dim"):
+        h._prepare_video_for_wandb(bad)
+
+
+@pytest.mark.parametrize("c", [1, 3, 4])
+def test_prepare_video_5d_valid_channel_dim_passes(c):
+    # 5D (F,T,C,H,W) with C in {1,3,4} passes through (grayscale upcast).
+    h = WandBHandler(project="proj")
+    value = np.zeros((2, 4, c, 8, 12), dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    expected_c = 3 if c == 1 else c
+    assert out.shape == (2, 4, expected_c, 8, 12)
+
+
+def test_prepare_video_channels_first_grayscale_repeated():
+    h = WandBHandler(project="proj")
+    F, H, W = 5, 8, 12
+    value = np.full((F, 1, H, W), 128, dtype=np.uint8)
+    out = h._prepare_video_for_wandb(value)
+    assert out.shape == (F, 3, H, W)
