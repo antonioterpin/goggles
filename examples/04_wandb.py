@@ -274,8 +274,9 @@ try:
         step=104,
     )
 
-    # Add extra fields to any metric logged to be used as x-axis in W&B
-    for i in range(102, 152):
+    # Add extra fields to any metric logged to be used as x-axis in W&B.
+    # Start at 104 so we stay monotonic with the trajectories above.
+    for i in range(104, 154):
         logger.scalar(
             "loss",
             150 - i,
@@ -294,14 +295,14 @@ try:
     # Log a static histogram (that does not change over time)
     data = np.random.randn(1000)
     logger.histogram(
-        data, name="Random Values Histogram", static=True, step=152
+        data, name="Random Values Histogram", static=True, step=154
     )
 
     # Or a dynamic histogram (that changes over time)
     for i in range(10):
         data = np.random.randn(1000) + i  # Shift mean over time
         logger.histogram(
-            data, name="Dynamic Random Values Histogram", step=152 + i
+            data, name="Dynamic Random Values Histogram", step=154 + i
         )
 
     time.sleep(2)
