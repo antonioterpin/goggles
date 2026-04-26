@@ -668,9 +668,9 @@ def test_client_attach_and_detach_control_frames(socket_path: str) -> None:
             assert collector.events[0].payload == "before-detach"
 
             client.detach("collector", "global")
-            assert _wait_until(
-                lambda: "collector" not in bus.handlers
-            ), "client DETACH should remove handler from host"
+            assert _wait_until(lambda: "collector" not in bus.handlers), (
+                "client DETACH should remove handler from host"
+            )
 
             client.emit(
                 Event(
