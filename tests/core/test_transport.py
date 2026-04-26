@@ -1068,16 +1068,32 @@ def _terminate_subprocess(
 ) -> None:
     """SIGTERM, then SIGKILL on timeout. Always wait for the child to exit.
 
+    Tolerates a process that has already exited (e.g. the host worker
+    naturally finished after recording its expected events) — without
+    that guard, ``proc.terminate()`` would raise ``ProcessLookupError``
+    on POSIX and fail tests during teardown. Also closes the stdout/
+    stderr pipes opened by ``_launch_host_subprocess`` so we don't leak
+    file descriptors.
+
     Args:
         proc: Process to terminate.
         timeout: Seconds to wait for graceful exit before killing.
     """
-    proc.terminate()
     try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        if proc.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.terminate()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            proc.wait()
+    finally:
+        if proc.stdout is not None:
+            proc.stdout.close()
+        if proc.stderr is not None:
+            proc.stderr.close()
 
 
 @contextlib.contextmanager
