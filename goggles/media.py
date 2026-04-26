@@ -504,7 +504,7 @@ def _build_trajectories_figure(
         ax.scatter(
             starts[:, 0],
             starts[:, 1],
-            starts[:, 2],
+            zs=starts[:, 2],
             facecolors="none",
             edgecolors="black",
             s=14,
@@ -514,7 +514,7 @@ def _build_trajectories_figure(
         ax.scatter(
             ends[:, 0],
             ends[:, 1],
-            ends[:, 2],
+            zs=ends[:, 2],
             color="black",
             s=10,
             depthshade=False,

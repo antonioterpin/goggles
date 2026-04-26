@@ -7,14 +7,113 @@ from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
+import plotly.graph_objects as go
 from typing_extensions import Self
 
 import wandb
-from goggles.media import (
-    create_numpy_trajectories_visualization,
-    create_numpy_vector_field_visualization,
-)
+from goggles.media import create_numpy_vector_field_visualization
 from goggles.types import Kind
+
+
+def create_plotly_trajectories_figure(trajectories: np.ndarray) -> Any:
+    """Render trajectories as an interactive Plotly figure.
+
+    Each path is drawn as line+marker segments whose color encodes the
+    per-step speed ``||x[t+1] - x[t]||``. All trajectories share a
+    single trace (separated by NaNs) so the figure has one colorbar.
+    Lives in the W&B integration so plotly stays in the ``wandb`` extra.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
+            ``{2, 3}`` and ``L >= 2``.
+
+    Returns:
+        A ``plotly.graph_objects.Figure``.
+
+    Raises:
+        ValueError: If the input shape or dimension is invalid.
+    """
+    if trajectories.ndim != 3:
+        raise ValueError(
+            "Trajectories must have shape (N, L, dim); "
+            f"got {trajectories.shape}."
+        )
+    N, L, dim = trajectories.shape
+    if dim not in (2, 3):
+        raise ValueError(f"Trajectories dim must be 2 or 3; got {dim}.")
+    if L < 2:
+        raise ValueError(f"Trajectories must have length L >= 2; got {L}.")
+
+    # Per-step speed; pad to L by repeating the last value so each
+    # vertex (not just each segment) has a color.
+    deltas = np.diff(trajectories, axis=1)
+    speed = np.linalg.norm(deltas, axis=-1)
+    speed_per_pt = np.concatenate([speed, speed[:, -1:]], axis=1)
+
+    # NaN-separate trajectories so a single Plotly trace renders them
+    # as disjoint paths with a shared colorbar.
+    nan_pt = np.full((1, dim), np.nan, dtype=trajectories.dtype)
+    nan_speed = np.array([np.nan], dtype=speed_per_pt.dtype)
+    pts_chunks: list[np.ndarray] = []
+    speed_chunks: list[np.ndarray] = []
+    for n in range(N):
+        pts_chunks.append(trajectories[n])
+        speed_chunks.append(speed_per_pt[n])
+        if n < N - 1:
+            pts_chunks.append(nan_pt)
+            speed_chunks.append(nan_speed)
+    pts = np.concatenate(pts_chunks, axis=0)
+    color = np.concatenate(speed_chunks)
+
+    marker = {
+        "color": color,
+        "colorscale": "Viridis",
+        "cmin": float(np.nanmin(color)),
+        "cmax": float(np.nanmax(color)),
+        "size": 2,
+        "showscale": True,
+        "colorbar": {"title": "speed"},
+    }
+    line = {"color": "rgba(110,110,110,0.45)", "width": 2}
+
+    if dim == 3:
+        trace = go.Scatter3d(
+            x=pts[:, 0],
+            y=pts[:, 1],
+            z=pts[:, 2],
+            mode="lines+markers",
+            line=line,
+            marker=marker,
+            connectgaps=False,
+        )
+        layout = {
+            "scene": {
+                "xaxis_title": "x",
+                "yaxis_title": "y",
+                "zaxis_title": "z",
+                "aspectmode": "data",
+            },
+            "margin": {"l": 0, "r": 0, "t": 30, "b": 0},
+            "showlegend": False,
+        }
+    else:
+        trace = go.Scatter(
+            x=pts[:, 0],
+            y=pts[:, 1],
+            mode="lines+markers",
+            line=line,
+            marker=marker,
+            connectgaps=False,
+        )
+        layout = {
+            "xaxis": {"scaleanchor": "y", "scaleratio": 1, "title": "x"},
+            "yaxis": {"title": "y"},
+            "margin": {"l": 40, "r": 10, "t": 30, "b": 40},
+            "showlegend": False,
+        }
+
+    return go.Figure(data=[trace], layout=layout)
+
 
 Run = Any  # wandb.sdk.wandb_run.Run
 Reinit: TypeAlias = Literal[
@@ -336,8 +435,8 @@ class WandBHandler:
                     )
                     continue
                 try:
-                    image = create_numpy_trajectories_visualization(value)
-                    logs[field_name] = wandb.Image(image)
+                    fig = create_plotly_trajectories_figure(value)
+                    logs[field_name] = wandb.Plotly(fig)
                 except Exception as exc:
                     self._logger.warning(
                         f"Invalid trajectories payload for '{field_name}' "

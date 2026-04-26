@@ -2182,6 +2182,7 @@ jax = [
     { name = "jaxlib", version = "0.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 wandb = [
+    { name = "plotly" },
     { name = "wandb", extra = ["media"] },
 ]
 
@@ -2195,6 +2196,7 @@ requires-dist = [
     { name = "jaxlib", marker = "extra == 'jax'", specifier = ">=0.4.3" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "numpy", specifier = ">=1.23" },
+    { name = "plotly", marker = "extra == 'wandb'", specifier = ">=5.20.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.0.1" },
     { name = "psutil", marker = "extra == 'dev'" },
     { name = "pydoclint", specifier = ">=0.8.3" },

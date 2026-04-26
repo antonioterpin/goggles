@@ -71,6 +71,7 @@ jax = [
 # Optional W&B integration
 wandb = [
     "wandb[media]",
+    "plotly>=5.20.0",
 ]
 
 # Pytest configuration
