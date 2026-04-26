@@ -129,7 +129,9 @@ class WandBHandler:
         kind = getattr(event, "kind", None) or "metric"
         step = getattr(event, "step", None)
         payload = getattr(event, "payload", None)
-        extra = getattr(event, "extra", {}) or {}
+        # Copy so our .pop(...) calls don't mutate the shared event.extra
+        # that other handlers on the same bus will read afterwards.
+        extra = dict(getattr(event, "extra", {}) or {})
         extra_config = extra.pop("config_wandb", {})
 
         # Get or create the W&B run for the given scope
