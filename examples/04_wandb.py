@@ -1,4 +1,6 @@
+import tempfile
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -61,115 +63,136 @@ video = np.random.randint(
 )  # 30 frames of 64x64 RGB
 logger.video(video, name="Random Video", fps=10, step=100)
 
-# Generate and log an RGBA video (with alpha channel)
+# Generate and log an RGBA video (with alpha channel).
+# Layout is channels-first: (frames, channels, H, W) = (15, 4, 64, 64).
+# The alpha channel is axis 1 index 3 — index that, not the trailing dim.
 rgba_video = np.random.randint(0, 255, (15, 4, 64, 64), dtype=np.uint8)
 # Create a fading effect over time
 for t in range(15):
     alpha_value = int(255 * (1 - t / 14))  # Fade out over time
-    rgba_video[t, :, :, 3] = alpha_value
+    rgba_video[t, 3, :, :] = alpha_value
 logger.video(rgba_video, name="Random RGBA Video", fps=5, step=100)
 
-# Load and log artifact
-artifact = np.random.rand(100, 100, 3)
-logger.artifact(artifact, name="Random Artifact", step=100)
-
-
-def make_lamb_oseen_vortices(
-    H: int,
-    W: int,
-    vortices: list[tuple[float, float, float, float]],
-    domain: tuple[float, float, float, float] = (-1.0, 1.0, -1.0, 1.0),
-    uniform: tuple[float, float] = (0.0, 0.0),
-) -> np.ndarray:
-    """Build a 2D incompressible flow from Lamb-Oseen vortices.
-
-    Args:
-        H: Height of the output vector field.
-        W: Width of the output vector field.
-        vortices: List of tuples (x0, y0, Gamma, sigma) defining the position,
-            circulation strength, and core size of each vortex.
-        domain:
-            (xmin, xmax, ymin, ymax) defining the spatial extent of the field.
-        uniform: (u, v) uniform flow component to add to the field.
-
-    Returns:
-        A (H, W, 2) array containing the (u, v) vector field.
-    """
-    xmin, xmax, ymin, ymax = domain
-    y = np.linspace(ymin, ymax, H, dtype=np.float32)
-    x = np.linspace(xmin, xmax, W, dtype=np.float32)
-    X, Y = np.meshgrid(x, y)
-
-    u = np.full((H, W), uniform[0], dtype=np.float32)
-    v = np.full((H, W), uniform[1], dtype=np.float32)
-
-    eps = 1e-6
-    for x0, y0, Gamma, sigma in vortices:
-        dx = X - x0
-        dy = Y - y0
-        r2 = dx * dx + dy * dy
-        r = np.sqrt(r2) + eps
-        v_theta = (
-            (Gamma / (2.0 * np.pi))
-            * (1.0 - np.exp(-r2 / (2.0 * sigma * sigma)))
-            / r
-        )
-        u += -dy * (v_theta / r)
-        v += dx * (v_theta / r)
-
-    return np.stack([u, v], axis=-1)
-
-
-# Vector field logging to W&B
-VF_H, VF_W = 128, 128
-vortices = [
-    (-0.4, 0.0, +5.0, 0.15),
-    (+0.4, 0.0, -5.0, 0.15),
-]
-dummy_vector_field = make_lamb_oseen_vortices(
-    VF_H, VF_W, vortices, uniform=(0.2, 0.0)
-)
-
-logger.vector_field(
-    dummy_vector_field,
-    name="lamb_oseen_dipole_magnitude",
-    mode="magnitude",
-    step=101,
-)
-logger.vector_field(
-    dummy_vector_field,
-    name="lamb_oseen_dipole_vorticity",
-    mode="vorticity",
-    add_colorbar=True,
-    step=102,
-)
-
-# Add extra fields to any metric logged to be used as x-axis in W&B
-for i in range(102, 152):
-    logger.scalar(
-        "loss",
-        150 - i,
-        step=i,
+# Load and log artifact: WandBHandler expects {path, name, type} where
+# `path` points to a file on disk to be uploaded as a W&B artifact.
+# WandB uploads the file asynchronously, so the local copy must outlive
+# every later logger call (and gg.finish()) — that's why the temp dir
+# is held open until the very end and the cleanup is wrapped in a
+# try/finally so a crash anywhere in the example still removes it.
+artifact_dir = tempfile.TemporaryDirectory(prefix="goggles-example-")
+try:
+    artifact_file = Path(artifact_dir.name) / "random_artifact.npy"
+    np.save(artifact_file, np.random.rand(100, 100, 3))
+    logger.artifact(
+        {
+            "path": str(artifact_file),
+            "name": "random_artifact",
+            "type": "misc",
+        },
+        step=100,
     )
-    if i % 10 == 0:
-        logger.image(
-            np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8),
-            name="Random image with custom step",
-            step=i,  # Global step
-            custom_step={
-                "custom_step": i // 10 - 10
-            },  # Extra field to be used as x-axis
+
+    def make_lamb_oseen_vortices(
+        H: int,
+        W: int,
+        vortices: list[tuple[float, float, float, float]],
+        domain: tuple[float, float, float, float] = (-1.0, 1.0, -1.0, 1.0),
+        uniform: tuple[float, float] = (0.0, 0.0),
+    ) -> np.ndarray:
+        """Build a 2D incompressible flow from Lamb-Oseen vortices.
+
+        Args:
+            H: Height of the output vector field.
+            W: Width of the output vector field.
+            vortices: List of tuples (x0, y0, Gamma, sigma) defining the
+                position, circulation strength, and core size of each vortex.
+            domain: (xmin, xmax, ymin, ymax) defining the spatial extent of
+                the field.
+            uniform: (u, v) uniform flow component to add to the field.
+
+        Returns:
+            A (H, W, 2) array containing the (u, v) vector field.
+        """
+        xmin, xmax, ymin, ymax = domain
+        y = np.linspace(ymin, ymax, H, dtype=np.float32)
+        x = np.linspace(xmin, xmax, W, dtype=np.float32)
+        X, Y = np.meshgrid(x, y)
+
+        u = np.full((H, W), uniform[0], dtype=np.float32)
+        v = np.full((H, W), uniform[1], dtype=np.float32)
+
+        eps = 1e-6
+        for x0, y0, Gamma, sigma in vortices:
+            dx = X - x0
+            dy = Y - y0
+            r2 = dx * dx + dy * dy
+            r = np.sqrt(r2) + eps
+            v_theta = (
+                (Gamma / (2.0 * np.pi))
+                * (1.0 - np.exp(-r2 / (2.0 * sigma * sigma)))
+                / r
+            )
+            u += -dy * (v_theta / r)
+            v += dx * (v_theta / r)
+
+        return np.stack([u, v], axis=-1)
+
+    # Vector field logging to W&B
+    VF_H, VF_W = 128, 128
+    vortices = [
+        (-0.4, 0.0, +5.0, 0.15),
+        (+0.4, 0.0, -5.0, 0.15),
+    ]
+    dummy_vector_field = make_lamb_oseen_vortices(
+        VF_H, VF_W, vortices, uniform=(0.2, 0.0)
+    )
+
+    logger.vector_field(
+        dummy_vector_field,
+        name="lamb_oseen_dipole_magnitude",
+        mode="magnitude",
+        step=101,
+    )
+    logger.vector_field(
+        dummy_vector_field,
+        name="lamb_oseen_dipole_vorticity",
+        mode="vorticity",
+        add_colorbar=True,
+        step=102,
+    )
+
+    # Add extra fields to any metric logged to be used as x-axis in W&B
+    for i in range(102, 152):
+        logger.scalar(
+            "loss",
+            150 - i,
+            step=i,
+        )
+        if i % 10 == 0:
+            logger.image(
+                np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8),
+                name="Random image with custom step",
+                step=i,  # Global step
+                custom_step={
+                    "custom_step": i // 10 - 10
+                },  # Extra field to be used as x-axis
+            )
+
+    # Log a static histogram (that does not change over time)
+    data = np.random.randn(1000)
+    logger.histogram(
+        data, name="Random Values Histogram", static=True, step=152
+    )
+
+    # Or a dynamic histogram (that changes over time)
+    for i in range(10):
+        data = np.random.randn(1000) + i  # Shift mean over time
+        logger.histogram(
+            data, name="Dynamic Random Values Histogram", step=152 + i
         )
 
-# Log a static histogram (that does not change over time)
-data = np.random.randn(1000)
-logger.histogram(data, name="Random Values Histogram", static=True, step=152)
-
-# Or a dynamic histogram (that changes over time)
-for i in range(10):
-    data = np.random.randn(1000) + i  # Shift mean over time
-    logger.histogram(data, name="Dynamic Random Values Histogram", step=152 + i)
-
-time.sleep(2)
-# When using asynchronous logging (like wandb), make sure to finish
-gg.finish()
+    time.sleep(2)
+    # When using asynchronous logging (like wandb), make sure to finish
+    gg.finish()
+finally:
+    artifact_dir.cleanup()
