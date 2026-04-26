@@ -9,7 +9,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+from matplotlib.collections import LineCollection
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 
 class _FrameWriter(Protocol):
@@ -421,9 +423,14 @@ def _build_trajectories_figure(
 ) -> Any:
     """Build a matplotlib figure visualizing a batch of trajectories.
 
+    Each path is drawn with its color encoding the per-step speed
+    ``||x[t+1] - x[t]||`` along the trajectory, with an open circle at
+    the start and a filled circle at the end so direction of motion is
+    unambiguous. A shared colorbar maps colors to speed.
+
     Args:
         trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
-            ``{2, 3}``.
+            ``{2, 3}`` and ``L >= 2``.
         dpi: Resolution used by matplotlib while rendering.
 
     Returns:
@@ -437,22 +444,84 @@ def _build_trajectories_figure(
             "Trajectories must have shape (N, L, dim); "
             f"got {trajectories.shape}."
         )
-    N, _, dim = trajectories.shape
+    _, L, dim = trajectories.shape
     if dim not in (2, 3):
         raise ValueError(f"Trajectories dim must be 2 or 3; got {dim}.")
+    if L < 2:
+        raise ValueError(f"Trajectories must have length L >= 2; got {L}.")
+
+    # Per-step speed = ||x[t+1] - x[t]||. We share one colormap across
+    # the whole batch so segments are comparable across trajectories.
+    deltas = np.diff(trajectories, axis=1)  # (N, L-1, dim)
+    speed = np.linalg.norm(deltas, axis=-1)  # (N, L-1)
+
+    # Stack consecutive points into 2-point segments for LineCollection.
+    segments = np.stack(
+        (trajectories[:, :-1], trajectories[:, 1:]), axis=2
+    ).reshape(-1, 2, dim)  # (N*(L-1), 2, dim)
 
     subplot_kw: dict[str, Any] = {"projection": "3d"} if dim == 3 else {}
     fig, ax = plt.subplots(dpi=dpi, subplot_kw=subplot_kw)
-    for n in range(N):
-        ax.plot(
-            *(trajectories[n, :, i] for i in range(dim)),
-            linestyle="-",
-            marker=".",
-            markersize=2,
-            linewidth=0.8,
-        )
+
+    lc_cls = Line3DCollection if dim == 3 else LineCollection
+    lc = lc_cls(segments, cmap="viridis", linewidth=1.0)  # pyright: ignore[reportArgumentType]
+    lc.set_array(speed.ravel())
+    ax.add_collection(lc)
+
+    # LineCollection does not auto-fit the view; set limits from data.
+    flat = trajectories.reshape(-1, dim)
+    mins = flat.min(axis=0)
+    maxs = flat.max(axis=0)
+    span = np.maximum(maxs - mins, 1e-6)
+    pad = 0.05 * span
+    ax.set_xlim(mins[0] - pad[0], maxs[0] + pad[0])
+    ax.set_ylim(mins[1] - pad[1], maxs[1] + pad[1])
+    if dim == 3:
+        ax.set_zlim(mins[2] - pad[2], maxs[2] + pad[2])  # pyright: ignore[reportAttributeAccessIssue]
+
+    # Direction markers: open circle at start, filled disc at end.
+    starts = trajectories[:, 0]
+    ends = trajectories[:, -1]
     if dim == 2:
+        ax.scatter(
+            starts[:, 0],
+            starts[:, 1],
+            facecolors="none",
+            edgecolors="black",
+            s=14,
+            linewidths=0.7,
+            zorder=3,
+        )
+        ax.scatter(
+            ends[:, 0],
+            ends[:, 1],
+            color="black",
+            s=10,
+            zorder=3,
+        )
         ax.set_aspect("equal")
+    else:
+        ax.scatter(
+            starts[:, 0],
+            starts[:, 1],
+            starts[:, 2],
+            facecolors="none",
+            edgecolors="black",
+            s=14,
+            linewidths=0.7,
+            depthshade=False,
+        )
+        ax.scatter(
+            ends[:, 0],
+            ends[:, 1],
+            ends[:, 2],
+            color="black",
+            s=10,
+            depthshade=False,
+        )
+
+    cb = fig.colorbar(lc, ax=ax, shrink=0.7, pad=0.04)
+    cb.set_label("speed (||Δx||)")
     return fig
 
 
