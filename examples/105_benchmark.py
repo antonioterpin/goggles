@@ -237,10 +237,7 @@ def _run_one(
     else:
         raise ValueError(f"Unsupported log_type: {log_type}")
 
-    for step_in_run in range(num_logs):
-        step = step_offset + step_in_run
-
-        start = time.perf_counter()
+    def _emit(step_in_run: int, step: int) -> None:
         if log_type == "scalar":
             assert scalar_values is not None
             _logger.scalar(
@@ -264,6 +261,11 @@ def _run_one(
             assert text_values is not None
             print(text_values[step_in_run])
 
+    for step_in_run in range(num_logs):
+        step = step_offset + step_in_run
+
+        start = time.perf_counter()
+        _emit(step_in_run, step)
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         times[step_in_run] = elapsed_ms
 
