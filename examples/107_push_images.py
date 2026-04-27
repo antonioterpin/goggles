@@ -4,9 +4,9 @@ import numpy as np
 
 import goggles as gg
 
-# `logger.push({...})` used to batch every value as a metric. With image
-# promotion, image-shaped numpy arrays in the mapping are split out into
-# individual image events while scalars stay in a single metric event.
+# `logger.push({...})` allows also image-shaped numpy arrays in the mapping
+# to be split out into individual image events
+# while scalars stay in a single metric event.
 # Image-shaped means: a 2-D array, OR a 3-D array with a trailing
 # channel axis in {1, 3, 4}.
 
