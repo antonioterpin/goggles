@@ -182,12 +182,12 @@ uv run examples/04_wandb.py
 uv run examples/05_wandb_multiple_runs.py
 
 # Advanced: Custom handler
-uv run exacmples/06_custom_handler.py
+uv run examples/06_custom_handler.py
 
 # Graceful shutdown utils
 uv run examples/100_interrupt.py
 
-# Pretty and convenient utils for configuration laoding
+# Pretty and convenient utils for configuration loading
 uv run examples/101_config.py
 
 # Advanced: Performance decorators
@@ -195,6 +195,12 @@ uv run examples/102_decorators.py
 
 # Advanced: JAX device-resident histories
 uv run examples/103_history.py
+
+# Filters: smoothing, outlier rejection, composition
+uv run examples/104_filters.py
+
+# Benchmark: producer-side logging latency under Hydra presets
+uv run examples/105_benchmark.py
 ```
 
 ## 🧠 For Goggles power user

@@ -33,4 +33,13 @@ logger.debug("This is a synchronous debug message.", async_mode=False)
 # if both are eligible.
 logger.info("This message will be logged by both handlers.")
 
+# Per-logger severity gate — useful to silence a noisy module without
+# touching the rest of the app's log level. Below, `noisy` drops DEBUG
+# locally while every other logger keeps emitting at its own level.
+# Also settable at construction: `gg.get_logger(__name__, level=gg.WARNING)`.
+noisy = gg.get_logger("examples.basic.noisy")
+noisy.set_level(gg.WARNING)
+noisy.debug("dropped — below the gate")
+noisy.warning("shown — at/above the gate")
+
 gg.finish()
