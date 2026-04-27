@@ -138,6 +138,7 @@ def test_scalar_emits_metric_event(goggles_logger, patch_bus):
         ("video", "video", "video"),
         ("artifact", "artifact", "data"),
         ("vector_field", "vector_field", "vector_field"),
+        ("trajectories", "trajectories", "trajectories"),
         ("histogram", "histogram", "histogram"),
     ],
 )

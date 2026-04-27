@@ -60,6 +60,7 @@ def test_can_handle_supported_kinds():
         "video",
         "artifact",
         "vector_field",
+        "trajectories",
         "histogram",
     ]:
         assert h.can_handle(kind), f"WandBHandler should handle '{kind}' events"
@@ -191,6 +192,59 @@ def test_handle_vector_field_logs_image(mock_wandb, monkeypatch):
     assert run.log.call_args.kwargs["step"] == 3, (
         "Logged payload should include the event step"
     )
+
+
+@pytest.mark.parametrize("dim", [2, 3], ids=["2d", "3d"])
+def test_handle_trajectories_logs_plotly(mock_wandb, monkeypatch, dim):
+    h = WandBHandler(project="proj")
+    payload = np.random.randn(4, 8, dim).astype(np.float32)
+    event = SimpleNamespace(
+        kind="trajectories",
+        scope="global",
+        payload=payload,
+        step=2,
+        extra={"name": "trails", "tag": "viz"},
+    )
+
+    mocked_fig = MagicMock(name="plotly_figure")
+    render_mock = MagicMock(return_value=mocked_fig)
+    monkeypatch.setattr(
+        wandb_module, "create_plotly_trajectories_figure", render_mock
+    )
+
+    h.handle(event)
+
+    render_mock.assert_called_once()
+    np.testing.assert_array_equal(render_mock.call_args[0][0], payload)
+    mock_wandb.Plotly.assert_called_once_with(mocked_fig)
+    run = mock_wandb.init.return_value
+    run.log.assert_called_once()
+    logged_payload = run.log.call_args[0][0]
+    assert "trails" in logged_payload
+    assert logged_payload["tag"] == "viz"
+    assert run.log.call_args.kwargs["step"] == 2
+
+
+def test_handle_trajectories_bad_payload_warns(mock_wandb, monkeypatch):
+    h = WandBHandler(project="proj")
+    # 2D array — not (N, L, dim) — renderer will raise
+    payload = np.zeros((3, 4), dtype=np.float32)
+    event = SimpleNamespace(
+        kind="trajectories",
+        scope="global",
+        payload=payload,
+        step=0,
+        extra={},
+    )
+
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(event)
+    finally:
+        h._logger.removeHandler(collector)
+
+    assert any("trajectories" in m.lower() for m in messages)
+    mock_wandb.Plotly.assert_not_called()
 
 
 def test_handle_vector_field_unknown_mode_warns_and_skips(mock_wandb):

@@ -58,6 +58,7 @@ def test_open_creates_directories(tmp_path):
         "videos",
         "artifacts",
         "vector_fields",
+        "trajectories",
         "histograms",
     ]:
         assert (tmp_path / sub).exists(), (
@@ -226,6 +227,36 @@ def test_save_vector_field_to_file_with_unknown_mode_warns(tmp_handler):
     assert any(
         "Unknown vector field visualization mode" in m for m in messages
     ), "Should log a warning for unknown vector field visualization mode"
+
+
+@patch(
+    "goggles._core.integrations.storage.save_numpy_trajectories_visualization"
+)
+def test_save_trajectories_to_file_with_visualization(mock_save, tmp_handler):
+    event = {
+        "payload": np.random.randn(3, 10, 2),
+        "extra.store_visualization": True,
+        "extra.name": "traj",
+    }
+    updated = tmp_handler._save_trajectories_to_file(event)
+    npy_path = tmp_handler._base_path / updated["payload"]
+    assert npy_path.exists(), "Trajectories .npy file should exist"
+    assert np.load(npy_path).shape == (3, 10, 2)
+    mock_save.assert_called_once()
+
+
+def test_save_trajectories_to_file_no_visualization(tmp_handler):
+    event = {
+        "payload": np.random.randn(3, 10, 2),
+        "extra.name": "traj",
+    }
+    updated = tmp_handler._save_trajectories_to_file(event)
+    npy_path = tmp_handler._base_path / updated["payload"]
+    assert npy_path.exists()
+    viz_dir = tmp_handler._trajectories_dir / "visualizations"
+    assert not viz_dir.exists() or not any(viz_dir.iterdir()), (
+        "No visualization should be written when store_visualization is absent"
+    )
 
 
 def test_save_histogram_to_file(tmp_handler):

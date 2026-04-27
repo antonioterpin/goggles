@@ -7,11 +7,161 @@ from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
+import plotly.graph_objects as go
 from typing_extensions import Self
 
 import wandb
 from goggles.media import create_numpy_vector_field_visualization
 from goggles.types import Kind
+
+
+def create_plotly_trajectories_figure(trajectories: np.ndarray) -> Any:
+    """Render trajectories as an interactive Plotly figure.
+
+    Each path is drawn as line+marker segments whose color encodes the
+    per-step speed ``||x[t+1] - x[t]||``. All trajectories share a
+    single trace (separated by NaNs) so the figure has one colorbar.
+    Lives in the W&B integration so plotly stays in the ``wandb`` extra.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
+            ``{2, 3}`` and ``L >= 2``.
+
+    Returns:
+        A ``plotly.graph_objects.Figure``.
+
+    Raises:
+        ValueError: If the input shape or dimension is invalid.
+    """
+    if trajectories.ndim != 3:
+        raise ValueError(
+            "Trajectories must have shape (N, L, dim); "
+            f"got {trajectories.shape}."
+        )
+    N, L, dim = trajectories.shape
+    if dim not in (2, 3):
+        raise ValueError(f"Trajectories dim must be 2 or 3; got {dim}.")
+    if L < 2:
+        raise ValueError(f"Trajectories must have length L >= 2; got {L}.")
+
+    # Per-step speed; pad to L by repeating the last value so each
+    # vertex (not just each segment) has a color.
+    deltas = np.diff(trajectories, axis=1)
+    speed = np.linalg.norm(deltas, axis=-1)
+    speed_per_pt = np.concatenate([speed, speed[:, -1:]], axis=1)
+
+    # NaN-separate trajectories so a single Plotly trace renders them
+    # as disjoint paths with a shared colorbar.
+    nan_pt = np.full((1, dim), np.nan, dtype=trajectories.dtype)
+    nan_speed = np.array([np.nan], dtype=speed_per_pt.dtype)
+    pts_chunks: list[np.ndarray] = []
+    speed_chunks: list[np.ndarray] = []
+    for n in range(N):
+        pts_chunks.append(trajectories[n])
+        speed_chunks.append(speed_per_pt[n])
+        if n < N - 1:
+            pts_chunks.append(nan_pt)
+            speed_chunks.append(nan_speed)
+    pts = np.concatenate(pts_chunks, axis=0)
+    color = np.concatenate(speed_chunks)
+
+    marker = {
+        "color": color,
+        "colorscale": "Viridis",
+        "cmin": float(np.nanmin(color)),
+        "cmax": float(np.nanmax(color)),
+        "size": 2,
+        "showscale": True,
+        "colorbar": {"title": "speed"},
+    }
+    line = {"color": "rgba(110,110,110,0.45)", "width": 2}
+
+    starts = trajectories[:, 0]
+    ends = trajectories[:, -1]
+    start_marker = {
+        "symbol": "circle-open",
+        "size": 6 if dim == 2 else 4,
+        "color": "black",
+        "line": {"width": 1.2, "color": "black"},
+    }
+    end_marker = {
+        "symbol": "circle",
+        "size": 6 if dim == 2 else 4,
+        "color": "black",
+    }
+
+    if dim == 3:
+        trace = go.Scatter3d(
+            x=pts[:, 0],
+            y=pts[:, 1],
+            z=pts[:, 2],
+            mode="lines+markers",
+            line=line,
+            marker=marker,
+            connectgaps=False,
+            showlegend=False,
+        )
+        starts_trace = go.Scatter3d(
+            x=starts[:, 0],
+            y=starts[:, 1],
+            z=starts[:, 2],
+            mode="markers",
+            marker=start_marker,
+            name="start",
+        )
+        ends_trace = go.Scatter3d(
+            x=ends[:, 0],
+            y=ends[:, 1],
+            z=ends[:, 2],
+            mode="markers",
+            marker=end_marker,
+            name="end",
+        )
+        layout = {
+            "scene": {
+                "xaxis_title": "x",
+                "yaxis_title": "y",
+                "zaxis_title": "z",
+                "aspectmode": "data",
+            },
+            "margin": {"l": 0, "r": 0, "t": 30, "b": 0},
+            "showlegend": True,
+            "legend": {"x": 0.0, "y": 1.0},
+        }
+    else:
+        trace = go.Scatter(
+            x=pts[:, 0],
+            y=pts[:, 1],
+            mode="lines+markers",
+            line=line,
+            marker=marker,
+            connectgaps=False,
+            showlegend=False,
+        )
+        starts_trace = go.Scatter(
+            x=starts[:, 0],
+            y=starts[:, 1],
+            mode="markers",
+            marker=start_marker,
+            name="start",
+        )
+        ends_trace = go.Scatter(
+            x=ends[:, 0],
+            y=ends[:, 1],
+            mode="markers",
+            marker=end_marker,
+            name="end",
+        )
+        layout = {
+            "xaxis": {"scaleanchor": "y", "scaleratio": 1, "title": "x"},
+            "yaxis": {"title": "y"},
+            "margin": {"l": 40, "r": 10, "t": 30, "b": 40},
+            "showlegend": True,
+            "legend": {"x": 0.0, "y": 1.0},
+        }
+
+    return go.Figure(data=[trace, starts_trace, ends_trace], layout=layout)
+
 
 Run = Any  # wandb.sdk.wandb_run.Run
 Reinit: TypeAlias = Literal[
@@ -44,6 +194,7 @@ class WandBHandler:
             "artifact",
             "histogram",
             "vector_field",
+            "trajectories",
         }
     )
     GLOBAL_SCOPE: ClassVar[str] = "global"
@@ -305,6 +456,38 @@ class WandBHandler:
                 except Exception as exc:
                     self._logger.warning(
                         f"Invalid vector field payload for '{field_name}' "
+                        f"(scope={scope}): {exc}",
+                    )
+
+            for k, v in extra.items():
+                logs[k] = v
+
+            if logs:
+                run.log(logs, step=step)
+            return
+
+        if kind == "trajectories":
+            name = extra.pop("name", "trajectories")
+
+            logs = {}
+            items = (
+                payload.items()
+                if isinstance(payload, Mapping)
+                else [(name, payload)]
+            )
+            for field_name, value in items:
+                if value is None:
+                    self._logger.warning(
+                        f"Skipping trajectories '{field_name}' with None "
+                        f"payload (scope={scope}).",
+                    )
+                    continue
+                try:
+                    fig = create_plotly_trajectories_figure(value)
+                    logs[field_name] = wandb.Plotly(fig)
+                except Exception as exc:
+                    self._logger.warning(
+                        f"Invalid trajectories payload for '{field_name}' "
                         f"(scope={scope}): {exc}",
                     )
 

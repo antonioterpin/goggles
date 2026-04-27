@@ -9,7 +9,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+from matplotlib.collections import LineCollection
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 
 class _FrameWriter(Protocol):
@@ -413,6 +415,181 @@ def _build_vector_field_figure(
         pad_setting = 0.0
 
     return fig, bbox_setting, pad_setting
+
+
+def _build_trajectories_figure(
+    trajectories: np.ndarray,
+    dpi: int,
+) -> Any:
+    """Build a matplotlib figure visualizing a batch of trajectories.
+
+    Each path is drawn with its color encoding the per-step speed
+    ``||x[t+1] - x[t]||`` along the trajectory, with an open circle at
+    the start and a filled circle at the end so direction of motion is
+    unambiguous. A shared colorbar maps colors to speed.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
+            ``{2, 3}`` and ``L >= 2``.
+        dpi: Resolution used by matplotlib while rendering.
+
+    Returns:
+        The matplotlib figure.
+
+    Raises:
+        ValueError: If the input shape or dimension is invalid.
+    """
+    if trajectories.ndim != 3:
+        raise ValueError(
+            "Trajectories must have shape (N, L, dim); "
+            f"got {trajectories.shape}."
+        )
+    _, L, dim = trajectories.shape
+    if dim not in (2, 3):
+        raise ValueError(f"Trajectories dim must be 2 or 3; got {dim}.")
+    if L < 2:
+        raise ValueError(f"Trajectories must have length L >= 2; got {L}.")
+
+    # Per-step speed = ||x[t+1] - x[t]||. We share one colormap across
+    # the whole batch so segments are comparable across trajectories.
+    deltas = np.diff(trajectories, axis=1)  # (N, L-1, dim)
+    speed = np.linalg.norm(deltas, axis=-1)  # (N, L-1)
+
+    # Stack consecutive points into 2-point segments for LineCollection.
+    segments = np.stack(
+        (trajectories[:, :-1], trajectories[:, 1:]), axis=2
+    ).reshape(-1, 2, dim)  # (N*(L-1), 2, dim)
+
+    subplot_kw: dict[str, Any] = {"projection": "3d"} if dim == 3 else {}
+    fig, ax = plt.subplots(dpi=dpi, subplot_kw=subplot_kw)
+
+    lc_cls = Line3DCollection if dim == 3 else LineCollection
+    lc = lc_cls(segments, cmap="viridis", linewidth=1.0)  # pyright: ignore[reportArgumentType]
+    lc.set_array(speed.ravel())
+    ax.add_collection(lc)
+
+    # LineCollection does not auto-fit the view; set limits from data.
+    flat = trajectories.reshape(-1, dim)
+    mins = flat.min(axis=0)
+    maxs = flat.max(axis=0)
+    span = np.maximum(maxs - mins, 1e-6)
+    pad = 0.05 * span
+    ax.set_xlim(mins[0] - pad[0], maxs[0] + pad[0])
+    ax.set_ylim(mins[1] - pad[1], maxs[1] + pad[1])
+    if dim == 3:
+        ax.set_zlim(mins[2] - pad[2], maxs[2] + pad[2])  # pyright: ignore[reportAttributeAccessIssue]
+
+    # Direction markers: open circle at start, filled disc at end.
+    starts = trajectories[:, 0]
+    ends = trajectories[:, -1]
+    if dim == 2:
+        ax.scatter(
+            starts[:, 0],
+            starts[:, 1],
+            facecolors="none",
+            edgecolors="black",
+            s=14,
+            linewidths=0.7,
+            zorder=3,
+        )
+        ax.scatter(
+            ends[:, 0],
+            ends[:, 1],
+            color="black",
+            s=10,
+            zorder=3,
+        )
+        ax.set_aspect("equal")
+    else:
+        ax.scatter(
+            starts[:, 0],
+            starts[:, 1],
+            zs=starts[:, 2],
+            facecolors="none",
+            edgecolors="black",
+            s=14,
+            linewidths=0.7,
+            depthshade=False,
+        )
+        ax.scatter(
+            ends[:, 0],
+            ends[:, 1],
+            zs=ends[:, 2],
+            color="black",
+            s=10,
+            depthshade=False,
+        )
+
+    cb = fig.colorbar(lc, ax=ax, shrink=0.7, pad=0.04)
+    cb.set_label("speed (||Δx||)")
+    return fig
+
+
+def save_numpy_trajectories_visualization(
+    trajectories: np.ndarray,
+    dir: Path,
+    name: str,
+    dpi: int = 200,
+) -> None:
+    """Save a trajectories visualization as a PNG image.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)``.
+        dir: Output directory.
+        name: Base name for the output PNG file (no extension).
+        dpi: Rendering resolution.
+    """
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+    try:
+        fig = _build_trajectories_figure(trajectories, dpi=dpi)
+        dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(
+            str(dir / f"{name}.png"),
+            dpi=dpi,
+            bbox_inches="tight",
+            pad_inches=0.05,
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+    finally:
+        matplotlib.use(original_backend)
+
+
+def create_numpy_trajectories_visualization(
+    trajectories: np.ndarray,
+    dpi: int = 200,
+) -> np.ndarray:
+    """Render a trajectories visualization to a uint8 RGB image.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)``.
+        dpi: Rendering resolution.
+
+    Returns:
+        Rendered image as a ``uint8`` array with shape ``(H, W, 3)``.
+    """
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+    try:
+        fig = _build_trajectories_figure(trajectories, dpi=dpi)
+        buf = io.BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=dpi,
+            bbox_inches="tight",
+            pad_inches=0.05,
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+        buf.seek(0)
+        rgba = imageio.imread(buf)
+        return np.ascontiguousarray(rgba[..., :3])
+    finally:
+        matplotlib.use(original_backend)
 
 
 class NumpyDumper(yaml.SafeDumper):
