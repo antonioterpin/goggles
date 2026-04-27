@@ -62,6 +62,16 @@ Step-by-step procedures for common tasks:
 
 ---
 
+## Retrospectives
+
+Postmortem write-ups for non-obvious bugs. Linked from the regression
+test that guards each one.
+
+See [retrospectives/README.md](retrospectives/README.md) for the
+index.
+
+---
+
 ## Quick reference
 
 ```bash

@@ -791,7 +791,8 @@ def test_shutdown_flushes_pending_events(socket_path: str) -> None:
 
     Regresses the "77/1500 video logs arrived" bug: BYE was sent out-of-band
     during shutdown, so any frames still in the client's send queue were
-    discarded when the send thread was force-closed.
+    discarded when the send thread was force-closed. Full retrospective:
+    ``docs/retrospectives/2026-04-shutdown-bye-flush.md``.
 
     Args:
         socket_path: Endpoint path (via fixture).
