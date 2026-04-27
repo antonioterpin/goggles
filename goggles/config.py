@@ -82,13 +82,19 @@ class PrettyConfig(dict):
         """Create an instance from a config dict.
 
         For dataclass subclasses:
-            - Only dataclass fields are accepted.
+            - Only declared public fields (no leading ``_``) may be set.
             - Missing values fall back to the dataclass defaults.
-            - Extra keys are ignored.
-            - Keys starting with '_' are ignored.
+            - Unknown keys (typos, extras) are silently ignored so
+              that callers can hand the same dict through multiple
+              ``from_config`` consumers without pre-filtering.
+            - Keys matching a declared private (``_``-prefixed) field
+              raise ``ValueError``: declared private state is not
+              configurable from a config dict by design, and silently
+              dropping a key that points at a real attribute would
+              hide a bug.
 
         For non-dataclass usage:
-            - Behaves like `cls(config)`.
+            - Behaves like ``cls(config)``.
 
         Args:
             config: Source configuration mapping.
@@ -96,17 +102,26 @@ class PrettyConfig(dict):
         Returns:
             A configuration instance of `cls`.
 
+        Raises:
+            ValueError: If ``config`` contains keys that name declared
+                private (``_``-prefixed) fields on the dataclass.
         """
         if not is_dataclass(cls):
             return cls(config)
 
-        # Keep only known dataclass fields.
-        allowed = {f.name for f in fields(cls) if not f.name.startswith("_")}
-
-        filtered = {k: v for k, v in config.items() if k in allowed}
-
-        # Instantiating the dataclass will apply defaults automatically.
-        return cls(**filtered)  # type: ignore[misc]
+        declared = {f.name for f in fields(cls)}
+        private_hits = sorted(
+            k for k in config if k in declared and k.startswith("_")
+        )
+        if private_hits:
+            raise ValueError(
+                f"Private fields cannot be overridden via from_config: "
+                f"{private_hits}."
+            )
+        # Unknown keys are silently dropped — callers can hand the
+        # same dict to several consumers without pre-filtering.
+        known = {k: v for k, v in config.items() if k in declared}
+        return cls(**known)  # type: ignore[misc]
 
     def to_yaml(self, file_path: str) -> None:
         """Save configuration to a YAML file.

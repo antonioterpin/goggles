@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import pytest
+
 from goggles.config import PrettyConfig, load_configuration
 
 
@@ -142,24 +144,29 @@ def test_yaml_and_json_roundtrip_via_prettyconfig_loaders(
     )
 
 
-def test_private_fields_are_not_overwritten_by_from_config() -> None:
-    """Keys starting with '_' must be ignored by from_config."""
-    cfg = DummyTypedConfig.from_config(
-        {
-            "_secret": "hacked",
-            "name": "x",
-            "port": "y",
-        }
-    )
+def test_private_fields_cannot_be_overridden_by_from_config() -> None:
+    """A declared `_`-prefixed field must not be settable from config."""
+    with pytest.raises(ValueError) as exc_info:
+        DummyTypedConfig.from_config(
+            {
+                "_secret": "hacked",
+                "name": "x",
+                "port": "y",
+            }
+        )
+    msg = str(exc_info.value)
+    assert "Private fields cannot be overridden" in msg
+    assert "_secret" in msg
 
-    assert cfg.name == "x", "Public field must be set from config."
-    assert cfg.port == "y", "Public field must be set from config."
-    assert cfg._secret == "dont-serialize", (
-        "Private field must keep default value."
+
+def test_undeclared_private_keys_are_silently_ignored() -> None:
+    """Undeclared `_`-prefixed keys are unknown keys, not private hits."""
+    cfg = DummyTypedConfig.from_config(
+        {"_not_declared": 1, "name": "x", "port": "y"}
     )
-    assert "_secret" not in cfg, (
-        "Private field must not appear in dict payload."
-    )
+    assert cfg.name == "x"
+    assert cfg.port == "y"
+    assert not hasattr(cfg, "_not_declared")
 
 
 def test_private_fields_not_serialized_yaml_json_roundtrip(
