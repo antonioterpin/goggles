@@ -335,7 +335,11 @@ def test_host_emit_sync_dispatches_inline(socket_path: str) -> None:
     "kind, payload, extra",
     [
         ("log", "", None),
-        ("artifact", {"empty": "", "non_empty": "x"}, {"name": "d", "format": "json"}),
+        (
+            "artifact",
+            {"empty": "", "non_empty": "x"},
+            {"name": "d", "format": "json"},
+        ),
     ],
     ids=["log_empty_string", "artifact_with_empty_string_value"],
 )
@@ -377,7 +381,11 @@ def test_empty_string_payloads_roundtrip_through_framing(
     "kind, payload, extra",
     [
         ("log", "", None),
-        ("artifact", {"empty": "", "non_empty": "x"}, {"name": "d", "format": "json"}),
+        (
+            "artifact",
+            {"empty": "", "non_empty": "x"},
+            {"name": "d", "format": "json"},
+        ),
     ],
     ids=["log_empty_string", "artifact_with_empty_string_value"],
 )
