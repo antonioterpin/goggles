@@ -2,6 +2,7 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
 from goggles._core.logger import CoreGogglesLogger, CoreTextLogger
@@ -151,6 +152,110 @@ def test_push_emits_metric_event(
     assert event.kind == "metric", "Event kind should be 'metric'"
     assert event.payload == metrics, "Event payload should match pushed metrics"
     assert event.step == 2, "Event step mismatch"
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [(8, 12), (8, 12, 1), (8, 12, 3), (8, 12, 4)],
+    ids=["hw", "hw1", "hw3", "hw4"],
+)
+def test_push_promotes_image_shaped_ndarrays(
+    goggles_logger: CoreGogglesLogger,
+    patch_bus: MagicMock,
+    shape: tuple[int, ...],
+) -> None:
+    """Image-shaped ndarrays passed to ``push`` are emitted as image events.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+        shape: Tensor shape under test (parametrized).
+    """
+    img = np.zeros(shape, dtype=np.uint8)
+    goggles_logger.push({"fig": img}, step=3)
+    kinds = [c.args[0].kind for c in patch_bus.emit.call_args_list]
+    assert kinds == ["image"]
+    event = patch_bus.emit.call_args_list[0].args[0]
+    np.testing.assert_array_equal(event.payload, img)
+    assert event.extra["name"] == "fig"
+    assert event.extra["format"] == "png"
+    assert event.step == 3
+
+
+def test_push_keeps_1d_ndarray_as_metric(
+    goggles_logger: CoreGogglesLogger, patch_bus: MagicMock
+) -> None:
+    """1-D ndarrays stay in the metric payload (not promoted to image).
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
+    vec = np.arange(4, dtype=np.float32)
+    goggles_logger.push({"v": vec}, step=1)
+    event = patch_bus.emit.call_args[0][0]
+    assert event.kind == "metric"
+    np.testing.assert_array_equal(event.payload["v"], vec)
+
+
+def test_push_mixes_scalars_and_images(
+    goggles_logger: CoreGogglesLogger, patch_bus: MagicMock
+) -> None:
+    """``push`` splits a mixed dict into one metric event + per-image events.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
+    img1 = np.zeros((4, 4), dtype=np.uint8)
+    img2 = np.zeros((4, 4, 3), dtype=np.uint8)
+    goggles_logger.push(
+        {"loss": 0.1, "acc": 0.9, "fig1": img1, "fig2": img2}, step=5
+    )
+    events = [c.args[0] for c in patch_bus.emit.call_args_list]
+    kinds = [e.kind for e in events]
+    assert kinds.count("metric") == 1
+    assert kinds.count("image") == 2
+
+    metric_event = next(e for e in events if e.kind == "metric")
+    assert metric_event.payload == {"loss": 0.1, "acc": 0.9}
+    assert metric_event.step == 5
+
+    image_names = [e.extra["name"] for e in events if e.kind == "image"]
+    assert sorted(image_names) == ["fig1", "fig2"]
+    for e in events:
+        assert e.step == 5
+
+
+def test_push_image_only_does_not_emit_empty_metric_event(
+    goggles_logger: CoreGogglesLogger, patch_bus: MagicMock
+) -> None:
+    """Image-only ``push`` must not emit an empty metric event alongside.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
+    img = np.zeros((4, 4), dtype=np.uint8)
+    goggles_logger.push({"fig": img}, step=2)
+    kinds = [c.args[0].kind for c in patch_bus.emit.call_args_list]
+    assert "metric" not in kinds
+
+
+def test_push_forwards_extras_to_image_events(
+    goggles_logger: CoreGogglesLogger, patch_bus: MagicMock
+) -> None:
+    """Extras forwarded to ``push`` reach each promoted image event's extras.
+
+    Args:
+        goggles_logger: ``CoreGogglesLogger`` fixture.
+        patch_bus: Patched mock client fixture.
+    """
+    img = np.zeros((4, 4), dtype=np.uint8)
+    goggles_logger.push({"fig": img}, step=2, split="train")
+    event = patch_bus.emit.call_args[0][0]
+    assert event.kind == "image"
+    assert event.extra["split"] == "train"
 
 
 def test_scalar_emits_metric_event(
