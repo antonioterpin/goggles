@@ -1,18 +1,7 @@
 """Transport package: cross-platform same-machine event routing.
 
-Public surface:
-    - :class:`Transport` — the protocol every implementation satisfies.
-    - :class:`LocalTransport` — the default local-machine implementation
-      (auto-elected host, AF_UNIX on Unix / TCP loopback on Windows).
-
-Internals:
-    - :mod:`._frames` — wire format, environment knobs, shm housekeeping.
-    - :mod:`._endpoints` — platform-specific socket binding/connecting.
-    - :mod:`._protocol` — the :class:`Transport` protocol declaration.
-    - :mod:`._local` — :class:`LocalTransport` and its private state.
-
-Imports below preserve the flat ``from goggles._core.transport import X``
-pattern that tests and routing code rely on.
+See ``docs/guides/transport.md`` for the package layout and the
+rationale behind the flat re-exports below.
 """
 
 from __future__ import annotations
