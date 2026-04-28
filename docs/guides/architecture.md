@@ -24,7 +24,11 @@ goggles/
 `-- _core/             # Implementation detail; do not import outside
     |-- logger.py            # CoreTextLogger / CoreGogglesLogger impls
     |-- routing.py           # Transport singleton (get_bus / reset_bus)
-    |-- transport.py         # Transport protocol + LocalTransport (UDS)
+    |-- transport/           # Transport protocol + LocalTransport — see transport.md
+    |   |-- _frames.py       # Wire format, env knobs, shm helpers
+    |   |-- _endpoints.py    # Platform-specific socket binding/connecting
+    |   |-- _protocol.py     # Transport Protocol declaration
+    |   `-- _local.py        # LocalTransport (UDS / TCP loopback)
     |-- decorators.py        # @timeit / @trace_on_error impls
     `-- integrations/
         |-- console.py        # ConsoleHandler
@@ -54,7 +58,7 @@ do (see [api-design.md](../standards/api-design.md)).
 
 ## Subsystems
 
-### 1. Logger & bus routing (`_core/logger.py`, `_core/routing.py`, `_core/transport.py`)
+### 1. Logger & bus routing (`_core/logger.py`, `_core/routing.py`, `_core/transport/`)
 
 Goggles maintains a **single EventBus per machine**: one host process
 owns it, the rest connect as clients. The user-facing entry points are
@@ -65,8 +69,9 @@ owns it, the rest connect as clients. The user-facing entry points are
   hands it to the transport via `emit` (async) or `emit_sync`.
 - `_core/routing.py` exposes `get_bus()` / `reset_bus()`, the
   process-wide transport singleton.
-- `_core/transport.py` defines the `Transport` protocol and the default
-  `LocalTransport` (see §4).
+- `_core/transport/` defines the `Transport` protocol and the default
+  `LocalTransport` (see §4 and [transport.md](transport.md) for the
+  package layout).
 
 - Loggers carry a `scope` (free-form string, default `global`). Events
   are routed to handlers attached to matching scopes.
@@ -115,7 +120,10 @@ Adding a new handler: subclass an existing handler or implement the
 `register_handler()` so it can be serialized for transport across the
 bus.
 
-### 4. Transport (`_core/transport.py`)
+### 4. Transport (`_core/transport/`)
+
+See [transport.md](transport.md) for the package layout (frames,
+endpoints, protocol, local impl) and the flat re-export rationale.
 
 Goggles uses a local-machine transport (`LocalTransport`) to route
 events within a machine. The first process to bind the configured
@@ -206,4 +214,4 @@ and close all handlers with a configurable timeout
 | New logger method | Update the `TextLogger` / `DataLogger` / `GogglesLogger` Protocols in `goggles/__init__.py`, then `_core/logger.py`. |
 | New config helper | `goggles/config.py` (keep the YAML-focused surface small). |
 | New history buffer op | `goggles/history/buffer.py` + types in `goggles/history/types.py`. |
-| New / alternative transport | Implement the `Transport` protocol in a new module under `goggles/_core/` (or a peer to `_core/transport.py`) and wire it in `goggles/_core/routing.py:get_bus`. |
+| New / alternative transport | Implement the `Transport` protocol in a new module under `goggles/_core/` (peer to `_core/transport/`) and wire it in `goggles/_core/routing.py:get_bus`. See [transport.md](transport.md). |
