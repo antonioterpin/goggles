@@ -74,14 +74,25 @@ class CoreTextLogger(TextLogger):
                 Optional initial persistent context to bind.
 
         """
-        # Importing here to avoid circular imports
-        from goggles._core.routing import get_bus  # noqa: PLC0415
-
         self.name = name
         self._scope = scope
         self._level = int(level)
         self._bound: dict[str, Any] = dict(**to_bind or {})
-        self._client = get_bus()
+
+    @property
+    def _client(self) -> Any:
+        """Return the live transport singleton.
+
+        Resolved lazily on every access so loggers captured at
+        class-body / module-import time (before any ``gg.attach()``)
+        always route through the current bus, and so a logger that
+        survives a ``gg.finish()`` -> rebuild cycle picks up the new
+        transport instead of holding a stale, closed reference.
+        """
+        # Importing here to avoid the goggles -> routing -> goggles cycle.
+        from goggles._core.routing import get_bus  # noqa: PLC0415
+
+        return get_bus()
 
     def set_level(self, level: int) -> None:
         """Set the minimum severity this logger will emit.

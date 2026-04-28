@@ -2,12 +2,30 @@
 
 import importlib
 import logging
+import threading
 from pathlib import Path
 from typing import ClassVar
 
 import pytest
 
 import goggles as gg
+
+
+class _ClassLevelLoggerHolder:
+    """Holder whose logger is captured at class-body time (regression #78).
+
+    The ``gg.get_logger(...)`` call happens once when this module is
+    imported by pytest, before any test body runs. That mirrors the real
+    user scenario from #78: ``logger = gg.get_logger(...)`` at class
+    scope in their own module, with ``gg.attach(...)`` called later from
+    ``main()``.
+
+    Attributes:
+        logger: Class-level Goggles text logger captured at module load.
+    """
+
+    logger = gg.get_logger("test-78-class-var", scope="global")
+
 
 # ---------------------------------------------------------------------
 # Logger creation
@@ -143,6 +161,44 @@ def test_attach_and_emit() -> None:
     assert any(
         hasattr(e, "payload") for e in DummyHandler.handled if e != "closed"
     ), "Events should have a payload attribute"
+
+
+def test_class_level_logger_does_not_hang_on_first_info() -> None:
+    """Logger captured at class-body scope must not hang on first .info().
+
+    Regression for #78: the portal-based transport could deadlock on the
+    first ``.info()`` call when the logger had been resolved early
+    (class-body time, before any ``gg.attach()``). With ``LocalTransport``
+    that pattern must complete promptly.
+
+    The emit runs on a worker thread so a hang surfaces as a timed-out
+    join rather than wedging the test runner.
+    """
+    gg.register_handler(DummyHandler)
+    DummyHandler.handled.clear()
+    handler = DummyHandler()
+    gg.attach(handler, scopes=["global"])
+
+    done = threading.Event()
+
+    def _emit() -> None:
+        _ClassLevelLoggerHolder().logger.info("class-var event")
+        done.set()
+
+    t = threading.Thread(target=_emit, daemon=True)
+    t.start()
+    assert done.wait(timeout=5.0), (
+        "class-level logger.info() did not return within 5 s — see #78"
+    )
+    gg.finish()
+    assert any(
+        getattr(e, "payload", None) == "class-var event"
+        for e in DummyHandler.handled
+        if e != "closed"
+    ), (
+        "class-level logger never delivered its event — likely a stale "
+        "transport reference captured at class-body time"
+    )
 
 
 def test_eventbus_emit_routing_and_detach():
