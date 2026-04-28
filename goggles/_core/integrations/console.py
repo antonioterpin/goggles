@@ -46,10 +46,9 @@ class ConsoleHandler:
         self.path_style = path_style
         self.project_root = Path(project_root or Path.cwd())
         self._logger: logging.Logger
-        # Same monotonic-step tracker as LocalStorage / wandb, but with
-        # warn-only policy: out-of-order events are *still printed*, just
-        # flagged. Console output is meant for humans to read in arrival
-        # order. See issue #70.
+        # Console policy on out-of-order steps: warn but still emit.
+        # Console output is meant for humans reading in arrival order,
+        # not for downstream replay.
         self._step_guard = StepGuard()
 
     def can_handle(self, kind: Kind) -> bool:
@@ -69,7 +68,7 @@ class ConsoleHandler:
         Out-of-order steps (``event.step`` strictly less than the highest
         step previously seen on the same scope) trigger a warning but
         the event is still emitted — console output is for humans to
-        read in arrival order, not for downstream replay. See #70.
+        read in arrival order, not for downstream replay.
 
         Args:
             event: The log event to handle.

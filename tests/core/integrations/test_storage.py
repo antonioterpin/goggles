@@ -317,7 +317,7 @@ def test_handle_invalid_media_warns(tmp_handler):
 
 
 # -------------------------------------------------------------------------
-# Monotonic-step contract (#70)
+# Monotonic-step contract
 # -------------------------------------------------------------------------
 
 

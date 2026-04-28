@@ -1,4 +1,4 @@
-"""Unit tests for the per-scope monotonic step tracker (issue #70)."""
+"""Unit tests for the per-scope monotonic step tracker."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from goggles._core.integrations._step_guard import StepGuard
 def test_first_step_is_never_flagged():
     g = StepGuard()
     assert g.check("global", 0) is False
-    assert g.check("global", 1000) is False  # different scope's first call
+    assert g.check("train", 1000) is False  # different scope's first call
 
 
 def test_step_none_is_never_flagged():
@@ -70,9 +70,7 @@ def test_concurrent_check_is_safe():
         with lock:
             results.append(flagged)
 
-    threads = [
-        threading.Thread(target=worker, args=(i,)) for i in range(8)
-    ]
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
     for t in threads:
         t.start()
     for t in threads:

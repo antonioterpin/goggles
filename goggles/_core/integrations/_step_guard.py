@@ -1,16 +1,11 @@
 """Per-scope monotonic-step tracking shared by handlers.
 
-Different handlers historically dealt with out-of-order ``step`` values
-inconsistently:
+A small primitive that tracks the highest ``step`` seen per scope and
+reports backward jumps, mirroring wandb's per-run monotonicity contract
+(``run.log`` drops/warns when ``step`` goes backwards within a run).
 
-  - WandB enforced monotonicity (wandb's own ``run.log`` drops/warns
-    when ``step`` goes backwards within a run).
-  - LocalStorage and the console handler accepted anything.
-
-This module gives both built-in handlers a single, consistent way to
-reason about backward step jumps. The tracker itself only answers
-*"was this step a regression?"* — the policy decision (drop, warn,
-both) belongs to each handler.
+The tracker only answers *"was this step a regression?"* — the policy
+decision (drop, warn, both) belongs to each handler.
 """
 
 from __future__ import annotations
@@ -35,7 +30,12 @@ class StepGuard:
         self._lock = threading.Lock()
 
     def check(self, scope: str, step: int | None) -> bool:
-        """Record ``step`` for ``scope`` and return whether it regressed.
+        """Return whether ``step`` regressed for ``scope``.
+
+        If ``step`` is non-decreasing, the tracked max for ``scope`` is
+        bumped to ``step``. If it regresses, the tracked max is left
+        unchanged so a subsequent valid step is still measured against
+        the original high-water mark.
 
         Args:
             scope: Logical bucket the step is monotonic within. Mirrors

@@ -72,9 +72,9 @@ class LocalStorageHandler:
         """
         self.name = name
         self._base_path = Path(path)
-        # Match wandb's per-scope monotonic-step contract: backward step
-        # values are dropped (with a warning) instead of being recorded
-        # out of order. See issue #70.
+        # Storage policy on out-of-order steps: drop (with a warning).
+        # Backward step values would corrupt downstream replay tools that
+        # assume non-decreasing per-scope step.
         self._step_guard = StepGuard()
 
     def open(self) -> None:
