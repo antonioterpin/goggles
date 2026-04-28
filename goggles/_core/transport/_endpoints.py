@@ -194,5 +194,5 @@ class _WindowsEndpoint:
 
 def _endpoint() -> type[_Endpoint]:
     if _IS_WINDOWS:
-        return _WindowsEndpoint  # type: ignore[return-value]
-    return _UnixEndpoint  # type: ignore[return-value]
+        return _WindowsEndpoint
+    return _UnixEndpoint
