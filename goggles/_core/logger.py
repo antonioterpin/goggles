@@ -87,7 +87,7 @@ class CoreTextLogger(TextLogger):
         class-body / module-import time (before any ``gg.attach()``)
         always route through the current bus, and so a logger that
         survives a ``gg.finish()`` -> rebuild cycle picks up the new
-        transport instead of holding a stale, closed reference. See #78.
+        transport instead of holding a stale, closed reference.
         """
         # Importing here to avoid the goggles -> routing -> goggles cycle.
         from goggles._core.routing import get_bus  # noqa: PLC0415
