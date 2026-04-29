@@ -210,3 +210,66 @@ def test_to_from_dict_roundtrip(tmp_path):
     assert Path(new.project_root) == Path(h.project_root), (
         "Deserialized handler project_root mismatch"
     )
+
+
+# -------------------------------------------------------------------------
+# Monotonic-step contract
+# -------------------------------------------------------------------------
+
+
+def test_handle_warns_on_backward_step_but_still_emits(handler):
+    """Console emits the message even when the step regresses, with a warning."""
+    e1 = DummyEvent(
+        kind="log",
+        payload="first",
+        level=logging.INFO,
+        filepath=__file__,
+        lineno=10,
+        step=10,
+        time=0.0,
+        scope="run",
+    )
+    e2 = DummyEvent(
+        kind="log",
+        payload="second-backward",
+        level=logging.INFO,
+        filepath=__file__,
+        lineno=11,
+        step=3,
+        time=0.0,
+        scope="run",
+    )
+    messages, collector = _capture_logger_messages(handler._logger)
+    try:
+        handler.handle(e1)
+        handler.handle(e2)
+    finally:
+        handler._logger.removeHandler(collector)
+    output = " ".join(messages)
+    assert "first" in output
+    assert "second-backward" in output, (
+        "console handler must keep emitting even when step regresses"
+    )
+    assert any(
+        "out-of-order" in m.lower() and "step=3" in m for m in messages
+    ), "Console should warn that step=3 regressed"
+
+
+def test_handle_does_not_warn_when_step_is_none(handler):
+    """Events without a step never trip the guard."""
+    e = DummyEvent(
+        kind="log",
+        payload="no-step",
+        level=logging.INFO,
+        filepath=__file__,
+        lineno=42,
+        step=None,
+        time=0.0,
+        scope="run",
+    )
+    messages, collector = _capture_logger_messages(handler._logger)
+    try:
+        handler.handle(e)
+    finally:
+        handler._logger.removeHandler(collector)
+    assert not any("out-of-order" in m.lower() for m in messages)

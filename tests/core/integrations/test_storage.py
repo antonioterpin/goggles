@@ -30,10 +30,14 @@ def tmp_handler(tmp_path):
     handler.close()
 
 
-def make_event(kind, payload=None, extra=None):
+def make_event(kind, payload=None, extra=None, *, scope="global", step=None):
     event = MagicMock()
+    event.scope = scope
+    event.step = step
     event_data = {
         "kind": kind,
+        "scope": scope,
+        "step": step,
         "payload": payload,
         "extra": {},  # Keep top-level empty for typing compatibility if needed
     }
@@ -310,3 +314,52 @@ def test_handle_invalid_media_warns(tmp_handler):
         assert any("Skipping event logging" in m for m in messages), (
             "Should log a warning when skipping event logging due to failure"
         )
+
+
+# -------------------------------------------------------------------------
+# Monotonic-step contract
+# -------------------------------------------------------------------------
+
+
+def test_handle_drops_backward_step_with_warning(tmp_handler):
+    # Out-of-order step within the same scope is dropped + warned.
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        tmp_handler.handle(make_event("metric", {"loss": 1.0}, step=10))
+        tmp_handler.handle(make_event("metric", {"loss": 0.9}, step=5))
+    finally:
+        tmp_handler._logger.removeHandler(collector)
+
+    log_path = tmp_handler._base_path / "log.jsonl"
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 1, "second (backward-step) event must be dropped"
+    assert '"loss": 1.0' in lines[0]
+    assert any(
+        "out-of-order" in m.lower() and "step=5" in m for m in messages
+    ), "Should warn that step=5 regressed"
+
+
+def test_handle_allows_equal_and_forward_steps(tmp_handler):
+    # Equal and forward steps within the same scope are recorded.
+    tmp_handler.handle(make_event("metric", {"a": 1}, step=3))
+    tmp_handler.handle(make_event("metric", {"b": 2}, step=3))  # equal — ok
+    tmp_handler.handle(make_event("metric", {"c": 3}, step=4))  # forward — ok
+    log_path = tmp_handler._base_path / "log.jsonl"
+    assert len(log_path.read_text().splitlines()) == 3
+
+
+def test_handle_tracks_step_per_scope(tmp_handler):
+    # Step monotonicity is tracked per scope, not globally.
+    tmp_handler.handle(make_event("metric", {"x": 1}, scope="train", step=10))
+    # Lower step on a *different* scope must still be recorded.
+    tmp_handler.handle(make_event("metric", {"x": 2}, scope="eval", step=1))
+    log_path = tmp_handler._base_path / "log.jsonl"
+    assert len(log_path.read_text().splitlines()) == 2
+
+
+def test_handle_records_events_without_step(tmp_handler):
+    # Events with step=None never trigger the guard, even after a regression.
+    tmp_handler.handle(make_event("metric", {"a": 1}, step=10))
+    tmp_handler.handle(make_event("log", {"msg": "no-step"}))  # step=None
+    log_path = tmp_handler._base_path / "log.jsonl"
+    assert len(log_path.read_text().splitlines()) == 2

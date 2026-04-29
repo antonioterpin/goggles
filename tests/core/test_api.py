@@ -12,19 +12,18 @@ import goggles as gg
 
 
 class _ClassLevelLoggerHolder:
-    """Holder whose logger is captured at class-body time (regression #78).
+    """Holder whose logger is captured at class-body time.
 
     The ``gg.get_logger(...)`` call happens once when this module is
-    imported by pytest, before any test body runs. That mirrors the real
-    user scenario from #78: ``logger = gg.get_logger(...)`` at class
-    scope in their own module, with ``gg.attach(...)`` called later from
-    ``main()``.
+    imported by pytest, before any test body runs. That mirrors the
+    realistic pattern of ``logger = gg.get_logger(...)`` at class scope
+    in user code, with ``gg.attach(...)`` invoked later from ``main()``.
 
     Attributes:
         logger: Class-level Goggles text logger captured at module load.
     """
 
-    logger = gg.get_logger("test-78-class-var", scope="global")
+    logger = gg.get_logger("class-level-logger-test", scope="global")
 
 
 # ---------------------------------------------------------------------
@@ -156,8 +155,6 @@ def test_attach_and_emit() -> None:
     assert "closed" in DummyHandler.handled, (
         "Handler should be closed on finish"
     )
-    # Events are now Event objects, which have .payload
-    # (previously .msg was used in dict).
     assert any(
         hasattr(e, "payload") for e in DummyHandler.handled if e != "closed"
     ), "Events should have a payload attribute"
@@ -166,13 +163,10 @@ def test_attach_and_emit() -> None:
 def test_class_level_logger_does_not_hang_on_first_info() -> None:
     """Logger captured at class-body scope must not hang on first .info().
 
-    Regression for #78: the portal-based transport could deadlock on the
-    first ``.info()`` call when the logger had been resolved early
-    (class-body time, before any ``gg.attach()``). With ``LocalTransport``
-    that pattern must complete promptly.
-
-    The emit runs on a worker thread so a hang surfaces as a timed-out
-    join rather than wedging the test runner.
+    Class-body resolution happens before any ``gg.attach()``; the first
+    ``.info()`` after attach must complete promptly. The emit runs on a
+    worker thread so a hang surfaces as a timed-out join rather than
+    wedging the test runner.
     """
     gg.register_handler(DummyHandler)
     DummyHandler.handled.clear()
@@ -188,7 +182,7 @@ def test_class_level_logger_does_not_hang_on_first_info() -> None:
     t = threading.Thread(target=_emit, daemon=True)
     t.start()
     assert done.wait(timeout=5.0), (
-        "class-level logger.info() did not return within 5 s — see #78"
+        "class-level logger.info() did not return within 5 s"
     )
     gg.finish()
     assert any(

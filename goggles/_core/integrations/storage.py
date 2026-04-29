@@ -20,6 +20,8 @@ from goggles.media import (
 )
 from goggles.types import Event, Kind
 
+from ._step_guard import StepGuard
+
 JSONScalar: TypeAlias = str | int | float | bool | None
 JSONValue: TypeAlias = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
@@ -36,6 +38,12 @@ class LocalStorageHandler:
     For media events (image, video, artifact), the binary data is saved to
     the appropriate subdirectory and the relative path is logged in the
     JSONL file instead of the raw data.
+
+    Out-of-order steps (``event.step`` strictly less than the highest step
+    previously seen on the same scope) are dropped with a warning, so the
+    JSONL stream is non-decreasing within a scope and downstream replay
+    tools can rely on monotonic step. Events with ``step is None`` are
+    always written.
 
     Thread-safe and line-buffered, ensuring atomic writes per event.
 
@@ -70,6 +78,7 @@ class LocalStorageHandler:
         """
         self.name = name
         self._base_path = Path(path)
+        self._step_guard = StepGuard()
 
     def open(self) -> None:
         """Create directory structure and open the JSONL file for appending."""
@@ -126,6 +135,15 @@ class LocalStorageHandler:
             event: The event to serialize.
 
         """
+        if self._step_guard.check(event.scope, event.step):
+            self._logger.warning(
+                "Dropping out-of-order event (scope=%s, step=%s) — "
+                "step regressed below previously seen max",
+                event.scope,
+                event.step,
+            )
+            return
+
         event_dict = event.to_dict()
 
         # Handle media events by saving files and updating payload
