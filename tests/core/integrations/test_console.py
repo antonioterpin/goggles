@@ -218,8 +218,7 @@ def test_to_from_dict_roundtrip(tmp_path):
 
 
 def test_handle_warns_on_backward_step_but_still_emits(handler):
-    """Console emits the message even when the step regresses, "
-    "with a warning."""
+    """Console still emits the message on a backward step, plus a warning."""
     e1 = DummyEvent(
         kind="log",
         payload="first",
