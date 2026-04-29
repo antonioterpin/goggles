@@ -104,6 +104,81 @@ def test_get_or_create_run_creates_new(mock_wandb):
     )
 
 
+def test_get_or_create_run_forwards_group_and_tags(mock_wandb):
+    """``group`` and ``tags`` from __init__ reach the wandb.init call.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(
+        project="proj",
+        run_name="base",
+        group="cohort-a",
+        tags=("baseline", "ablation"),
+    )
+    h._get_or_create_run("global", extra_config={})
+
+    init_kwargs = mock_wandb.init.call_args.kwargs
+    assert init_kwargs["group"] == "cohort-a", (
+        "group passed at init should reach wandb.init"
+    )
+    assert list(init_kwargs["tags"]) == ["baseline", "ablation"], (
+        "tags passed at init should reach wandb.init as a list"
+    )
+
+
+def test_get_or_create_run_omits_tags_when_unset(mock_wandb):
+    """``tags`` defaults to None — not an empty list — at the wandb.init call.
+
+    Lets callers/W&B distinguish "no tags configured" from "explicitly empty".
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="proj", run_name="base")
+    h._get_or_create_run("global", extra_config={})
+
+    assert mock_wandb.init.call_args.kwargs["tags"] is None
+
+
+def test_tags_roundtrip_through_to_dict(mock_wandb):
+    """``group`` and ``tags`` survive to_dict/from_dict serialization.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(
+        project="proj",
+        run_name="base",
+        group="cohort-a",
+        tags=["baseline"],
+    )
+    serialized = h.to_dict()["data"]
+    assert serialized["group"] == "cohort-a"
+    assert serialized["tags"] == ["baseline"]
+
+    restored = WandBHandler.from_dict(serialized)
+    restored._get_or_create_run("global", extra_config={})
+    init_kwargs = mock_wandb.init.call_args.kwargs
+    assert init_kwargs["group"] == "cohort-a"
+    assert list(init_kwargs["tags"]) == ["baseline"]
+
+
+def test_tags_must_be_sequence_of_strings(mock_wandb):
+    """Bare ``str`` and non-string items are rejected at construction.
+
+    A ``str`` matches ``Sequence[str]`` under the type system but would
+    iterate character by character at runtime, so we reject it explicitly.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    with pytest.raises(TypeError, match="tags"):
+        WandBHandler(project="proj", tags="single-tag")
+    with pytest.raises(TypeError, match="tags"):
+        WandBHandler(project="proj", tags=[1, 2])  # pyright: ignore[reportArgumentType]
+
+
 def test_handle_artifact_uploads_file(mock_wandb, tmp_path):
     artifact_file = tmp_path / "random_artifact.npy"
     artifact_file.write_bytes(b"dummy")
@@ -225,17 +300,9 @@ def test_handle_trajectories_logs_plotly(mock_wandb, monkeypatch, dim):
     run = mock_wandb.init.return_value
     run.log.assert_called_once()
     logged_payload = run.log.call_args[0][0]
-    assert "trails" in logged_payload, (
-        f"Logged trajectory payload should contain a 'trails' key, "
-        f"got keys: {list(logged_payload)}"
-    )
-    assert logged_payload["tag"] == "viz", (
-        f"Logged payload tag should be 'viz', got {logged_payload['tag']!r}"
-    )
-    assert run.log.call_args.kwargs["step"] == 2, (
-        f"wandb.log() should receive step=2, "
-        f"got step={run.log.call_args.kwargs.get('step')!r}"
-    )
+    assert "trails" in logged_payload
+    assert logged_payload["tag"] == "viz"
+    assert run.log.call_args.kwargs["step"] == 2
 
 
 def test_handle_trajectories_bad_payload_warns(mock_wandb, monkeypatch):
@@ -256,10 +323,7 @@ def test_handle_trajectories_bad_payload_warns(mock_wandb, monkeypatch):
     finally:
         h._logger.removeHandler(collector)
 
-    assert any("trajectories" in m.lower() for m in messages), (
-        f"Should warn about bad trajectories payload, "
-        f"got messages: {messages!r}"
-    )
+    assert any("trajectories" in m.lower() for m in messages)
     mock_wandb.Plotly.assert_not_called()
 
 
@@ -307,10 +371,7 @@ def test_prepare_video_channels_first_preserved():
     F, C, H, W = 5, 3, 8, 12
     value = np.full((F, C, H, W), 128, dtype=np.uint8)
     out = h._prepare_video_for_wandb(value)
-    assert out.shape == (F, 3, H, W), (
-        f"Channels-first input must be preserved as (F, 3, H, W); "
-        f"expected ({F}, 3, {H}, {W}), got {out.shape}"
-    )
+    assert out.shape == (F, 3, H, W)
 
 
 @pytest.mark.parametrize("W", [1, 3, 4])
@@ -355,10 +416,7 @@ def test_prepare_video_5d_valid_channel_dim_passes(c):
     value = np.zeros((2, 4, c, 8, 12), dtype=np.uint8)
     out = h._prepare_video_for_wandb(value)
     expected_c = 3 if c == 1 else c
-    assert out.shape == (2, 4, expected_c, 8, 12), (
-        f"5D input with C={c} "
-        f"should produce shape (2, 4, {expected_c}, 8, 12), got {out.shape}"
-    )
+    assert out.shape == (2, 4, expected_c, 8, 12)
 
 
 @pytest.mark.parametrize(
@@ -399,10 +457,7 @@ def test_prepare_video_channels_first_grayscale_repeated():
     F, H, W = 5, 8, 12
     value = np.full((F, 1, H, W), 128, dtype=np.uint8)
     out = h._prepare_video_for_wandb(value)
-    assert out.shape == (F, 3, H, W), (
-        f"Channels-first grayscale should be upcast to RGB; "
-        f"expected ({F}, 3, {H}, {W}), got {out.shape}"
-    )
+    assert out.shape == (F, 3, H, W)
 
 
 # -------------------------------------------------------------------------

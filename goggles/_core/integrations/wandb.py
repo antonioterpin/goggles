@@ -8,9 +8,9 @@ from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
 import plotly.graph_objects as go
+import wandb
 from typing_extensions import Self
 
-import wandb
 from goggles.media import create_numpy_vector_field_visualization
 from goggles.types import Kind
 
@@ -214,6 +214,7 @@ class WandBHandler:
         run_name: str | None = None,
         config: Mapping[str, Any] | None = None,
         group: str | None = None,
+        tags: Sequence[str] | None = None,
         reinit: Reinit = "create_new",
     ) -> None:
         """Initialize the W&B handler.
@@ -223,13 +224,20 @@ class WandBHandler:
             entity: W&B entity (user or team) name.
             run_name: Base name for W&B runs.
             config: Configuration dictionary to log with the run(s).
-            group: W&B group name for runs.
+            group: W&B group name. Use it to keep related runs together
+                in the W&B UI; per-scope runs created by this handler
+                share the same group.
+            tags: W&B tags applied to every run created by this handler.
+                Pass an iterable of strings (e.g. ``["baseline", "v2"]``).
+                A bare string is rejected because W&B would silently
+                iterate it character by character.
             reinit: W&B reinitialization strategy when opening runs.
                 One of:
                 {"finish_previous", "return_previous", "create_new", "default"}.
 
         Raises:
             ValueError: If `reinit` is not a valid option.
+            TypeError: If `tags` is a `str` or contains non-string items.
         """
         self._logger = logging.getLogger(self.name)
         # Ensure that Goggles logs are not propagated to the root logger
@@ -247,9 +255,25 @@ class WandBHandler:
                 f"{', '.join(valid_reinit)}."
             )
 
+        if isinstance(tags, str):
+            raise TypeError(
+                "tags must be a sequence of strings, not a single str. "
+                'Wrap it in a list: tags=["my-tag"].'
+            )
+        normalized_tags: list[str] | None = None
+        if tags is not None:
+            normalized_tags = list(tags)
+            for item in normalized_tags:
+                if not isinstance(item, str):
+                    raise TypeError(
+                        "tags must contain only strings; "
+                        f"got {type(item).__name__}."
+                    )
+
         self._project = project
         self._entity = entity
         self._group = group
+        self._tags: list[str] | None = normalized_tags
         self._base_run_name = run_name
         self._config: dict[str, Any] = (
             dict(config) if config is not None else {}
@@ -572,6 +596,7 @@ class WandBHandler:
                 "config": self._config,
                 "reinit": self._reinit,
                 "group": self._group,
+                "tags": list(self._tags) if self._tags is not None else None,
             },
         }
 
@@ -592,6 +617,7 @@ class WandBHandler:
             config=serialized.get("config"),
             reinit=serialized.get("reinit", "create_new"),
             group=serialized.get("group"),
+            tags=serialized.get("tags"),
         )
 
     def _get_or_create_run(self, scope: str, extra_config: dict) -> Run:
@@ -619,6 +645,7 @@ class WandBHandler:
             name=name,
             config={**self._config, "scope": scope, **extra_config},
             group=self._group,
+            tags=list(self._tags) if self._tags is not None else None,
             reinit=self._reinit,
         )
         self._runs[scope] = run
