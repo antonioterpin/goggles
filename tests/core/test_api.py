@@ -155,8 +155,6 @@ def test_attach_and_emit() -> None:
     assert "closed" in DummyHandler.handled, (
         "Handler should be closed on finish"
     )
-    # Events are now Event objects, which have .payload
-    # (previously .msg was used in dict).
     assert any(
         hasattr(e, "payload") for e in DummyHandler.handled if e != "closed"
     ), "Events should have a payload attribute"

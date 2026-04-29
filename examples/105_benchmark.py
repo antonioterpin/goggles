@@ -519,13 +519,12 @@ def _summary(all_results: list[tuple[str, np.ndarray]]) -> None:
 def _run_benchmark(cfg: DictConfig) -> None:
     """Execute the benchmark end-to-end for a single resolved config.
 
-    This function is designed to run inside a fresh subprocess spawned by
-    :func:`main`. Each Hydra sweep point gets its own Python interpreter,
-    so the goggles transport, wandb handler, and any module-level state
-    are constructed from scratch and torn down cleanly at process exit.
-    Running multiple presets in one interpreter previously leaked a
-    shutdown transport into subsequent presets, silently dropping 100% of
-    their events.
+    Designed to run inside a fresh subprocess spawned by :func:`main`.
+    Each Hydra sweep point gets its own Python interpreter, so the
+    goggles transport, wandb handler, and any module-level state are
+    constructed from scratch and torn down cleanly at process exit.
+    A shared interpreter would let one preset's shutdown transport
+    leak into the next preset and silently drop its events.
 
     Args:
         cfg: Resolved config for this sweep point.
@@ -640,11 +639,11 @@ def _run_benchmark(cfg: DictConfig) -> None:
         )
         gg.finish(timeout=0)
 
-        # Delivery-count check: every enqueued event must have reached a
-        # handler. This catches transport-level drops (e.g. the shutdown
-        # race that used to lose >90 % of video frames). Print directly
-        # to stderr because the transport is already shut down and any
-        # _logger.* call after finish() would be a silent no-op.
+        # Delivery-count check: every enqueued event must have reached
+        # a handler. Catches transport-level drops (e.g. shutdown races
+        # in the video path). Print directly to stderr because the
+        # transport is already shut down and any _logger.* call after
+        # finish() would be a silent no-op.
         totals = counter.totals
         payload_kind = _kind_for_log_type(cfg.log_type)
         expected = len(runs) * int(cfg.num_logs)

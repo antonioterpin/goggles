@@ -39,6 +39,12 @@ class LocalStorageHandler:
     the appropriate subdirectory and the relative path is logged in the
     JSONL file instead of the raw data.
 
+    Out-of-order steps (``event.step`` strictly less than the highest step
+    previously seen on the same scope) are dropped with a warning, so the
+    JSONL stream is non-decreasing within a scope and downstream replay
+    tools can rely on monotonic step. Events with ``step is None`` are
+    always written.
+
     Thread-safe and line-buffered, ensuring atomic writes per event.
 
     Attributes:
@@ -72,9 +78,6 @@ class LocalStorageHandler:
         """
         self.name = name
         self._base_path = Path(path)
-        # Storage policy on out-of-order steps: drop (with a warning).
-        # Backward step values would corrupt downstream replay tools that
-        # assume non-decreasing per-scope step.
         self._step_guard = StepGuard()
 
     def open(self) -> None:
@@ -127,11 +130,6 @@ class LocalStorageHandler:
 
     def handle(self, event: Event) -> None:
         """Write a single event to the JSONL file.
-
-        Out-of-order steps (``event.step`` strictly less than the highest
-        step previously seen on the same scope) are dropped with a
-        warning, matching the wandb handler's monotonicity contract.
-        Events without a step are always written.
 
         Args:
             event: The event to serialize.

@@ -347,12 +347,11 @@ def test_host_emit_sync_dispatches_inline(socket_path: str) -> None:
 def test_empty_string_payloads_roundtrip_through_framing(
     kind: str, payload: object, extra: dict | None
 ) -> None:
-    """Regression for #79: empty-string payloads must survive the wire layer.
+    """Empty-string payloads must survive the wire layer.
 
-    Portal's non-empty-buffer assertion used to blow up on ``""``. The new
-    transport goes through ``_pack_small_frame`` → socket → ``_unpack_small``,
-    so we assert the framing round-trip directly (covers the failure mode
-    regardless of host/client dispatch mode).
+    The transport goes through ``_pack_small_frame`` → socket →
+    ``_unpack_small``; this asserts the framing round-trip directly so
+    the failure mode is caught regardless of host/client dispatch mode.
 
     Args:
         kind: Event kind to round-trip.
@@ -393,10 +392,10 @@ def test_empty_string_payloads_roundtrip_through_framing(
 def test_empty_string_payloads_survive_host_emit_sync(
     socket_path: str, kind: str, payload: object, extra: dict | None
 ) -> None:
-    """Integration-level smoke for #79: host-mode emit_sync preserves data.
+    """Host-mode ``emit_sync`` preserves empty-string payloads end-to-end.
 
-    This exercises dispatch (not framing), to confirm the inline path
-    doesn't eat empty strings. The wire-level regression lives in
+    Exercises dispatch (not framing), to confirm the inline path
+    doesn't eat empty strings. The wire-level coverage lives in
     :func:`test_empty_string_payloads_roundtrip_through_framing`.
 
     Args:

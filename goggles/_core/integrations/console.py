@@ -14,6 +14,11 @@ from ._step_guard import StepGuard
 class ConsoleHandler:
     """Handle 'log' events and output them to console using Python's logging.
 
+    Out-of-order steps (``event.step`` strictly less than the highest step
+    previously seen on the same scope) trigger a warning but the event is
+    still emitted: console output is meant for humans reading in arrival
+    order, not for downstream replay.
+
     Attributes:
         name: Stable handler identifier.
         capabilities: Supported event kinds (only {"log"}).
@@ -46,9 +51,6 @@ class ConsoleHandler:
         self.path_style = path_style
         self.project_root = Path(project_root or Path.cwd())
         self._logger: logging.Logger
-        # Console policy on out-of-order steps: warn but still emit.
-        # Console output is meant for humans reading in arrival order,
-        # not for downstream replay.
         self._step_guard = StepGuard()
 
     def can_handle(self, kind: Kind) -> bool:
@@ -64,11 +66,6 @@ class ConsoleHandler:
 
     def handle(self, event: Event) -> None:
         """Forward a log event to Python's logging system.
-
-        Out-of-order steps (``event.step`` strictly less than the highest
-        step previously seen on the same scope) trigger a warning but
-        the event is still emitted — console output is for humans to
-        read in arrival order, not for downstream replay.
 
         Args:
             event: The log event to handle.
