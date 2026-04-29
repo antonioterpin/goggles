@@ -225,9 +225,17 @@ def test_handle_trajectories_logs_plotly(mock_wandb, monkeypatch, dim):
     run = mock_wandb.init.return_value
     run.log.assert_called_once()
     logged_payload = run.log.call_args[0][0]
-    assert "trails" in logged_payload
-    assert logged_payload["tag"] == "viz"
-    assert run.log.call_args.kwargs["step"] == 2
+    assert "trails" in logged_payload, (
+        f"Logged trajectory payload should contain a 'trails' key, "
+        f"got keys: {list(logged_payload)}"
+    )
+    assert logged_payload["tag"] == "viz", (
+        f"Logged payload tag should be 'viz', got {logged_payload['tag']!r}"
+    )
+    assert run.log.call_args.kwargs["step"] == 2, (
+        f"wandb.log() should receive step=2, "
+        f"got step={run.log.call_args.kwargs.get('step')!r}"
+    )
 
 
 def test_handle_trajectories_bad_payload_warns(mock_wandb, monkeypatch):
@@ -248,7 +256,10 @@ def test_handle_trajectories_bad_payload_warns(mock_wandb, monkeypatch):
     finally:
         h._logger.removeHandler(collector)
 
-    assert any("trajectories" in m.lower() for m in messages)
+    assert any("trajectories" in m.lower() for m in messages), (
+        f"Should warn about bad trajectories payload, "
+        f"got messages: {messages!r}"
+    )
     mock_wandb.Plotly.assert_not_called()
 
 
@@ -296,7 +307,10 @@ def test_prepare_video_channels_first_preserved():
     F, C, H, W = 5, 3, 8, 12
     value = np.full((F, C, H, W), 128, dtype=np.uint8)
     out = h._prepare_video_for_wandb(value)
-    assert out.shape == (F, 3, H, W)
+    assert out.shape == (F, 3, H, W), (
+        f"Channels-first input must be preserved as (F, 3, H, W); "
+        f"expected ({F}, 3, {H}, {W}), got {out.shape}"
+    )
 
 
 @pytest.mark.parametrize("W", [1, 3, 4])
@@ -341,7 +355,10 @@ def test_prepare_video_5d_valid_channel_dim_passes(c):
     value = np.zeros((2, 4, c, 8, 12), dtype=np.uint8)
     out = h._prepare_video_for_wandb(value)
     expected_c = 3 if c == 1 else c
-    assert out.shape == (2, 4, expected_c, 8, 12)
+    assert out.shape == (2, 4, expected_c, 8, 12), (
+        f"5D input with C={c} "
+        f"should produce shape (2, 4, {expected_c}, 8, 12), got {out.shape}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -382,7 +399,10 @@ def test_prepare_video_channels_first_grayscale_repeated():
     F, H, W = 5, 8, 12
     value = np.full((F, 1, H, W), 128, dtype=np.uint8)
     out = h._prepare_video_for_wandb(value)
-    assert out.shape == (F, 3, H, W)
+    assert out.shape == (F, 3, H, W), (
+        f"Channels-first grayscale should be upcast to RGB; "
+        f"expected ({F}, 3, {H}, {W}), got {out.shape}"
+    )
 
 
 # -------------------------------------------------------------------------

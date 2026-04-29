@@ -10,7 +10,9 @@ def test_console_handler_isolation():
     handler = ConsoleHandler(name="test.console")
     handler.open()
     try:
-        assert handler._logger.propagate is False
+        assert handler._logger.propagate is False, (
+            "ConsoleHandler logger must not propagate to root"
+        )
     finally:
         handler.close()
 
@@ -24,7 +26,9 @@ def test_storage_handler_isolation(tmp_path: Path) -> None:
     handler = LocalStorageHandler(path=tmp_path, name="test.jsonl")
     handler.open()
     try:
-        assert handler._logger.propagate is False
+        assert handler._logger.propagate is False, (
+            "LocalStorageHandler logger must not propagate to root"
+        )
     finally:
         handler.close()
 
@@ -33,4 +37,6 @@ def test_wandb_handler_isolation():
     """Verify that WandBHandler logger has propagation disabled."""
     # WandBHandler sets propagate = False in __init__
     handler = WandBHandler()
-    assert handler._logger.propagate is False
+    assert handler._logger.propagate is False, (
+        "WandBHandler logger must not propagate to root"
+    )
