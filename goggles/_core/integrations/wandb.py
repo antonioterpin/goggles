@@ -14,6 +14,8 @@ import wandb
 from goggles.media import create_numpy_vector_field_visualization
 from goggles.types import Kind
 
+from ._step_guard import StepGuard
+
 
 def create_plotly_trajectories_figure(trajectories: np.ndarray) -> Any:
     """Render trajectories as an interactive Plotly figure.
@@ -176,6 +178,12 @@ class WandBHandler:
     explicitly closed. Compatible with the `Handler` protocol used by the
     EventBus.
 
+    Out-of-order steps (``event.step`` strictly less than the highest step
+    previously seen on the same scope) are dropped with a warning, so the
+    W&B run timeline is non-decreasing per scope. Events with
+    ``step is None`` are forwarded unchanged. Artifact events are
+    step-less and bypass the check.
+
     Attributes:
         name: Stable handler identifier.
         capabilities: Supported event kinds
@@ -250,6 +258,7 @@ class WandBHandler:
         self._runs: dict[str, Run] = {}
         self._wandb_run: Run | None = None
         self._current_scope: str | None = None
+        self._step_guard = StepGuard()
 
     def can_handle(self, kind: str) -> bool:
         """Return True if the handler supports this event kind.
@@ -276,6 +285,17 @@ class WandBHandler:
         kind = getattr(event, "kind", None) or "metric"
         step = getattr(event, "step", None)
         payload = getattr(event, "payload", None)
+
+        # Artifacts are step-less and bypass the monotonic-step check.
+        if kind != "artifact" and self._step_guard.check(scope, step):
+            self._logger.warning(
+                "Dropping out-of-order event (scope=%s, step=%s) -- "
+                "step regressed below previously seen max",
+                scope,
+                step,
+            )
+            return
+
         # Copy so our .pop(...) calls don't mutate the shared event.extra
         # that other handlers on the same bus will read afterwards.
         extra = dict(getattr(event, "extra", {}) or {})

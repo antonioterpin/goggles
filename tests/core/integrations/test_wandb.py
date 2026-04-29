@@ -30,7 +30,12 @@ def mock_wandb(monkeypatch):
     return mock
 
 
-def make_event(kind="metric", scope="global", payload=None, step=0):
+def make_event(
+    kind="metric",
+    scope="global",
+    payload=None,
+    step: int | None = 0,
+):
     return SimpleNamespace(kind=kind, scope=scope, payload=payload, step=step)
 
 
@@ -378,3 +383,100 @@ def test_prepare_video_channels_first_grayscale_repeated():
     value = np.full((F, 1, H, W), 128, dtype=np.uint8)
     out = h._prepare_video_for_wandb(value)
     assert out.shape == (F, 3, H, W)
+
+
+# -------------------------------------------------------------------------
+# Monotonic-step contract
+# -------------------------------------------------------------------------
+
+
+def test_handle_drops_backward_step_with_warning(mock_wandb):
+    """Backward step within a scope is dropped before any wandb call."""
+    h = WandBHandler(project="proj")
+    e1 = make_event(kind="metric", payload={"loss": 1.0}, step=10)
+    e2 = make_event(kind="metric", payload={"loss": 0.9}, step=5)
+
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(e1)
+        h.handle(e2)
+    finally:
+        h._logger.removeHandler(collector)
+
+    run = mock_wandb.init.return_value
+    assert run.log.call_count == 1, (
+        "Backward-step event must not reach run.log; "
+        f"saw {run.log.call_count} calls"
+    )
+    assert run.log.call_args.kwargs["step"] == 10, (
+        "Only the forward-step event should have been logged"
+    )
+    assert any(
+        "out-of-order" in m.lower() and "step=5" in m for m in messages
+    ), "Should warn that step=5 regressed"
+
+
+def test_handle_allows_equal_and_forward_steps(mock_wandb):
+    """Equal and forward steps within the same scope are forwarded to wandb."""
+    h = WandBHandler(project="proj")
+    h.handle(make_event(kind="metric", payload={"a": 1}, step=3))
+    h.handle(make_event(kind="metric", payload={"b": 2}, step=3))  # equal
+    h.handle(make_event(kind="metric", payload={"c": 3}, step=4))  # forward
+
+    run = mock_wandb.init.return_value
+    assert run.log.call_count == 3, (
+        f"Expected 3 wandb.log calls; saw {run.log.call_count}"
+    )
+
+
+def test_handle_tracks_step_per_scope(mock_wandb):
+    """Step monotonicity is tracked per scope, not globally."""
+    h = WandBHandler(project="proj")
+    h.handle(
+        make_event(kind="metric", payload={"x": 1}, scope="train", step=10)
+    )
+    # Lower step on a different scope must still be forwarded.
+    h.handle(make_event(kind="metric", payload={"x": 2}, scope="eval", step=1))
+
+    # mock_wandb.init returns the same MagicMock for every scope, so both
+    # scopes share the same .log mock; assert on total calls instead.
+    run = mock_wandb.init.return_value
+    assert run.log.call_count == 2, (
+        f"both scopes' events should have been forwarded; "
+        f"saw {run.log.call_count} log calls"
+    )
+
+
+def test_handle_does_not_guard_when_step_is_none(mock_wandb):
+    """Events with step=None never trip the guard, even after a regression."""
+    h = WandBHandler(project="proj")
+    h.handle(make_event(kind="metric", payload={"a": 1}, step=10))
+    # step=None must not be flagged.
+    h.handle(make_event(kind="metric", payload={"b": 2}, step=None))
+
+    run = mock_wandb.init.return_value
+    assert run.log.call_count == 2, (
+        f"step=None must not be dropped; saw {run.log.call_count} calls"
+    )
+
+
+def test_handle_artifact_bypasses_step_guard(mock_wandb, tmp_path):
+    """Artifacts are step-less and must bypass the monotonic-step check."""
+    artifact_file = tmp_path / "a.npy"
+    artifact_file.write_bytes(b"x")
+    h = WandBHandler(project="proj")
+    # Establish a high-water mark on this scope.
+    h.handle(make_event(kind="metric", payload={"loss": 1.0}, step=100))
+
+    artifact_event = SimpleNamespace(
+        kind="artifact",
+        scope="global",
+        payload={"path": str(artifact_file), "name": "a", "type": "misc"},
+        step=0,  # would be a regression for non-artifact events
+        extra={},
+    )
+    h.handle(artifact_event)
+
+    # mock.assert_called_once() raises with its own diagnostic on failure;
+    # this asserts the artifact was uploaded despite step < scope max.
+    mock_wandb.Artifact.assert_called_once()
