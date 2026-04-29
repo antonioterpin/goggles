@@ -173,8 +173,10 @@ def _install_collector(
 
 def test_user_tag_is_portable() -> None:
     tag = _user_tag()
-    assert tag
-    assert isinstance(tag, str)
+    assert tag, f"_user_tag() should return a non-empty value, got {tag!r}"
+    assert isinstance(tag, str), (
+        f"_user_tag() should return a str, got {type(tag).__name__}"
+    )
 
 
 def test_default_socket_path_uses_tempdir_fallback(
@@ -183,8 +185,12 @@ def test_default_socket_path_uses_tempdir_fallback(
     monkeypatch.delenv("GOGGLES_SOCKET", raising=False)
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     path = _default_socket_path()
-    assert path.endswith(".sock")
-    assert os.path.isabs(path)
+    assert path.endswith(".sock"), (
+        f"Default socket path should end with '.sock', got {path!r}"
+    )
+    assert os.path.isabs(path), (
+        f"Default socket path should be absolute, got {path!r}"
+    )
 
 
 def test_default_shm_threshold_env_parsing(
@@ -196,16 +202,30 @@ def test_default_shm_threshold_env_parsing(
         monkeypatch: pytest helper for environment isolation.
     """
     monkeypatch.delenv("GOGGLES_SHM_THRESHOLD", raising=False)
-    assert _default_shm_threshold() == _DEFAULT_SHM_THRESHOLD
+    assert _default_shm_threshold() == _DEFAULT_SHM_THRESHOLD, (
+        f"Without GOGGLES_SHM_THRESHOLD set, "
+        f"threshold should equal _DEFAULT_SHM_THRESHOLD "
+        f"({_DEFAULT_SHM_THRESHOLD}), got {_default_shm_threshold()}"
+    )
 
     monkeypatch.setenv("GOGGLES_SHM_THRESHOLD", "1234")
-    assert _default_shm_threshold() == 1234
+    assert _default_shm_threshold() == 1234, (
+        f"GOGGLES_SHM_THRESHOLD=1234 should yield 1234, "
+        f"got {_default_shm_threshold()}"
+    )
 
     monkeypatch.setenv("GOGGLES_SHM_THRESHOLD", "-1")
-    assert _default_shm_threshold() == 0
+    assert _default_shm_threshold() == 0, (
+        f"GOGGLES_SHM_THRESHOLD=-1 should clamp to 0, "
+        f"got {_default_shm_threshold()}"
+    )
 
     monkeypatch.setenv("GOGGLES_SHM_THRESHOLD", "not-an-int")
-    assert _default_shm_threshold() == _DEFAULT_SHM_THRESHOLD
+    assert _default_shm_threshold() == _DEFAULT_SHM_THRESHOLD, (
+        f"GOGGLES_SHM_THRESHOLD='not-an-int' should fall back to "
+        f"_DEFAULT_SHM_THRESHOLD ({_DEFAULT_SHM_THRESHOLD}), "
+        f"got {_default_shm_threshold()}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -223,10 +243,18 @@ def test_pack_unpack_small_roundtrip_scalar() -> None:
         step=7,
     )
     restored = _unpack_small(_frame_body(event))
-    assert restored.kind == "metric"
-    assert restored.payload == {"loss": 0.42}
-    assert restored.step == 7
-    assert restored.scope == "global"
+    assert restored.kind == "metric", (
+        f"Roundtripped event kind should be 'metric', got {restored.kind!r}"
+    )
+    assert restored.payload == {"loss": 0.42}, (
+        f"Roundtripped payload should equal original; got {restored.payload!r}"
+    )
+    assert restored.step == 7, (
+        f"Roundtripped step should be 7, got {restored.step!r}"
+    )
+    assert restored.scope == "global", (
+        f"Roundtripped scope should be 'global', got {restored.scope!r}"
+    )
 
 
 def test_pack_unpack_small_roundtrip_numpy() -> None:
@@ -239,8 +267,14 @@ def test_pack_unpack_small_roundtrip_numpy() -> None:
         lineno=2,
     )
     restored = _unpack_small(_frame_body(event))
-    assert isinstance(restored.payload, np.ndarray)
-    assert restored.payload.shape == (16, 16)
+    assert isinstance(restored.payload, np.ndarray), (
+        f"Roundtripped payload should be an ndarray, "
+        f"got {type(restored.payload).__name__}"
+    )
+    assert restored.payload.shape == (16, 16), (
+        f"Roundtripped ndarray should preserve shape (16, 16), "
+        f"got {restored.payload.shape}"
+    )
     np.testing.assert_array_equal(restored.payload, arr)
 
 
@@ -257,10 +291,18 @@ def test_pack_small_frame_header_layout() -> None:
         lineno=3,
     )
     frame = _pack_small_frame(event)
-    assert isinstance(frame, bytearray)
+    assert isinstance(frame, bytearray), (
+        f"_pack_small_frame should return a bytearray, "
+        f"got {type(frame).__name__}"
+    )
     kind, body_len = struct.unpack_from(_HEADER_FMT, frame, 0)
-    assert kind == _MSG_SMALL
-    assert body_len == len(frame) - _HEADER_SIZE
+    assert kind == _MSG_SMALL, (
+        f"Frame header kind should be _MSG_SMALL ({_MSG_SMALL}), got {kind}"
+    )
+    assert body_len == len(frame) - _HEADER_SIZE, (
+        f"Frame header body_len should equal frame size minus header; "
+        f"expected {len(frame) - _HEADER_SIZE}, got {body_len}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +315,9 @@ def test_host_mode_emit_dispatches_to_handler(socket_path: str) -> None:
     transport = LocalTransport(socket_path=socket_path)
     try:
         assert transport.is_host, "first transport should become host"
-        assert transport.is_running
+        assert transport.is_running, (
+            "Newly-created host transport should report is_running=True"
+        )
         transport.attach(
             handlers=[_CollectingHandler().to_dict()], scopes=["global"]
         )
@@ -294,10 +338,15 @@ def test_host_mode_emit_dispatches_to_handler(socket_path: str) -> None:
         assert _wait_until(lambda: len(collector.events) == 1), (
             "host-mode emit should dispatch to attached handler"
         )
-        assert collector.events[0].payload == "hello"
+        assert collector.events[0].payload == "hello", (
+            f"Dispatched event payload should be 'hello', "
+            f"got {collector.events[0].payload!r}"
+        )
     finally:
         transport.shutdown(timeout=2.0)
-        assert not transport.is_running
+        assert not transport.is_running, (
+            "Transport should report is_running=False after shutdown"
+        )
         assert not Path(socket_path).exists(), (
             "host should clean up endpoint on shutdown"
         )
@@ -308,7 +357,9 @@ def test_shutdown_is_idempotent(socket_path: str) -> None:
     transport.shutdown(timeout=2.0)
     # A second shutdown must be a no-op, not raise.
     transport.shutdown(timeout=2.0)
-    assert not transport.is_running
+    assert not transport.is_running, (
+        "Transport must report is_running=False after a double shutdown"
+    )
 
 
 def test_host_emit_sync_dispatches_inline(socket_path: str) -> None:
@@ -326,8 +377,14 @@ def test_host_emit_sync_dispatches_inline(socket_path: str) -> None:
         )
         transport.emit_sync(event)
         # No wait needed: sync path must dispatch before returning.
-        assert len(collector.events) == 1
-        assert collector.events[0].payload == "sync"
+        assert len(collector.events) == 1, (
+            f"emit_sync should dispatch inline; "
+            f"expected 1 event, got {len(collector.events)}"
+        )
+        assert collector.events[0].payload == "sync", (
+            f"Dispatched event payload should be 'sync', "
+            f"got {collector.events[0].payload!r}"
+        )
     finally:
         transport.shutdown(timeout=2.0)
 
@@ -371,10 +428,18 @@ def test_empty_string_payloads_roundtrip_through_framing(
         event_kwargs["extra"] = extra
     event = Event(**event_kwargs)
     restored = _unpack_small(_frame_body(event))
-    assert restored.kind == kind
-    assert restored.payload == payload
+    assert restored.kind == kind, (
+        f"Roundtripped kind should be {kind!r}, got {restored.kind!r}"
+    )
+    assert restored.payload == payload, (
+        f"Roundtripped payload should equal original {payload!r}, "
+        f"got {restored.payload!r}"
+    )
     if extra is not None:
-        assert restored.extra == extra
+        assert restored.extra == extra, (
+            f"Roundtripped extra should equal original {extra!r}, "
+            f"got {restored.extra!r}"
+        )
 
 
 @pytest.mark.parametrize(
@@ -420,8 +485,13 @@ def test_empty_string_payloads_survive_host_emit_sync(
             event_kwargs["step"] = 0
             event_kwargs["extra"] = extra
         transport.emit_sync(Event(**event_kwargs))
-        assert len(collector.events) == 1
-        assert collector.events[0].payload == payload
+        assert len(collector.events) == 1, (
+            f"emit_sync should dispatch one event, got {len(collector.events)}"
+        )
+        assert collector.events[0].payload == payload, (
+            f"Dispatched payload should equal original {payload!r}, "
+            f"got {collector.events[0].payload!r}"
+        )
     finally:
         transport.shutdown(timeout=2.0)
 
@@ -512,7 +582,11 @@ def test_concurrent_attach_detach_with_emit(socket_path: str) -> None:
         stop.set()
         for t in threads:
             t.join(timeout=2.0)
-            assert not t.is_alive()
+            assert not t.is_alive(), (
+                f"Thread {t.name!r} "
+                f"did not exit within 2s — bus likely deadlocked under "
+                f"concurrent attach/emit"
+            )
     finally:
         transport.shutdown(timeout=2.0)
 
@@ -525,7 +599,9 @@ def test_concurrent_attach_detach_with_emit(socket_path: str) -> None:
 def test_second_transport_connects_as_client(socket_path: str) -> None:
     host = LocalTransport(socket_path=socket_path)
     try:
-        assert host.is_host
+        assert host.is_host, (
+            "First transport on a fresh socket must become host"
+        )
         client = LocalTransport(socket_path=socket_path)
         try:
             assert not client.is_host, (
@@ -547,7 +623,10 @@ def test_second_transport_connects_as_client(socket_path: str) -> None:
             assert _wait_until(lambda: len(collector.events) == 1), (
                 "host should receive event from connected client"
             )
-            assert collector.events[0].payload == "from-client"
+            assert collector.events[0].payload == "from-client", (
+                f"Host should receive the client's payload 'from-client', "
+                f"got {collector.events[0].payload!r}"
+            )
         finally:
             client.shutdown(timeout=2.0)
     finally:
@@ -574,9 +653,14 @@ def test_client_numpy_payload_roundtrip(socket_path: str) -> None:
                 )
             )
 
-            assert _wait_until(lambda: len(collector.events) == 1)
+            assert _wait_until(lambda: len(collector.events) == 1), (
+                "Host should receive the client's image event within timeout"
+            )
             got = collector.events[0].payload
-            assert isinstance(got, np.ndarray)
+            assert isinstance(got, np.ndarray), (
+                f"Roundtripped payload should be an ndarray, "
+                f"got {type(got).__name__}"
+            )
             np.testing.assert_array_equal(got, arr)
         finally:
             client.shutdown(timeout=2.0)
@@ -634,7 +718,10 @@ def test_client_numpy_payload_is_snapshotted_before_mutation(
                 f"{path_label} client event should be delivered"
             )
             got = collector.events[0].payload
-            assert isinstance(got, np.ndarray)
+            assert isinstance(got, np.ndarray), (
+                f"{path_label}: roundtripped payload should be an ndarray, "
+                f"got {type(got).__name__}"
+            )
             np.testing.assert_array_equal(got, expected)
         finally:
             client.shutdown(timeout=2.0)
@@ -651,7 +738,10 @@ def test_shm_side_channel_for_large_payload(socket_path: str) -> None:
             _install_collector(host, collector)
 
             arr = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)
-            assert arr.nbytes > 1024
+            assert arr.nbytes > 1024, (
+                f"Test setup expects arr above the 1024-byte shm threshold; "
+                f"got {arr.nbytes} bytes"
+            )
             client.emit(
                 Event(
                     kind="image",
@@ -662,16 +752,31 @@ def test_shm_side_channel_for_large_payload(socket_path: str) -> None:
                 )
             )
 
-            assert _wait_until(lambda: len(collector.events) == 1)
+            assert _wait_until(lambda: len(collector.events) == 1), (
+                "Host should receive the large-payload event via shm side "
+                "channel"
+            )
             got = collector.events[0].payload
-            assert isinstance(got, np.ndarray)
-            assert got.shape == arr.shape
-            assert got.dtype == arr.dtype
+            assert isinstance(got, np.ndarray), (
+                f"Roundtripped payload should be an ndarray, "
+                f"got {type(got).__name__}"
+            )
+            assert got.shape == arr.shape, (
+                f"Roundtripped ndarray shape mismatch: expected {arr.shape}, "
+                f"got {got.shape}"
+            )
+            assert got.dtype == arr.dtype, (
+                f"Roundtripped ndarray dtype mismatch: expected {arr.dtype}, "
+                f"got {got.dtype}"
+            )
             np.testing.assert_array_equal(got, arr)
             # Client must have released its pending-shm tracking.
             assert _wait_until(
                 lambda: not client._pending_shm,  # type: ignore[attr-defined]
                 timeout=1.0,
+            ), (
+                "Client must release pending-shm tracking after the host "
+                "consumes the buffer"
             )
         finally:
             client.shutdown(timeout=2.0)
@@ -715,9 +820,15 @@ def test_shm_threshold_zero_disables_side_channel(
                 )
             )
 
-            assert _wait_until(lambda: len(collector.events) == 1)
+            assert _wait_until(lambda: len(collector.events) == 1), (
+                "shm_threshold=0 should still deliver the event via the SMALL "
+                "frame path"
+            )
             got = collector.events[0].payload
-            assert isinstance(got, np.ndarray)
+            assert isinstance(got, np.ndarray), (
+                f"Roundtripped payload should be an ndarray, "
+                f"got {type(got).__name__}"
+            )
             np.testing.assert_array_equal(got, arr)
         finally:
             client.shutdown(timeout=2.0)
@@ -736,7 +847,10 @@ def test_client_attach_and_detach_control_frames(socket_path: str) -> None:
     try:
         client = LocalTransport(socket_path=socket_path)
         try:
-            assert not client.is_host
+            assert not client.is_host, (
+                "Second transport on the same socket must connect as client, "
+                "not host"
+            )
             bus = host._bus  # type: ignore[attr-defined]
             client.attach(
                 handlers=[_CollectingHandler().to_dict()],
@@ -759,8 +873,14 @@ def test_client_attach_and_detach_control_frames(socket_path: str) -> None:
                     lineno=1,
                 )
             )
-            assert _wait_until(lambda: len(collector.events) == 1)
-            assert collector.events[0].payload == "before-detach"
+            assert _wait_until(lambda: len(collector.events) == 1), (
+                "Host should receive 'before-detach' event before client "
+                "detaches"
+            )
+            assert collector.events[0].payload == "before-detach", (
+                f"First event payload should be 'before-detach', "
+                f"got {collector.events[0].payload!r}"
+            )
 
             client.detach("collector", "global")
             assert _wait_until(lambda: "collector" not in bus.handlers), (
@@ -779,7 +899,7 @@ def test_client_attach_and_detach_control_frames(socket_path: str) -> None:
             assert not _wait_until(
                 lambda: len(collector.events) > 1,
                 timeout=0.2,
-            )
+            ), "Detached collector must not receive any further events"
         finally:
             client.shutdown(timeout=2.0)
     finally:
@@ -858,7 +978,10 @@ def test_shutdown_flushes_shm_frames(socket_path: str) -> None:
                 lambda: len(collector.events) == n, timeout=5.0
             ), f"host got {len(collector.events)}/{n}"
             # No leaked shm references on the client side.
-            assert not client._pending_shm  # type: ignore[attr-defined]
+            assert not client._pending_shm, (  # type: ignore[attr-defined]
+                "Client should have no pending shm refs after flush; "
+                f"got {client._pending_shm}"  # type: ignore[attr-defined]
+            )
         finally:
             pass
     finally:
@@ -931,7 +1054,9 @@ def test_unix_socket_is_owner_only(socket_path: str) -> None:
     """
     transport = LocalTransport(socket_path=socket_path)
     try:
-        assert transport.is_host
+        assert transport.is_host, (
+            "Newly-created transport on a fresh socket must become host"
+        )
         mode = os.stat(socket_path).st_mode & 0o777
         # Under a restrictive umask we expect exactly 0o600; tolerate
         # environments that narrow it further (0o600 or less-permissive).
@@ -1146,7 +1271,10 @@ def test_two_independent_processes_share_host(
     with _host_subprocess(socket_path, tmp_path, expected=1) as (_, out_path):
         client = LocalTransport(socket_path=socket_path)
         try:
-            assert not client.is_host
+            assert not client.is_host, (
+                "Client transport must connect to the host subprocess, "
+                "not rebind"
+            )
             client.emit(
                 Event(
                     kind="log",
@@ -1179,7 +1307,10 @@ def test_cross_process_no_loss_at_bulk_send(
     with _host_subprocess(socket_path, tmp_path, expected=n) as (_, out_path):
         client = LocalTransport(socket_path=socket_path)
         try:
-            assert not client.is_host
+            assert not client.is_host, (
+                "Client transport must connect to the host subprocess, "
+                "not rebind"
+            )
             for i in range(n):
                 client.emit(
                     Event(
@@ -1224,7 +1355,10 @@ def test_cross_process_multiple_concurrent_clients(
         c2 = LocalTransport(socket_path=socket_path)
         try:
             for c in (c1, c2):
-                assert not c.is_host
+                assert not c.is_host, (
+                    "Both client transports must connect to the host "
+                    "subprocess, not rebind"
+                )
 
             def emit_many(client: LocalTransport, tag: str) -> None:
                 for i in range(n_per_client):
@@ -1479,9 +1613,13 @@ def test_try_unlink_shm_tolerates_missing_name() -> None:
 def test_next_shm_name_is_unique_and_prefixed() -> None:
     a = _next_shm_name()
     b = _next_shm_name()
-    assert a.startswith(_SHM_NAME_PREFIX)
-    assert b.startswith(_SHM_NAME_PREFIX)
-    assert a != b
+    assert a.startswith(_SHM_NAME_PREFIX), (
+        f"shm name {a!r} should start with prefix {_SHM_NAME_PREFIX!r}"
+    )
+    assert b.startswith(_SHM_NAME_PREFIX), (
+        f"shm name {b!r} should start with prefix {_SHM_NAME_PREFIX!r}"
+    )
+    assert a != b, f"_next_shm_name() must return unique names, got {a!r} twice"
 
 
 def test_pack_unpack_large_roundtrip_and_unlinks_shm() -> None:
@@ -1509,14 +1647,38 @@ def test_pack_unpack_large_roundtrip_and_unlinks_shm() -> None:
 
         restored = _unpack_large(_pack_large(event, shm_name))
 
-        assert restored.kind == event.kind
-        assert restored.scope == event.scope
-        assert restored.filepath == event.filepath
-        assert restored.lineno == event.lineno
-        assert restored.step == event.step
-        assert restored.time == event.time
-        assert restored.extra == event.extra
-        assert isinstance(restored.payload, np.ndarray)
+        assert restored.kind == event.kind, (
+            f"LARGE-frame roundtrip kind mismatch: expected {event.kind!r}, "
+            f"got {restored.kind!r}"
+        )
+        assert restored.scope == event.scope, (
+            f"LARGE-frame roundtrip scope mismatch: expected {event.scope!r}, "
+            f"got {restored.scope!r}"
+        )
+        assert restored.filepath == event.filepath, (
+            f"LARGE-frame roundtrip filepath mismatch: expected "
+            f"{event.filepath!r}, got {restored.filepath!r}"
+        )
+        assert restored.lineno == event.lineno, (
+            f"LARGE-frame roundtrip lineno mismatch: expected "
+            f"{event.lineno!r}, got {restored.lineno!r}"
+        )
+        assert restored.step == event.step, (
+            f"LARGE-frame roundtrip step mismatch: expected {event.step!r}, "
+            f"got {restored.step!r}"
+        )
+        assert restored.time == event.time, (
+            f"LARGE-frame roundtrip time mismatch: expected {event.time!r}, "
+            f"got {restored.time!r}"
+        )
+        assert restored.extra == event.extra, (
+            f"LARGE-frame roundtrip extra mismatch: expected {event.extra!r}, "
+            f"got {restored.extra!r}"
+        )
+        assert isinstance(restored.payload, np.ndarray), (
+            f"LARGE-frame restored payload should be an ndarray, "
+            f"got {type(restored.payload).__name__}"
+        )
         np.testing.assert_array_equal(restored.payload, arr)
         with pytest.raises(FileNotFoundError):
             shared_memory.SharedMemory(name=shm_name)
@@ -1552,7 +1714,10 @@ def test_reap_orphan_shm_removes_only_old_goggles_segments(
         os.utime(stale_path, (old, old))
 
         reaped = _reap_orphan_shm(max_age_s=600.0)
-        assert reaped >= 1
+        assert reaped >= 1, (
+            f"_reap_orphan_shm should reap at least the stale segment, "
+            f"got reaped={reaped}"
+        )
         assert not stale_path.exists(), "stale segment must be unlinked"
         assert (Path("/dev/shm") / fresh.name).exists(), (
             "fresh segment must not be touched"

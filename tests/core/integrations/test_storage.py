@@ -245,7 +245,10 @@ def test_save_trajectories_to_file_with_visualization(mock_save, tmp_handler):
     updated = tmp_handler._save_trajectories_to_file(event)
     npy_path = tmp_handler._base_path / updated["payload"]
     assert npy_path.exists(), "Trajectories .npy file should exist"
-    assert np.load(npy_path).shape == (3, 10, 2)
+    assert np.load(npy_path).shape == (3, 10, 2), (
+        f"Saved trajectories shape mismatch: expected (3, 10, 2), "
+        f"got {np.load(npy_path).shape}"
+    )
     mock_save.assert_called_once()
 
 
@@ -256,7 +259,9 @@ def test_save_trajectories_to_file_no_visualization(tmp_handler):
     }
     updated = tmp_handler._save_trajectories_to_file(event)
     npy_path = tmp_handler._base_path / updated["payload"]
-    assert npy_path.exists()
+    assert npy_path.exists(), (
+        f"Trajectories .npy file should exist at {npy_path}"
+    )
     viz_dir = tmp_handler._trajectories_dir / "visualizations"
     assert not viz_dir.exists() or not any(viz_dir.iterdir()), (
         "No visualization should be written when store_visualization is absent"
@@ -333,7 +338,9 @@ def test_handle_drops_backward_step_with_warning(tmp_handler):
     log_path = tmp_handler._base_path / "log.jsonl"
     lines = log_path.read_text().splitlines()
     assert len(lines) == 1, "second (backward-step) event must be dropped"
-    assert '"loss": 1.0' in lines[0]
+    assert '"loss": 1.0' in lines[0], (
+        f"First (in-order) event must remain on disk; got line: {lines[0]!r}"
+    )
     assert any(
         "out-of-order" in m.lower() and "step=5" in m for m in messages
     ), "Should warn that step=5 regressed"
@@ -345,7 +352,11 @@ def test_handle_allows_equal_and_forward_steps(tmp_handler):
     tmp_handler.handle(make_event("metric", {"b": 2}, step=3))  # equal — ok
     tmp_handler.handle(make_event("metric", {"c": 3}, step=4))  # forward — ok
     log_path = tmp_handler._base_path / "log.jsonl"
-    assert len(log_path.read_text().splitlines()) == 3
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 3, (
+        f"All three equal/forward-step events must be recorded, "
+        f"got {len(lines)} lines: {lines}"
+    )
 
 
 def test_handle_tracks_step_per_scope(tmp_handler):
@@ -354,7 +365,11 @@ def test_handle_tracks_step_per_scope(tmp_handler):
     # Lower step on a *different* scope must still be recorded.
     tmp_handler.handle(make_event("metric", {"x": 2}, scope="eval", step=1))
     log_path = tmp_handler._base_path / "log.jsonl"
-    assert len(log_path.read_text().splitlines()) == 2
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 2, (
+        f"Cross-scope events must both be recorded (step monotonicity is "
+        f"per-scope), got {len(lines)} lines: {lines}"
+    )
 
 
 def test_handle_records_events_without_step(tmp_handler):
@@ -362,4 +377,8 @@ def test_handle_records_events_without_step(tmp_handler):
     tmp_handler.handle(make_event("metric", {"a": 1}, step=10))
     tmp_handler.handle(make_event("log", {"msg": "no-step"}))  # step=None
     log_path = tmp_handler._base_path / "log.jsonl"
-    assert len(log_path.read_text().splitlines()) == 2
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 2, (
+        f"step=None events must always be recorded; "
+        f"expected 2 lines, got {len(lines)}: {lines}"
+    )

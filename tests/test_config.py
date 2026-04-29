@@ -155,8 +155,12 @@ def test_private_fields_cannot_be_overridden_by_from_config() -> None:
             }
         )
     msg = str(exc_info.value)
-    assert "Private fields cannot be overridden" in msg
-    assert "_secret" in msg
+    assert "Private fields cannot be overridden" in msg, (
+        f"Error message should explain the rule, got {msg!r}"
+    )
+    assert "_secret" in msg, (
+        f"Error message should name the offending field '_secret', got {msg!r}"
+    )
 
 
 def test_undeclared_private_keys_are_silently_ignored() -> None:
@@ -164,9 +168,16 @@ def test_undeclared_private_keys_are_silently_ignored() -> None:
     cfg = DummyTypedConfig.from_config(
         {"_not_declared": 1, "name": "x", "port": "y"}
     )
-    assert cfg.name == "x"
-    assert cfg.port == "y"
-    assert not hasattr(cfg, "_not_declared")
+    assert cfg.name == "x", (
+        f"Declared 'name' should be set to 'x', got {cfg.name!r}"
+    )
+    assert cfg.port == "y", (
+        f"Declared 'port' should be set to 'y', got {cfg.port!r}"
+    )
+    assert not hasattr(cfg, "_not_declared"), (
+        "Undeclared private key '_not_declared' must not be attached to the "
+        "config"
+    )
 
 
 def test_private_fields_not_serialized_yaml_json_roundtrip(

@@ -224,9 +224,16 @@ def test_averagefilter_name() -> None:
 )
 def test_windowbuffer_filter_init_state(factory: Any) -> None:
     f = factory()
-    assert f.buffer is None
-    assert f.n_seen == 0
-    assert f.index == 0
+    assert f.buffer is None, (
+        f"Filter should start with buffer=None before any update; "
+        f"got {f.buffer!r}"
+    )
+    assert f.n_seen == 0, (
+        f"Filter should start with n_seen=0 before any update; got {f.n_seen}"
+    )
+    assert f.index == 0, (
+        f"Filter should start with index=0 before any update; got {f.index}"
+    )
 
 
 @pytest.mark.parametrize(
