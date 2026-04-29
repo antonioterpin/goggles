@@ -998,10 +998,15 @@ def configure(
 
         gg.configure(enable_console=True)
 
-    Power users should keep using ``attach`` / handler classes directly —
+    Power users should keep using ``attach`` / handler classes directly --
     this helper only covers the standard cases. Calling it with no arguments
     is a no-op so it is safe to invoke unconditionally during library
-    initialisation. See issue #43.
+    initialization.
+
+    Calling ``configure(enable_console=True, ...)`` while a console handler
+    is already attached will detach the existing handler from every scope
+    it is bound to and attach a fresh one with the new options, so the
+    second call wins instead of being silently deduped by name.
 
     Args:
         enable_console: When True, attach a default ``ConsoleHandler``
@@ -1021,6 +1026,23 @@ def configure(
         return
     if scopes is None:
         scopes = ["global"]
+
+    # Replace any existing console handler so a second `configure(...)` call
+    # with new options actually takes effect (`attach()` dedupes by name and
+    # would otherwise silently keep the first instance).
+    internal_bus = cast(Any, get_bus())._bus
+    existing_scopes = [
+        s
+        for s, names in list(internal_bus.scopes.items())
+        if ConsoleHandler.name in names
+    ]
+    for s in existing_scopes:
+        try:
+            detach(ConsoleHandler.name, s)
+        except ValueError:
+            # Already detached by a concurrent caller; nothing to do.
+            pass
+
     handler = ConsoleHandler(
         level=console_level,
         path_style=console_path_style,

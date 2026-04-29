@@ -162,56 +162,97 @@ def test_attach_and_emit() -> None:
 
 def _scoped_handlers() -> dict:
     """Snapshot of (scope -> set of handler names) on the host bus."""
-    transport = cast("Any", gg.get_bus())
+    transport = cast(Any, gg.get_bus())
     return dict(transport._bus.scopes)
 
 
 def _bus_handlers() -> dict:
     """Snapshot of (handler name -> handler instance) on the host bus."""
-    transport = cast("Any", gg.get_bus())
+    transport = cast(Any, gg.get_bus())
     return dict(transport._bus.handlers)
 
 
 def test_configure_is_noop_by_default() -> None:
     """configure() with no args attaches nothing — purely a shortcut."""
     gg.finish()  # clean slate
-    before = _scoped_handlers()
-    gg.configure()
-    assert _scoped_handlers() == before, (
-        "configure() with default args must not change the bus state"
-    )
-    gg.finish()
+    try:
+        before = _scoped_handlers()
+        gg.configure()
+        assert _scoped_handlers() == before, (
+            "configure() with default args must not change the bus state"
+        )
+    finally:
+        gg.finish()
 
 
 def test_configure_enable_console_attaches_console_handler() -> None:
     """configure(enable_console=True) wires a ConsoleHandler on global."""
     gg.finish()
-    gg.configure(enable_console=True, console_level=logging.WARNING)
-    assert "global" in _scoped_handlers(), (
-        "configure(enable_console=True) should attach to 'global' by default"
-    )
-    consoles = [
-        h for h in _bus_handlers().values() if isinstance(h, gg.ConsoleHandler)
-    ]
-    assert len(consoles) == 1, (
-        f"Expected exactly one ConsoleHandler, found {len(consoles)}"
-    )
-    assert consoles[0].level == logging.WARNING, (
-        "console_level should propagate to the handler"
-    )
-    gg.finish()
+    try:
+        gg.configure(enable_console=True, console_level=logging.WARNING)
+        assert "global" in _scoped_handlers(), (
+            "configure(enable_console=True) should attach to 'global' by "
+            "default"
+        )
+        consoles = [
+            h
+            for h in _bus_handlers().values()
+            if isinstance(h, gg.ConsoleHandler)
+        ]
+        assert len(consoles) == 1, (
+            f"Expected exactly one ConsoleHandler, found {len(consoles)}"
+        )
+        assert consoles[0].level == logging.WARNING, (
+            "console_level should propagate to the handler"
+        )
+    finally:
+        gg.finish()
 
 
 def test_configure_respects_scopes_argument() -> None:
     """A custom scopes list routes the auto-attached handler accordingly."""
     gg.finish()
-    gg.configure(enable_console=True, scopes=["train", "eval"])
-    scopes = _scoped_handlers()
-    for s in ("train", "eval"):
-        assert s in scopes, (
-            f"configure(scopes=[..., '{s}']) must attach under scope '{s}'"
-        )
+    try:
+        gg.configure(enable_console=True, scopes=["train", "eval"])
+        scopes = _scoped_handlers()
+        for s in ("train", "eval"):
+            assert s in scopes, (
+                f"configure(scopes=[..., '{s}']) must attach under scope '{s}'"
+            )
+    finally:
+        gg.finish()
+
+
+def test_configure_replaces_existing_console_handler() -> None:
+    """A second configure() call swaps the console handler instance."""
     gg.finish()
+    try:
+        gg.configure(enable_console=True, console_level=logging.INFO)
+        first = next(
+            h
+            for h in _bus_handlers().values()
+            if isinstance(h, gg.ConsoleHandler)
+        )
+        gg.configure(enable_console=True, console_level=logging.WARNING)
+        consoles = [
+            h
+            for h in _bus_handlers().values()
+            if isinstance(h, gg.ConsoleHandler)
+        ]
+        assert len(consoles) == 1, (
+            f"Reconfigure must keep exactly one console handler; "
+            f"saw {len(consoles)}"
+        )
+        assert consoles[0] is not first, (
+            "Reconfigure must install a new ConsoleHandler instance, "
+            "not silently keep the first one"
+        )
+        assert consoles[0].level == logging.WARNING, (
+            "Reconfigure must apply the new console_level (saw "
+            f"{consoles[0].level})"
+        )
+    finally:
+        gg.finish()
 
 
 def test_class_level_logger_does_not_hang_on_first_info() -> None:
