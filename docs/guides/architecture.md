@@ -137,15 +137,42 @@ The endpoint is platform-dependent. On Unix (Linux, macOS) it is an
 `AF_UNIX` stream socket at the path indicated by `GOGGLES_SOCKET`,
 protected at `0o600` (owner-only). On Windows, where `AF_UNIX` is
 unreliable across Python versions, the host binds a TCP loopback
-socket on `127.0.0.1:<random-port>` and writes the chosen port to a
-sidecar discovery file at the same logical `GOGGLES_SOCKET` path; the
-file itself is not a socket. Both paths share the same framing
-protocol.
+socket on `127.0.0.1:<random-port>` and writes the chosen port plus a
+per-host random token to a JSON sidecar discovery file at the same
+logical `GOGGLES_SOCKET` path; clients send the token as the first
+frame, and the host drops the connection unless it matches. Both
+paths share the same framing protocol.
 
-The transport is designed for **trusted local processes only**. The
-host unpickles bytes received from connected peers, so the on-disk
-permissions (Unix) or loopback isolation (Windows) are the security
-boundary; do not share the socket with untrusted users.
+#### Trust model
+
+The host calls `pickle.loads` on bytes received from connected peers,
+so the transport assumes its peers are trusted local processes. The
+threat actor in scope is **another local user on the same machine**
+who could otherwise connect to the host and feed it crafted bytes;
+remote network attackers are out of scope (the host never listens
+off-loopback). Each backend mitigates this differently:
+
+- **Unix (`AF_UNIX`)**: the socket file is created at `0o600` under a
+  parent dir narrowed to `0o700`. Only the owning UID can `connect()`,
+  so other local users are excluded by the kernel before any byte is
+  read.
+- **Windows (TCP loopback)**: any local user can `connect()` to
+  `127.0.0.1:<port>`, so isolation is enforced on the wire instead of
+  the filesystem. The host mints a 256-bit random token at bind time,
+  writes it into the discovery file, and the accept loop requires a
+  matching token frame within a 1-second handshake window before any
+  payload bytes are read. The default discovery path is
+  `tempfile.gettempdir()`, which on stock Windows resolves under
+  `%LOCALAPPDATA%\Temp` (already user-private); the token defends the
+  case where another user can locate the listener (port scan, or an
+  explicitly-shared `GOGGLES_SOCKET`). Other local users still
+  consume one accept slot per probe but never reach the unpickler.
+
+Setting `GOGGLES_SOCKET` to a path another user can read does not
+weaken the Unix story (file mode `0o600` still gates `connect`) but
+does weaken the Windows story (the token sits in that file). On a
+shared-tenant Windows host, leave `GOGGLES_SOCKET` at its default
+under the per-user temp dir.
 
 Payloads whose numpy `.nbytes` is at or above `GOGGLES_SHM_THRESHOLD`
 (default 64 KiB) take a shared-memory side-channel: the client writes
