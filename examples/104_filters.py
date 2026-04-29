@@ -257,6 +257,39 @@ def demo_multidimensional_data():
     logger.info(f"Processed {len(scaled_results)} multidimensional samples")
 
 
+def demo_jittable_functional_api() -> None:
+    """Demonstrate the JIT-compatible functional API.
+
+    Each filter exposes ``init_state(data)`` and ``apply(state, data)``.
+    ``apply`` is pure: no hidden state, safe under ``jax.jit`` and
+    ``jax.lax.scan``.
+    """
+    logger.info("\n=== JIT-compatible functional API ===")
+
+    if not HAS_JAX:
+        logger.warning("JAX not available - skipping JIT demo")
+        return
+    assert jnp is not None and jax is not None
+
+    f = AverageFilter(window_size=4)
+    seq = jnp.asarray(np.random.RandomState(0).randn(8, 3).astype("float32"))
+
+    # JIT-compile the per-step function and roll it manually.
+    jitted = jax.jit(f.apply)
+    state = f.init_state(seq[0])
+    outs = []
+    for x in seq:
+        state, y = jitted(state, x)
+        outs.append(y)
+
+    logger.info(f"jit step outputs: {jnp.stack(outs).shape}")
+
+    # Or scan over the whole sequence in a single jitted call.
+    state = f.init_state(seq[0])
+    _, scan_outs = jax.lax.scan(f.apply, state, seq)
+    logger.info(f"lax.scan outputs: {scan_outs.shape}")
+
+
 def main():
     """Run all filter demonstrations."""
     logger.info("Starting Goggles Filters demonstration...")
@@ -268,6 +301,7 @@ def main():
     demo_concat_filter()
     demo_config_based_filters()
     demo_multidimensional_data()
+    demo_jittable_functional_api()
 
     logger.info("\n=== Filter Demonstration Complete ===")
     logger.info("Key takeaways:")
@@ -276,6 +310,7 @@ def main():
     logger.info("- Filters can be chained together with ConcatFilter")
     logger.info("- Filters work with multidimensional data")
     logger.info("- Configuration-based filter creation enables flexibility")
+    logger.info("- The functional API (init_state + apply) is JIT-compatible")
 
 
 if __name__ == "__main__":
