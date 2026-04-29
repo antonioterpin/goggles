@@ -360,13 +360,16 @@ def test_histogram_adds_name_and_payload(
         goggles_logger: ``CoreGogglesLogger`` fixture.
         patch_bus: Patched mock client fixture.
     """
-    goggles_logger.histogram([1, 2, 3], name="hist", step=1)
+    payload = np.array([1, 2, 3])
+    goggles_logger.histogram(payload, name="hist", step=1)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "histogram", "Event kind should be 'histogram'"
     assert event.extra["name"] == "hist", (
         "Event extra 'name' mismatch for histogram"
     )
-    assert event.payload == [1, 2, 3], "Event payload mismatch for histogram"
+    np.testing.assert_array_equal(
+        event.payload, payload, "Event payload mismatch for histogram"
+    )
 
 
 def test_sync_mode_uses_emit_sync(patch_bus: MagicMock) -> None:

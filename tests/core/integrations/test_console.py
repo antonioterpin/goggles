@@ -218,7 +218,11 @@ def test_to_from_dict_roundtrip(tmp_path):
 
 
 def test_handle_warns_on_backward_step_but_still_emits(handler):
-    """Console still emits the message on a backward step, plus a warning."""
+    """Console still emits the message on a backward step, plus a warning.
+
+    Args:
+        handler: ``ConsoleHandler`` fixture.
+    """
     e1 = DummyEvent(
         kind="log",
         payload="first",
@@ -258,7 +262,11 @@ def test_handle_warns_on_backward_step_but_still_emits(handler):
 
 
 def test_handle_does_not_warn_when_step_is_none(handler):
-    """Events without a step never trip the guard."""
+    """Events without a step never trip the guard.
+
+    Args:
+        handler: ``ConsoleHandler`` fixture.
+    """
     e = DummyEvent(
         kind="log",
         payload="no-step",

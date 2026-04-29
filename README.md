@@ -88,10 +88,19 @@ uv run examples/01_basic_run.py
 import goggles as gg
 import numpy as np
 
-# Enable metrics logging
+# Enable metrics logging. `group` and `tags` are forwarded straight to
+# `wandb.init`: use `group` to keep related runs together in the W&B UI
+# (see "Multiple runs in WandB" below) and `tags` to make a run easy to
+# find or filter on later. Pass `tags` as a list — a bare string is
+# rejected because W&B would silently iterate it character by character.
 logger = gg.get_logger("experiment", with_metrics=True)
 gg.attach(
-    gg.WandBHandler(project="my_project", run_name="run_1"),
+    gg.WandBHandler(
+        project="my_project",
+        run_name="run_1",
+        group="experiment_v2",
+        tags=["baseline", "smoke-test"],
+    ),
 )
 
 # Log metrics, images, and videos
