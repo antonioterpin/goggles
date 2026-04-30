@@ -46,9 +46,13 @@ class _Endpoint(Protocol):
     def connect(path: str, timeout: float = 1.0) -> socket.socket | None:
         """Attempt to connect to a host at ``path``.
 
-        Performs any platform-specific handshake (e.g. token exchange on
-        Windows) before returning the socket, so callers can use the
-        returned socket immediately.
+        Sends any platform-specific opening frame (e.g. the token frame
+        on Windows) before returning. The handshake is one-way client→
+        server: ``connect`` returns ``None`` only when the local end
+        couldn't deliver the connect or the opening frame. The server
+        independently authorizes the connection and silently drops it
+        on mismatch, so a successful return only means "wire is up";
+        callers must still tolerate the host closing immediately after.
 
         Args:
             path: Logical endpoint identifier.
@@ -56,7 +60,7 @@ class _Endpoint(Protocol):
 
         Returns:
             Connected stream socket, or None if no host is listening
-            or the handshake failed.
+            or the opening frame couldn't be sent.
         """
         ...
 
@@ -238,9 +242,23 @@ class _WindowsEndpoint:
         token = secrets.token_bytes(_TOKEN_BYTES)
         payload = json.dumps({"port": port, "token": token.hex()})
         tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(payload)
-        os.replace(tmp, path)
+        # If publishing the discovery file fails, close the listener so
+        # the ephemeral port isn't held open and best-effort remove the
+        # half-written tmp file before re-raising.
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(payload)
+            os.replace(tmp, path)
+        except OSError:
+            try:
+                server.close()
+            except OSError:
+                pass
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         return server, token
 
     @staticmethod
