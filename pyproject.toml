@@ -34,8 +34,6 @@ dependencies = [
     "numpy>=1.23",
     "imageio>=2.37.0",
     "matplotlib>=3.10.7",
-    "basedpyright",
-    "pydoclint>=0.8.3",
 ]
 
 [project.urls]
@@ -61,6 +59,8 @@ dev = [
     "pyupgrade>=3.19.0",
     "psutil",
     "hydra-core>=1.3.2",
+    "basedpyright",
+    "pydoclint>=0.8.3",
 ]
 # Optional JAX-based GPU history subsystem
 jax = [
