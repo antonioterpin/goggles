@@ -283,6 +283,15 @@ class WandBHandler:
         self._wandb_run: Run | None = None
         self._current_scope: str | None = None
         self._step_guard = StepGuard()
+        # Pending writes batched per scope, keyed by step. The W&B cloud
+        # backend treats multiple ``run.log({...}, step=N)`` calls at the
+        # same N as best-effort merges (a panel can register one key but
+        # show "No data available" for sibling keys logged at the same
+        # step — see issue #177). Coalesce same-step events into a single
+        # commit; a step change or ``close()`` flushes the buffer.
+        # ``step is None`` events bypass the buffer to preserve W&B's
+        # auto-increment semantics.
+        self._pending: dict[str, dict[str, Any]] = {}
 
     def can_handle(self, kind: str) -> bool:
         """Return True if the handler supports this event kind.
@@ -362,7 +371,7 @@ class WandBHandler:
             return
         for k, v in extra.items():
             payload[k] = v
-        run.log(payload, step=step)
+        self._stage(run, scope, step, payload)
 
     def _handle_media(
         self,
@@ -397,7 +406,7 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def _build_wandb_video(
         self, name: str, value: Any, extra: Mapping[str, Any]
@@ -478,7 +487,7 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def _handle_vector_field(
         self,
@@ -530,7 +539,7 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def _handle_trajectories(
         self,
@@ -567,10 +576,12 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def close(self) -> None:
         """Finish all active W&B runs."""
+        for scope in list(self._pending.keys()):
+            self._flush_pending(scope)
         for run in list(self._runs.values()):
             if run is not None:
                 try:
@@ -578,6 +589,7 @@ class WandBHandler:
                 except Exception as exc:
                     self._logger.warning("Failed to finish W&B run: %s", exc)
         self._runs.clear()
+        self._pending.clear()
         self._wandb_run = None
         self._current_scope = None
 
@@ -619,6 +631,57 @@ class WandBHandler:
             group=serialized.get("group"),
             tags=serialized.get("tags"),
         )
+
+    def _stage(
+        self,
+        run: Run,
+        scope: str,
+        step: int | None,
+        logs: Mapping[str, Any],
+    ) -> None:
+        """Buffer a log payload for ``scope`` at ``step``.
+
+        Same-step events are merged into a single ``run.log`` commit; a
+        step change flushes the previous buffer first. ``step is None``
+        bypasses the buffer entirely so W&B's auto-increment semantics
+        are preserved for callers that don't pin a step.
+
+        Args:
+            run: The W&B run for ``scope`` (already created).
+            scope: The scope being logged under.
+            step: User-supplied step, or None for auto-increment.
+            logs: Mapping of keys to values to merge into the commit.
+        """
+        if step is None:
+            self._flush_pending(scope)
+            run.log(dict(logs))
+            return
+        pending = self._pending.get(scope)
+        if pending is None:
+            pending = {"step": step, "logs": {}}
+            self._pending[scope] = pending
+        elif pending["step"] != step:
+            self._flush_pending(scope)
+            pending = self._pending.setdefault(
+                scope, {"step": step, "logs": {}}
+            )
+            pending["step"] = step
+        pending["logs"].update(logs)
+
+    def _flush_pending(self, scope: str) -> None:
+        """Commit any pending logs for ``scope`` in one ``run.log`` call.
+
+        Args:
+            scope: The scope whose pending buffer should be flushed.
+        """
+        pending = self._pending.get(scope)
+        if not pending or not pending["logs"]:
+            return
+        run = self._runs.get(scope)
+        if run is not None:
+            run.log(pending["logs"], step=pending["step"])
+        pending["logs"] = {}
+        pending["step"] = None
 
     def _get_or_create_run(self, scope: str, extra_config: dict) -> Run:
         """Get or create a W&B run for the given scope.
