@@ -1,7 +1,7 @@
 import glob
+import importlib
 import logging
 import os
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -13,6 +13,31 @@ from wandb.sdk.internal.datastore import DataStore
 
 import goggles._core.integrations.wandb as wandb_module
 from goggles._core.integrations.wandb import WandBHandler
+
+
+def _moviepy_video_importable() -> bool:
+    """Probe whether the moviepy video pipeline is loadable.
+
+    wandb's video path lazy-imports ``moviepy.video.VideoClip``. moviepy <2
+    ships a ``config_defaults.py`` whose Windows path constants raise a
+    SyntaxWarning on newer Python versions; under pytest's
+    ``filterwarnings = ["error"]`` config the warning is upgraded to a
+    SyntaxError at import time. Try-importing here lets the test suite
+    skip gracefully on every (Python, moviepy, OS) combination that has
+    the issue rather than enumerating versions.
+
+    Returns:
+        ``True`` if ``moviepy.video.VideoClip`` imports cleanly,
+        ``False`` if any exception (including ``SyntaxError``) is raised.
+    """
+    try:
+        importlib.import_module("moviepy.video.VideoClip")
+    except Exception:
+        return False
+    return True
+
+
+_MOVIEPY_USABLE = _moviepy_video_importable()
 
 
 def _capture_logger_messages(
@@ -694,11 +719,12 @@ def test_step_none_bypasses_buffer_to_preserve_autoincrement(
 
 @pytest.mark.slow
 @pytest.mark.skipif(
-    sys.version_info >= (3, 13),
+    not _MOVIEPY_USABLE,
     reason=(
-        "moviepy<2 imports fail under Py3.13 (invalid escape '\\P' in "
-        "config_defaults.py); reachable from wandb's video path. "
-        "Tracked in #182."
+        "moviepy.video.VideoClip is not importable in this environment "
+        "(commonly: moviepy<2 SyntaxWarning under Py3.12+ promoted to "
+        "SyntaxError by pytest's filterwarnings=['error']). Reachable "
+        "from wandb's video path. Tracked in #182."
     ),
 )
 def test_example_04_logs_all_keys_at_step_100_offline(
