@@ -147,6 +147,11 @@ class LocalTransport:
 
         # Host-side state
         self._server_sock: socket.socket | None = None
+        # Per-host secret minted by the endpoint at bind time. Used by
+        # endpoints that enforce a wire-level handshake (Windows TCP);
+        # ``None`` for endpoints whose isolation is filesystem-based
+        # (Unix). Set in ``_connect_or_host``.
+        self._endpoint_secret: bytes | None = None
         self._accept_thread: threading.Thread | None = None
         self._reader_threads: list[threading.Thread] = []
         self._client_sockets: list[socket.socket] = []
@@ -207,7 +212,7 @@ class LocalTransport:
             return
 
         try:
-            server = self._endpoint.bind(self._socket_path)
+            server, secret = self._endpoint.bind(self._socket_path)
         except OSError as exc:
             if exc.errno != errno.EADDRINUSE:
                 # Anything other than "path already taken" is a real
@@ -222,7 +227,7 @@ class LocalTransport:
             # stale. Unlink and retry the bind exactly once.
             self._endpoint.cleanup(self._socket_path)
             try:
-                server = self._endpoint.bind(self._socket_path)
+                server, secret = self._endpoint.bind(self._socket_path)
             except OSError:
                 # Another process raced us to the now-empty path.
                 if self._try_connect(retries=5, backoff=0.02):
@@ -231,6 +236,7 @@ class LocalTransport:
                 raise
 
         self._server_sock = server
+        self._endpoint_secret = secret
         self._is_host = True
         self._start_host_workers()
 
@@ -244,7 +250,7 @@ class LocalTransport:
             self._start_send_worker()
             return
         try:
-            server = self._endpoint.bind(self._socket_path)
+            server, secret = self._endpoint.bind(self._socket_path)
         except OSError:
             # Race: another process became host between our probe and
             # bind. Try one more time as client.
@@ -253,6 +259,7 @@ class LocalTransport:
                 return
             raise
         self._server_sock = server
+        self._endpoint_secret = secret
         self._is_host = True
         self._start_host_workers()
 
@@ -345,10 +352,20 @@ class LocalTransport:
     def _reader_loop(self, conn: socket.socket) -> None:
         """Read framed messages from ``conn`` and route them to the bus.
 
+        Authorizes the peer before reading any payload so an
+        unauthenticated client (Windows TCP loopback) is dropped before
+        anything they send is fed to ``pickle.loads``.
+
         Args:
             conn: Connected client socket.
         """
         try:
+            if not self._endpoint.authorize(conn, self._endpoint_secret):
+                _log.warning(
+                    "goggles host: rejected client at %s (handshake failed)",
+                    self._endpoint.accept_address_hint(),
+                )
+                return
             while self._running:
                 header = _recvall(conn, _HEADER_SIZE)
                 if header is None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import socket
 import struct
 import subprocess
 import sys
@@ -38,6 +39,12 @@ from goggles._core.transport import (
     _unpack_large,
     _unpack_small,
     _user_tag,
+    _WindowsEndpoint,
+)
+from goggles._core.transport._endpoints import (
+    _HANDSHAKE_TIMEOUT_S,
+    _MAX_TOKEN_BYTES,
+    _TOKEN_LEN_FMT,
 )
 
 
@@ -1278,6 +1285,304 @@ def test_unix_socket_is_owner_only(socket_path: str) -> None:
         # Under a restrictive umask we expect exactly 0o600; tolerate
         # environments that narrow it further (0o600 or less-permissive).
         assert mode & 0o077 == 0, f"socket too open: {oct(mode)}"
+    finally:
+        transport.shutdown(timeout=2.0)
+
+
+# ---------------------------------------------------------------------------
+# Windows TCP loopback endpoint: per-host token isolation
+#
+# Driven directly against ``_WindowsEndpoint`` so the AF_INET path is
+# exercised on every CI platform, not just Windows.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def windows_discovery_path(tmp_path: Path) -> Iterator[str]:
+    """Allocate a discovery-file path for ``_WindowsEndpoint`` tests.
+
+    Args:
+        tmp_path: pytest's per-test temporary directory.
+
+    Yields:
+        str: Absolute path to use as the sidecar discovery file.
+    """
+    path = str(tmp_path / "goggles-win.sock")
+    try:
+        yield path
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+
+
+def _read_discovery_file(path: str) -> dict[str, object]:
+    """Parse the sidecar discovery file written by ``_WindowsEndpoint.bind``.
+
+    Args:
+        path: Discovery file path.
+
+    Returns:
+        Parsed JSON object as a dict.
+    """
+    import json  # noqa: PLC0415
+
+    with open(path, encoding="utf-8") as f:
+        return cast(dict[str, object], json.load(f))
+
+
+def test_windows_endpoint_bind_writes_port_and_token(
+    windows_discovery_path: str,
+) -> None:
+    """``bind`` must write a discovery file with both port and token.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
+    server, secret = _WindowsEndpoint.bind(windows_discovery_path)
+    try:
+        assert secret is not None and len(secret) >= 16, (
+            "secret must be substantial (>=128 bits)"
+        )
+        info = _read_discovery_file(windows_discovery_path)
+        assert isinstance(info["port"], int) and 0 < int(info["port"]) < 65536
+        assert isinstance(info["token"], str)
+        assert bytes.fromhex(cast(str, info["token"])) == secret
+    finally:
+        server.close()
+
+
+def test_windows_endpoint_bind_mints_distinct_secrets(
+    tmp_path: Path,
+) -> None:
+    """Each ``bind`` call must mint a fresh secret.
+
+    Args:
+        tmp_path: pytest's per-test temporary directory.
+    """
+    p1 = str(tmp_path / "a.sock")
+    p2 = str(tmp_path / "b.sock")
+    s1, sec1 = _WindowsEndpoint.bind(p1)
+    s2, sec2 = _WindowsEndpoint.bind(p2)
+    try:
+        assert sec1 is not None and sec2 is not None
+        assert sec1 != sec2, "per-host secret must not repeat across binds"
+    finally:
+        s1.close()
+        s2.close()
+
+
+def test_windows_endpoint_connect_then_authorize_roundtrip(
+    windows_discovery_path: str,
+) -> None:
+    """A client built by ``connect`` must satisfy ``authorize`` on accept.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
+    server, secret = _WindowsEndpoint.bind(windows_discovery_path)
+    try:
+        client = _WindowsEndpoint.connect(windows_discovery_path, timeout=2.0)
+        assert client is not None, "connect should succeed against live host"
+        try:
+            conn, _ = server.accept()
+            try:
+                assert _WindowsEndpoint.authorize(conn, secret), (
+                    "authentic client must be authorized"
+                )
+            finally:
+                conn.close()
+        finally:
+            client.close()
+    finally:
+        server.close()
+
+
+def test_windows_endpoint_authorize_rejects_missing_token(
+    windows_discovery_path: str,
+) -> None:
+    """A bare TCP client that never sends a token must be rejected.
+
+    Mirrors a hostile local user that does ``socket.connect((host, port))``
+    and waits for the host to ``pickle.loads`` whatever they send next.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
+    server, secret = _WindowsEndpoint.bind(windows_discovery_path)
+    try:
+        addr = server.getsockname()
+        rogue = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rogue.connect(addr)
+        try:
+            conn, _ = server.accept()
+            t0 = time.monotonic()
+            try:
+                allowed = _WindowsEndpoint.authorize(conn, secret)
+            finally:
+                conn.close()
+            elapsed = time.monotonic() - t0
+            assert not allowed, "silent client must not be authorized"
+            assert elapsed < _HANDSHAKE_TIMEOUT_S + 1.0, (
+                f"authorize should bound wait to handshake timeout, "
+                f"took {elapsed:.2f}s"
+            )
+        finally:
+            rogue.close()
+    finally:
+        server.close()
+
+
+def test_windows_endpoint_authorize_rejects_wrong_token(
+    windows_discovery_path: str,
+) -> None:
+    """Sending a token the host did not mint must be rejected.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
+    server, secret = _WindowsEndpoint.bind(windows_discovery_path)
+    try:
+        addr = server.getsockname()
+        rogue = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rogue.connect(addr)
+        try:
+            bogus = b"\x00" * len(secret if secret else b"")
+            rogue.sendall(struct.pack(_TOKEN_LEN_FMT, len(bogus)) + bogus)
+            conn, _ = server.accept()
+            try:
+                assert not _WindowsEndpoint.authorize(conn, secret), (
+                    "client presenting a different token must be rejected"
+                )
+            finally:
+                conn.close()
+        finally:
+            rogue.close()
+    finally:
+        server.close()
+
+
+def test_windows_endpoint_authorize_rejects_oversized_length(
+    windows_discovery_path: str,
+) -> None:
+    """A length prefix above the cap must be rejected before allocation.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
+    server, secret = _WindowsEndpoint.bind(windows_discovery_path)
+    try:
+        addr = server.getsockname()
+        rogue = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rogue.connect(addr)
+        try:
+            rogue.sendall(struct.pack(_TOKEN_LEN_FMT, _MAX_TOKEN_BYTES + 1))
+            conn, _ = server.accept()
+            try:
+                assert not _WindowsEndpoint.authorize(conn, secret), (
+                    "oversized token length must be rejected"
+                )
+            finally:
+                conn.close()
+        finally:
+            rogue.close()
+    finally:
+        server.close()
+
+
+def test_windows_endpoint_authorize_refuses_when_secret_missing(
+    windows_discovery_path: str,
+) -> None:
+    """``authorize`` must fail closed if no secret was set up by bind.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
+    server, _secret = _WindowsEndpoint.bind(windows_discovery_path)
+    try:
+        addr = server.getsockname()
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect(addr)
+        try:
+            conn, _ = server.accept()
+            try:
+                assert not _WindowsEndpoint.authorize(conn, None), (
+                    "missing secret must fail closed, not allow the peer"
+                )
+            finally:
+                conn.close()
+        finally:
+            client.close()
+    finally:
+        server.close()
+
+
+def test_windows_endpoint_read_discovery_rejects_legacy_format(
+    windows_discovery_path: str,
+) -> None:
+    """A bare-port discovery file (legacy) must not satisfy ``connect``.
+
+    A legacy file lacks the token, so a host built against the new
+    contract cannot authenticate the client; ``connect`` must therefore
+    refuse to act on the file rather than silently produce a socket
+    that will be dropped by the host.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
+    Path(windows_discovery_path).write_text("12345", encoding="utf-8")
+    sock = _WindowsEndpoint.connect(windows_discovery_path, timeout=0.2)
+    assert sock is None, "legacy single-port discovery file must be rejected"
+
+
+def test_windows_endpoint_local_transport_rejects_unauthenticated_client(
+    windows_discovery_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: a raw TCP client cannot push events into a Windows host.
+
+    Forces ``LocalTransport`` to use the Windows endpoint (and the
+    Windows connect-then-bind ordering) on every platform so the
+    handshake path is exercised in CI.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+        monkeypatch: pytest's monkeypatch fixture for forcing the
+            Windows code path on non-Windows hosts.
+    """
+    monkeypatch.setattr("goggles._core.transport._local._IS_WINDOWS", True)
+    monkeypatch.setattr(
+        "goggles._core.transport._local._endpoint",
+        lambda: _WindowsEndpoint,
+    )
+
+    gg.register_handler(_CollectingHandler)
+    transport = LocalTransport(socket_path=windows_discovery_path)
+    try:
+        assert transport.is_host
+        collector = _CollectingHandler()
+        _install_collector(transport, collector)
+
+        info = _read_discovery_file(windows_discovery_path)
+        port = int(cast(int, info["port"]))
+
+        rogue = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rogue.settimeout(2.0)
+        rogue.connect(("127.0.0.1", port))
+        try:
+            event = Event(
+                kind="log",
+                scope="global",
+                payload="injected",
+                filepath="rogue.py",
+                lineno=1,
+            )
+            with contextlib.suppress(OSError):
+                rogue.sendall(bytes(_pack_small_frame(event)))
+            time.sleep(_HANDSHAKE_TIMEOUT_S + 0.5)
+            assert collector.events == [], (
+                "host must drop frames from a peer that skipped the handshake"
+            )
+        finally:
+            rogue.close()
     finally:
         transport.shutdown(timeout=2.0)
 
