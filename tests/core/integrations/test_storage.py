@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -115,7 +116,7 @@ def test_save_image_to_file_calls_helper(mock_save, tmp_handler):
         "extra.name": "img_name",
     }
     updated = tmp_handler._save_image_to_file(event)
-    assert "images/img_name.png" in updated["payload"], (
+    assert os.path.join("images", "img_name.png") in updated["payload"], (
         "Image payload should contain relative path to saved png"
     )
     mock_save.assert_called_once()
@@ -130,7 +131,7 @@ def test_save_video_to_file_mp4(mock_save, tmp_handler):
         "extra.fps": 5.0,
     }
     updated = tmp_handler._save_video_to_file(event)
-    assert "videos/vid.mp4" in updated["payload"], (
+    assert os.path.join("videos", "vid.mp4") in updated["payload"], (
         "Video payload should contain relative path to saved mp4"
     )
     mock_save.assert_called_once()
@@ -146,7 +147,7 @@ def test_save_video_to_file_gif(mock_save, tmp_handler):
         "extra.loop": 1,
     }
     updated = tmp_handler._save_video_to_file(event)
-    assert "videos/anim.gif" in updated["payload"], (
+    assert os.path.join("videos", "anim.gif") in updated["payload"], (
         "Video payload should contain relative path to saved gif"
     )
     mock_save.assert_called_once()

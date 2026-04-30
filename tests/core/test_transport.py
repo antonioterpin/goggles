@@ -672,7 +672,16 @@ def test_client_numpy_payload_roundtrip(socket_path: str) -> None:
     ("shm_threshold", "path_label"),
     [
         (10**9, "SMALL inline pickle"),
-        (1024, "LARGE shared memory"),
+        pytest.param(
+            1024,
+            "LARGE shared memory",
+            marks=pytest.mark.skipif(
+                _IS_WINDOWS,
+                reason=(
+                    "SHM side-channel doesn't work on Windows; tracked in #182."
+                ),
+            ),
+        ),
     ],
 )
 def test_client_numpy_payload_is_snapshotted_before_mutation(
@@ -729,6 +738,10 @@ def test_client_numpy_payload_is_snapshotted_before_mutation(
         host.shutdown(timeout=2.0)
 
 
+@pytest.mark.skipif(
+    _IS_WINDOWS,
+    reason="SHM side-channel doesn't work on Windows; tracked in #182.",
+)
 def test_shm_side_channel_for_large_payload(socket_path: str) -> None:
     host = LocalTransport(socket_path=socket_path, shm_threshold=1024)
     try:
@@ -948,6 +961,10 @@ def test_shutdown_flushes_pending_events(socket_path: str) -> None:
         host.shutdown(timeout=5.0)
 
 
+@pytest.mark.skipif(
+    _IS_WINDOWS,
+    reason="SHM side-channel doesn't work on Windows; tracked in #182.",
+)
 def test_shutdown_flushes_shm_frames(socket_path: str) -> None:
     """LARGE frames must also flush on graceful shutdown (no shm leak).
 
@@ -1046,9 +1063,7 @@ class _SlowHandler:
         return cls()
 
 
-def _install_handler(
-    transport: LocalTransport, handler: _SlowHandler
-) -> None:
+def _install_handler(transport: LocalTransport, handler: _SlowHandler) -> None:
     """Install ``handler`` directly into ``transport``'s host bus.
 
     Args:
@@ -1824,6 +1839,10 @@ def test_next_shm_name_is_unique_and_prefixed() -> None:
     assert a != b, f"_next_shm_name() must return unique names, got {a!r} twice"
 
 
+@pytest.mark.skipif(
+    _IS_WINDOWS,
+    reason="SHM side-channel doesn't work on Windows; tracked in #182.",
+)
 def test_pack_unpack_large_roundtrip_and_unlinks_shm() -> None:
     """LARGE frame metadata should preserve Event fields and reap shm."""
     arr = np.arange(10 * 10, dtype=np.float32).reshape(10, 10)
