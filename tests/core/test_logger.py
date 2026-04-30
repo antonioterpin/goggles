@@ -174,12 +174,21 @@ def test_push_promotes_image_shaped_ndarrays(
     img = np.zeros(shape, dtype=np.uint8)
     goggles_logger.push({"fig": img}, step=3)
     kinds = [c.args[0].kind for c in patch_bus.emit.call_args_list]
-    assert kinds == ["image"]
+    assert kinds == ["image"], (
+        f"Image-shaped ndarray should emit a single image event; "
+        f"got kinds={kinds}"
+    )
     event = patch_bus.emit.call_args_list[0].args[0]
     np.testing.assert_array_equal(event.payload, img)
-    assert event.extra["name"] == "fig"
-    assert event.extra["format"] == "png"
-    assert event.step == 3
+    assert event.extra["name"] == "fig", (
+        f"Image event extra['name'] should be 'fig', "
+        f"got {event.extra.get('name')!r}"
+    )
+    assert event.extra["format"] == "png", (
+        f"Image event extra['format'] should be 'png', "
+        f"got {event.extra.get('format')!r}"
+    )
+    assert event.step == 3, f"Image event step should be 3, got {event.step}"
 
 
 def test_push_keeps_1d_ndarray_as_metric(
@@ -194,7 +203,9 @@ def test_push_keeps_1d_ndarray_as_metric(
     vec = np.arange(4, dtype=np.float32)
     goggles_logger.push({"v": vec}, step=1)
     event = patch_bus.emit.call_args[0][0]
-    assert event.kind == "metric"
+    assert event.kind == "metric", (
+        f"1-D ndarray should stay as a metric, got kind={event.kind!r}"
+    )
     np.testing.assert_array_equal(event.payload["v"], vec)
 
 
@@ -214,17 +225,33 @@ def test_push_mixes_scalars_and_images(
     )
     events = [c.args[0] for c in patch_bus.emit.call_args_list]
     kinds = [e.kind for e in events]
-    assert kinds.count("metric") == 1
-    assert kinds.count("image") == 2
+    assert kinds.count("metric") == 1, (
+        f"Mixed dict should emit exactly one metric event, got kinds={kinds}"
+    )
+    assert kinds.count("image") == 2, (
+        f"Mixed dict with two images should emit two image events, "
+        f"got kinds={kinds}"
+    )
 
     metric_event = next(e for e in events if e.kind == "metric")
-    assert metric_event.payload == {"loss": 0.1, "acc": 0.9}
-    assert metric_event.step == 5
+    assert metric_event.payload == {"loss": 0.1, "acc": 0.9}, (
+        f"Metric event payload should contain only the scalars, "
+        f"got {metric_event.payload!r}"
+    )
+    assert metric_event.step == 5, (
+        f"Metric event step should be 5, got {metric_event.step}"
+    )
 
     image_names = [e.extra["name"] for e in events if e.kind == "image"]
-    assert sorted(image_names) == ["fig1", "fig2"]
+    assert sorted(image_names) == ["fig1", "fig2"], (
+        f"Image events should be named after their dict keys, "
+        f"got {sorted(image_names)}"
+    )
     for e in events:
-        assert e.step == 5
+        assert e.step == 5, (
+            f"Every event from a single push() must share the step; "
+            f"got step={e.step} for kind={e.kind!r}"
+        )
 
 
 def test_push_image_only_does_not_emit_empty_metric_event(
@@ -239,7 +266,10 @@ def test_push_image_only_does_not_emit_empty_metric_event(
     img = np.zeros((4, 4), dtype=np.uint8)
     goggles_logger.push({"fig": img}, step=2)
     kinds = [c.args[0].kind for c in patch_bus.emit.call_args_list]
-    assert "metric" not in kinds
+    assert "metric" not in kinds, (
+        f"Image-only push() must not emit an empty metric event; "
+        f"got kinds={kinds}"
+    )
 
 
 def test_push_forwards_extras_to_image_events(
@@ -254,8 +284,12 @@ def test_push_forwards_extras_to_image_events(
     img = np.zeros((4, 4), dtype=np.uint8)
     goggles_logger.push({"fig": img}, step=2, split="train")
     event = patch_bus.emit.call_args[0][0]
-    assert event.kind == "image"
-    assert event.extra["split"] == "train"
+    assert event.kind == "image", (
+        f"Promoted event should be an image event, got kind={event.kind!r}"
+    )
+    assert event.extra["split"] == "train", (
+        f"Image event should carry the 'split' extra, got extra={event.extra!r}"
+    )
 
 
 def test_scalar_emits_metric_event(
@@ -326,13 +360,16 @@ def test_histogram_adds_name_and_payload(
         goggles_logger: ``CoreGogglesLogger`` fixture.
         patch_bus: Patched mock client fixture.
     """
-    goggles_logger.histogram([1, 2, 3], name="hist", step=1)
+    payload = np.array([1, 2, 3])
+    goggles_logger.histogram(payload, name="hist", step=1)
     event = patch_bus.emit.call_args[0][0]
     assert event.kind == "histogram", "Event kind should be 'histogram'"
     assert event.extra["name"] == "hist", (
         "Event extra 'name' mismatch for histogram"
     )
-    assert event.payload == [1, 2, 3], "Event payload mismatch for histogram"
+    np.testing.assert_array_equal(
+        event.payload, payload, "Event payload mismatch for histogram"
+    )
 
 
 def test_sync_mode_uses_emit_sync(patch_bus: MagicMock) -> None:
@@ -372,7 +409,10 @@ def test_default_level_emits_all_severities(
     """
     for method in ("debug", "info", "warning", "error", "critical"):
         getattr(text_logger, method)("x")
-    assert patch_bus.emit.call_count == 5
+    assert patch_bus.emit.call_count == 5, (
+        f"Default NOTSET gate should let all 5 severities through, "
+        f"got {patch_bus.emit.call_count}"
+    )
 
 
 def test_set_level_drops_below_threshold(patch_bus: MagicMock) -> None:
@@ -385,11 +425,17 @@ def test_set_level_drops_below_threshold(patch_bus: MagicMock) -> None:
     logger.set_level(logging.INFO)
 
     logger.debug("drop")
-    assert patch_bus.emit.call_count == 0
+    assert patch_bus.emit.call_count == 0, (
+        f"DEBUG must be dropped at level=INFO, got {patch_bus.emit.call_count} "
+        f"emit(s)"
+    )
 
     logger.info("keep")
     logger.warning("keep")
-    assert patch_bus.emit.call_count == 2
+    assert patch_bus.emit.call_count == 2, (
+        f"INFO + WARNING should both pass at level=INFO, "
+        f"got {patch_bus.emit.call_count} emit(s)"
+    )
 
 
 def test_set_level_warning_drops_info_and_debug(
@@ -405,12 +451,18 @@ def test_set_level_warning_drops_info_and_debug(
 
     logger.debug("drop")
     logger.info("drop")
-    assert patch_bus.emit.call_count == 0
+    assert patch_bus.emit.call_count == 0, (
+        f"DEBUG and INFO must be dropped at level=WARNING, "
+        f"got {patch_bus.emit.call_count} emit(s)"
+    )
 
     logger.warning("keep")
     logger.error("keep")
     logger.critical("keep")
-    assert patch_bus.emit.call_count == 3
+    assert patch_bus.emit.call_count == 3, (
+        f"WARNING, ERROR, CRITICAL should all pass at level=WARNING, "
+        f"got {patch_bus.emit.call_count} emit(s)"
+    )
 
 
 def test_level_via_constructor(patch_bus: MagicMock) -> None:
@@ -422,7 +474,10 @@ def test_level_via_constructor(patch_bus: MagicMock) -> None:
     logger = CoreTextLogger(name="t", scope="global", level=logging.WARNING)
     logger.info("drop")
     logger.warning("keep")
-    assert patch_bus.emit.call_count == 1
+    assert patch_bus.emit.call_count == 1, (
+        f"Constructor-time level=WARNING should drop INFO and keep WARNING, "
+        f"got {patch_bus.emit.call_count} emit(s)"
+    )
 
 
 def test_bind_preserves_level(patch_bus: MagicMock) -> None:
@@ -435,7 +490,10 @@ def test_bind_preserves_level(patch_bus: MagicMock) -> None:
     child = logger.bind(scope="run", k=1)
     child.info("drop")
     child.warning("keep")
-    assert patch_bus.emit.call_count == 1
+    assert patch_bus.emit.call_count == 1, (
+        "bind() must inherit parent's WARNING level "
+        f"(drop INFO, keep WARNING), got {patch_bus.emit.call_count} emit(s)"
+    )
 
 
 def test_set_level_is_logger_local(patch_bus: MagicMock) -> None:
@@ -451,7 +509,10 @@ def test_set_level_is_logger_local(patch_bus: MagicMock) -> None:
 
     quiet.debug("drop")
     loud.debug("keep")
-    assert patch_bus.emit.call_count == 1
+    assert patch_bus.emit.call_count == 1, (
+        f"set_level on 'quiet' must not affect 'loud'; "
+        f"expected 1 emit, got {patch_bus.emit.call_count}"
+    )
 
 
 def test_get_logger_level_kwarg(patch_bus: MagicMock) -> None:
@@ -465,4 +526,7 @@ def test_get_logger_level_kwarg(patch_bus: MagicMock) -> None:
     logger = gg.get_logger("x", level=logging.WARNING)
     logger.info("drop")
     logger.warning("keep")
-    assert patch_bus.emit.call_count == 1
+    assert patch_bus.emit.call_count == 1, (
+        f"get_logger(level=WARNING) should drop INFO and keep WARNING, "
+        f"got {patch_bus.emit.call_count} emit(s)"
+    )

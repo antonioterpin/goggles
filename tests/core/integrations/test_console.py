@@ -218,7 +218,11 @@ def test_to_from_dict_roundtrip(tmp_path):
 
 
 def test_handle_warns_on_backward_step_but_still_emits(handler):
-    """Console emits the message even when the step regresses, with a warning."""
+    """Console still emits the message on a backward step, plus a warning.
+
+    Args:
+        handler: ``ConsoleHandler`` fixture.
+    """
     e1 = DummyEvent(
         kind="log",
         payload="first",
@@ -246,7 +250,9 @@ def test_handle_warns_on_backward_step_but_still_emits(handler):
     finally:
         handler._logger.removeHandler(collector)
     output = " ".join(messages)
-    assert "first" in output
+    assert "first" in output, (
+        f"First payload should be in console output, got: {output!r}"
+    )
     assert "second-backward" in output, (
         "console handler must keep emitting even when step regresses"
     )
@@ -256,7 +262,11 @@ def test_handle_warns_on_backward_step_but_still_emits(handler):
 
 
 def test_handle_does_not_warn_when_step_is_none(handler):
-    """Events without a step never trip the guard."""
+    """Events without a step never trip the guard.
+
+    Args:
+        handler: ``ConsoleHandler`` fixture.
+    """
     e = DummyEvent(
         kind="log",
         payload="no-step",
@@ -272,4 +282,7 @@ def test_handle_does_not_warn_when_step_is_none(handler):
         handler.handle(e)
     finally:
         handler._logger.removeHandler(collector)
-    assert not any("out-of-order" in m.lower() for m in messages)
+    assert not any("out-of-order" in m.lower() for m in messages), (
+        f"step=None should not trip the guard, "
+        f"but got out-of-order warnings: {messages!r}"
+    )

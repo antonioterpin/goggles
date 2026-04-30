@@ -91,6 +91,7 @@ pythonpath = ["goggles"]
 markers = [
         "resilience: marks tests as resilience tests (slow, disruptive)",
         "xdist_group: ensures tests run in the same group (serial execution within group)",
+        "slow: marks tests that exercise external integrations (e.g. wandb offline mode)",
 ]
 filterwarnings = [
         "error",

@@ -8,9 +8,9 @@ from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
 import plotly.graph_objects as go
+import wandb
 from typing_extensions import Self
 
-import wandb
 from goggles.media import create_numpy_vector_field_visualization
 from goggles.types import Kind
 
@@ -214,6 +214,7 @@ class WandBHandler:
         run_name: str | None = None,
         config: Mapping[str, Any] | None = None,
         group: str | None = None,
+        tags: Sequence[str] | None = None,
         reinit: Reinit = "create_new",
     ) -> None:
         """Initialize the W&B handler.
@@ -223,13 +224,20 @@ class WandBHandler:
             entity: W&B entity (user or team) name.
             run_name: Base name for W&B runs.
             config: Configuration dictionary to log with the run(s).
-            group: W&B group name for runs.
+            group: W&B group name. Use it to keep related runs together
+                in the W&B UI; per-scope runs created by this handler
+                share the same group.
+            tags: W&B tags applied to every run created by this handler.
+                Pass an iterable of strings (e.g. ``["baseline", "v2"]``).
+                A bare string is rejected because W&B would silently
+                iterate it character by character.
             reinit: W&B reinitialization strategy when opening runs.
                 One of:
                 {"finish_previous", "return_previous", "create_new", "default"}.
 
         Raises:
             ValueError: If `reinit` is not a valid option.
+            TypeError: If `tags` is a `str` or contains non-string items.
         """
         self._logger = logging.getLogger(self.name)
         # Ensure that Goggles logs are not propagated to the root logger
@@ -247,9 +255,25 @@ class WandBHandler:
                 f"{', '.join(valid_reinit)}."
             )
 
+        if isinstance(tags, str):
+            raise TypeError(
+                "tags must be a sequence of strings, not a single str. "
+                'Wrap it in a list: tags=["my-tag"].'
+            )
+        normalized_tags: list[str] | None = None
+        if tags is not None:
+            normalized_tags = list(tags)
+            for item in normalized_tags:
+                if not isinstance(item, str):
+                    raise TypeError(
+                        "tags must contain only strings; "
+                        f"got {type(item).__name__}."
+                    )
+
         self._project = project
         self._entity = entity
         self._group = group
+        self._tags: list[str] | None = normalized_tags
         self._base_run_name = run_name
         self._config: dict[str, Any] = (
             dict(config) if config is not None else {}
@@ -259,6 +283,15 @@ class WandBHandler:
         self._wandb_run: Run | None = None
         self._current_scope: str | None = None
         self._step_guard = StepGuard()
+        # Pending writes batched per scope, keyed by step. The W&B cloud
+        # backend treats multiple ``run.log({...}, step=N)`` calls at the
+        # same N as best-effort merges (a panel can register one key but
+        # show "No data available" for sibling keys logged at the same
+        # step — see issue #177). Coalesce same-step events into a single
+        # commit; a step change or ``close()`` flushes the buffer.
+        # ``step is None`` events bypass the buffer to preserve W&B's
+        # auto-increment semantics.
+        self._pending: dict[str, dict[str, Any]] = {}
 
     def can_handle(self, kind: str) -> bool:
         """Return True if the handler supports this event kind.
@@ -338,7 +371,7 @@ class WandBHandler:
             return
         for k, v in extra.items():
             payload[k] = v
-        run.log(payload, step=step)
+        self._stage(run, scope, step, payload)
 
     def _handle_media(
         self,
@@ -373,7 +406,7 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def _build_wandb_video(
         self, name: str, value: Any, extra: Mapping[str, Any]
@@ -454,7 +487,7 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def _handle_vector_field(
         self,
@@ -506,7 +539,7 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def _handle_trajectories(
         self,
@@ -543,10 +576,12 @@ class WandBHandler:
         for k, v in extra.items():
             logs[k] = v
         if logs:
-            run.log(logs, step=step)
+            self._stage(run, scope, step, logs)
 
     def close(self) -> None:
         """Finish all active W&B runs."""
+        for scope in list(self._pending.keys()):
+            self._flush_pending(scope)
         for run in list(self._runs.values()):
             if run is not None:
                 try:
@@ -554,6 +589,7 @@ class WandBHandler:
                 except Exception as exc:
                     self._logger.warning("Failed to finish W&B run: %s", exc)
         self._runs.clear()
+        self._pending.clear()
         self._wandb_run = None
         self._current_scope = None
 
@@ -572,6 +608,7 @@ class WandBHandler:
                 "config": self._config,
                 "reinit": self._reinit,
                 "group": self._group,
+                "tags": list(self._tags) if self._tags is not None else None,
             },
         }
 
@@ -592,7 +629,59 @@ class WandBHandler:
             config=serialized.get("config"),
             reinit=serialized.get("reinit", "create_new"),
             group=serialized.get("group"),
+            tags=serialized.get("tags"),
         )
+
+    def _stage(
+        self,
+        run: Run,
+        scope: str,
+        step: int | None,
+        logs: Mapping[str, Any],
+    ) -> None:
+        """Buffer a log payload for ``scope`` at ``step``.
+
+        Same-step events are merged into a single ``run.log`` commit; a
+        step change flushes the previous buffer first. ``step is None``
+        bypasses the buffer entirely so W&B's auto-increment semantics
+        are preserved for callers that don't pin a step.
+
+        Args:
+            run: The W&B run for ``scope`` (already created).
+            scope: The scope being logged under.
+            step: User-supplied step, or None for auto-increment.
+            logs: Mapping of keys to values to merge into the commit.
+        """
+        if step is None:
+            self._flush_pending(scope)
+            run.log(dict(logs))
+            return
+        pending = self._pending.get(scope)
+        if pending is None:
+            pending = {"step": step, "logs": {}}
+            self._pending[scope] = pending
+        elif pending["step"] != step:
+            self._flush_pending(scope)
+            pending = self._pending.setdefault(
+                scope, {"step": step, "logs": {}}
+            )
+            pending["step"] = step
+        pending["logs"].update(logs)
+
+    def _flush_pending(self, scope: str) -> None:
+        """Commit any pending logs for ``scope`` in one ``run.log`` call.
+
+        Args:
+            scope: The scope whose pending buffer should be flushed.
+        """
+        pending = self._pending.get(scope)
+        if not pending or not pending["logs"]:
+            return
+        run = self._runs.get(scope)
+        if run is not None:
+            run.log(pending["logs"], step=pending["step"])
+        pending["logs"] = {}
+        pending["step"] = None
 
     def _get_or_create_run(self, scope: str, extra_config: dict) -> Run:
         """Get or create a W&B run for the given scope.
@@ -619,6 +708,7 @@ class WandBHandler:
             name=name,
             config={**self._config, "scope": scope, **extra_config},
             group=self._group,
+            tags=list(self._tags) if self._tags is not None else None,
             reinit=self._reinit,
         )
         self._runs[scope] = run

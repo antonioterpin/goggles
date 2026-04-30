@@ -1,9 +1,14 @@
+import glob
 import logging
+import os
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+from wandb.proto import wandb_internal_pb2 as pb
+from wandb.sdk.internal.datastore import DataStore
 
 import goggles._core.integrations.wandb as wandb_module
 from goggles._core.integrations.wandb import WandBHandler
@@ -104,6 +109,81 @@ def test_get_or_create_run_creates_new(mock_wandb):
     )
 
 
+def test_get_or_create_run_forwards_group_and_tags(mock_wandb):
+    """``group`` and ``tags`` from __init__ reach the wandb.init call.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(
+        project="proj",
+        run_name="base",
+        group="cohort-a",
+        tags=("baseline", "ablation"),
+    )
+    h._get_or_create_run("global", extra_config={})
+
+    init_kwargs = mock_wandb.init.call_args.kwargs
+    assert init_kwargs["group"] == "cohort-a", (
+        "group passed at init should reach wandb.init"
+    )
+    assert list(init_kwargs["tags"]) == ["baseline", "ablation"], (
+        "tags passed at init should reach wandb.init as a list"
+    )
+
+
+def test_get_or_create_run_omits_tags_when_unset(mock_wandb):
+    """``tags`` defaults to None — not an empty list — at the wandb.init call.
+
+    Lets callers/W&B distinguish "no tags configured" from "explicitly empty".
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="proj", run_name="base")
+    h._get_or_create_run("global", extra_config={})
+
+    assert mock_wandb.init.call_args.kwargs["tags"] is None
+
+
+def test_tags_roundtrip_through_to_dict(mock_wandb):
+    """``group`` and ``tags`` survive to_dict/from_dict serialization.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(
+        project="proj",
+        run_name="base",
+        group="cohort-a",
+        tags=["baseline"],
+    )
+    serialized = h.to_dict()["data"]
+    assert serialized["group"] == "cohort-a"
+    assert serialized["tags"] == ["baseline"]
+
+    restored = WandBHandler.from_dict(serialized)
+    restored._get_or_create_run("global", extra_config={})
+    init_kwargs = mock_wandb.init.call_args.kwargs
+    assert init_kwargs["group"] == "cohort-a"
+    assert list(init_kwargs["tags"]) == ["baseline"]
+
+
+def test_tags_must_be_sequence_of_strings(mock_wandb):
+    """Bare ``str`` and non-string items are rejected at construction.
+
+    A ``str`` matches ``Sequence[str]`` under the type system but would
+    iterate character by character at runtime, so we reject it explicitly.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    with pytest.raises(TypeError, match="tags"):
+        WandBHandler(project="proj", tags="single-tag")
+    with pytest.raises(TypeError, match="tags"):
+        WandBHandler(project="proj", tags=[1, 2])  # pyright: ignore[reportArgumentType]
+
+
 def test_handle_artifact_uploads_file(mock_wandb, tmp_path):
     artifact_file = tmp_path / "random_artifact.npy"
     artifact_file.write_bytes(b"dummy")
@@ -178,6 +258,8 @@ def test_handle_vector_field_logs_image(mock_wandb, monkeypatch):
     )
 
     h.handle(event)
+    # Same-step events are buffered until a step change or close(); flush.
+    h.close()
 
     run = mock_wandb.init.return_value
     render_mock.assert_called_once_with(
@@ -218,6 +300,8 @@ def test_handle_trajectories_logs_plotly(mock_wandb, monkeypatch, dim):
     )
 
     h.handle(event)
+    # Same-step events are buffered until a step change or close(); flush.
+    h.close()
 
     render_mock.assert_called_once()
     np.testing.assert_array_equal(render_mock.call_args[0][0], payload)
@@ -400,6 +484,8 @@ def test_handle_drops_backward_step_with_warning(mock_wandb):
     try:
         h.handle(e1)
         h.handle(e2)
+        # Flush the pending step=10 buffer to assert against its single commit.
+        h.close()
     finally:
         h._logger.removeHandler(collector)
 
@@ -417,15 +503,32 @@ def test_handle_drops_backward_step_with_warning(mock_wandb):
 
 
 def test_handle_allows_equal_and_forward_steps(mock_wandb):
-    """Equal and forward steps within the same scope are forwarded to wandb."""
+    """Same-step events coalesce into one commit; step changes flush.
+
+    Logging at step 3, 3, 4 and then closing yields exactly two commits:
+    one merged ``{a, b}`` row at step=3 and one ``{c}`` row at step=4.
+    Coalescing same-step writes into a single ``run.log`` is the fix for
+    issue #177 (W&B not displaying logged data on same-step keys).
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
     h = WandBHandler(project="proj")
     h.handle(make_event(kind="metric", payload={"a": 1}, step=3))
     h.handle(make_event(kind="metric", payload={"b": 2}, step=3))  # equal
     h.handle(make_event(kind="metric", payload={"c": 3}, step=4))  # forward
+    h.close()  # flush pending step=4
 
     run = mock_wandb.init.return_value
-    assert run.log.call_count == 3, (
-        f"Expected 3 wandb.log calls; saw {run.log.call_count}"
+    assert run.log.call_count == 2, (
+        f"Expected 2 wandb.log calls (one per step); saw {run.log.call_count}"
+    )
+    calls = [(c.args[0], c.kwargs.get("step")) for c in run.log.call_args_list]
+    assert calls[0] == ({"a": 1, "b": 2}, 3), (
+        f"step=3 commit should batch keys 'a' and 'b'; got {calls[0]}"
+    )
+    assert calls[1] == ({"c": 3}, 4), (
+        f"step=4 commit should carry only 'c'; got {calls[1]}"
     )
 
 
@@ -437,6 +540,7 @@ def test_handle_tracks_step_per_scope(mock_wandb):
     )
     # Lower step on a different scope must still be forwarded.
     h.handle(make_event(kind="metric", payload={"x": 2}, scope="eval", step=1))
+    h.close()  # flush both per-scope buffers
 
     # mock_wandb.init returns the same MagicMock for every scope, so both
     # scopes share the same .log mock; assert on total calls instead.
@@ -480,3 +584,207 @@ def test_handle_artifact_bypasses_step_guard(mock_wandb, tmp_path):
     # mock.assert_called_once() raises with its own diagnostic on failure;
     # this asserts the artifact was uploaded despite step < scope max.
     mock_wandb.Artifact.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for issue #177 — W&B not displaying logged data.
+#
+# Same-step ``run.log`` calls were unreliable on the W&B cloud backend: a
+# panel could register one key but show "No data available" for sibling
+# keys logged at the same step. The fix coalesces same-step events into a
+# single commit per (scope, step).
+# ---------------------------------------------------------------------------
+
+
+def test_same_step_events_batch_into_single_log_call(
+    mock_wandb: MagicMock,
+) -> None:
+    """Three events at step=100 produce one ``run.log`` once step changes.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="p")
+    img1 = np.zeros((4, 4, 3), dtype=np.uint8)
+    img2 = np.zeros((4, 4, 4), dtype=np.uint8)
+    h.handle(
+        SimpleNamespace(
+            kind="image",
+            scope="global",
+            payload=img1,
+            step=100,
+            extra={"name": "RGB"},
+        )
+    )
+    h.handle(
+        SimpleNamespace(
+            kind="image",
+            scope="global",
+            payload=img2,
+            step=100,
+            extra={"name": "RGBA"},
+        )
+    )
+    h.handle(make_event(kind="metric", payload={"acc": 0.9}, step=100))
+
+    run = mock_wandb.init.return_value
+    run.log.assert_not_called()  # all three are buffered at step=100
+
+    # Step change forces a single batched commit for the previous step.
+    h.handle(make_event(kind="metric", payload={"acc": 0.95}, step=101))
+    assert run.log.call_count == 1, (
+        "Same-step events must batch into ONE run.log call"
+    )
+    logged, kwargs = run.log.call_args.args[0], run.log.call_args.kwargs
+    assert kwargs["step"] == 100
+    got = sorted(logged)
+    assert set(logged.keys()) == {"RGB", "RGBA", "acc"}, (
+        f"All same-step keys must land in the single commit; got {got}"
+    )
+
+
+def test_close_flushes_pending_buffer(mock_wandb: MagicMock) -> None:
+    """``close()`` flushes the pending step before finishing the run.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="p")
+    h.handle(make_event(kind="metric", payload={"loss": 0.1}, step=42))
+    run = mock_wandb.init.return_value
+    run.log.assert_not_called()  # buffered, not yet committed
+
+    h.close()
+    run.log.assert_called_once_with({"loss": 0.1}, step=42)
+    run.finish.assert_called()
+
+
+def test_step_none_bypasses_buffer_to_preserve_autoincrement(
+    mock_wandb: MagicMock,
+) -> None:
+    """``step=None`` flushes any pending buffer and commits immediately.
+
+    Wandb auto-increments the internal step for step-less ``run.log`` calls,
+    so callers relying on auto-increment must not see those events
+    coalesced into a single row.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="p")
+    h.handle(make_event(kind="metric", payload={"a": 1}, step=5))
+    h.handle(make_event(kind="metric", payload={"b": 2}, step=None))
+    h.handle(make_event(kind="metric", payload={"c": 3}, step=None))
+
+    run = mock_wandb.init.return_value
+    # 1 flush of step=5 + 2 immediate step-less commits == 3 calls.
+    assert run.log.call_count == 3
+    seen = [(c.args[0], c.kwargs.get("step")) for c in run.log.call_args_list]
+    assert seen[0] == ({"a": 1}, 5)
+    assert (
+        seen[1][0] == {"b": 2}
+        and "step" not in run.log.call_args_list[1].kwargs
+    )
+    assert (
+        seen[2][0] == {"c": 3}
+        and "step" not in run.log.call_args_list[2].kwargs
+    )
+
+
+@pytest.mark.slow
+def test_example_04_logs_all_keys_at_step_100_offline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end smoke against the real wandb client (offline mode).
+
+    Drives the same flow as ``examples/04_wandb.py`` (RGB + RGBA images +
+    video at step=100), then decodes the persisted ``.wandb`` proto and
+    asserts every same-step key lands in the row at ``_step=100``.
+
+    Args:
+        tmp_path: Per-test temporary directory used as ``WANDB_DIR``.
+        monkeypatch: pytest fixture for setting wandb env vars.
+    """
+    monkeypatch.setenv("WANDB_MODE", "offline")
+    monkeypatch.setenv("WANDB_DIR", str(tmp_path))
+    monkeypatch.setenv("WANDB_SILENT", "true")
+
+    h = WandBHandler(project="goggles_example_04_test", run_name="t")
+
+    rgb = np.random.randint(0, 255, (8, 8, 3), dtype=np.uint8)
+    rgba = np.random.randint(0, 255, (8, 8, 4), dtype=np.uint8)
+    vid = np.random.randint(0, 255, (4, 3, 8, 8), dtype=np.uint8)
+
+    for i in range(3):
+        h.handle(make_event(kind="metric", payload={"acc": i}, step=i))
+    h.handle(
+        SimpleNamespace(
+            kind="image",
+            scope="global",
+            payload=rgb,
+            step=100,
+            extra={"name": "Random image"},
+        )
+    )
+    h.handle(
+        SimpleNamespace(
+            kind="image",
+            scope="global",
+            payload=rgba,
+            step=100,
+            extra={"name": "Random RGBA image"},
+        )
+    )
+    h.handle(
+        SimpleNamespace(
+            kind="video",
+            scope="global",
+            payload=vid,
+            step=100,
+            extra={"name": "Random Video", "fps": 5, "format": "mp4"},
+        )
+    )
+    h.handle(make_event(kind="metric", payload={"next": 1}, step=101))
+    h.close()
+
+    matches = [
+        p
+        for p in glob.glob(
+            os.path.join(tmp_path, "**", "*.wandb"), recursive=True
+        )
+        if "latest-run" not in p
+    ]
+    assert matches, f"No .wandb proto under {tmp_path}"
+
+    by_step: dict[int, set[str]] = {}
+    ds = DataStore()
+    ds.open_for_scan(matches[0])
+    while True:
+        rec_data = ds.scan_record()
+        if rec_data is None:
+            break
+        rec = pb.Record()
+        rec.ParseFromString(rec_data[1])
+        kind = rec.WhichOneof("record_type")
+        if kind not in ("history", "partial_history"):
+            continue
+        items = getattr(rec, kind).item
+        step = None
+        keys = set()
+        for it in items:
+            key = it.key or (it.nested_key[0] if it.nested_key else "")
+            if key == "_step":
+                step = int(it.value_json)
+            elif not key.startswith("_"):
+                keys.add(key)
+        if step is not None:
+            by_step.setdefault(step, set()).update(keys)
+
+    assert 100 in by_step, f"step=100 row missing; rows={by_step}"
+    assert {"Random image", "Random RGBA image", "Random Video"} <= by_step[
+        100
+    ], (
+        "All three same-step media keys must land at step=100; "
+        f"got {sorted(by_step[100])}"
+    )

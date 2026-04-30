@@ -12,10 +12,16 @@ Example:
 
 from importlib import import_module
 from importlib.util import find_spec
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .console import ConsoleHandler
 from .storage import LocalStorageHandler
+
+if TYPE_CHECKING:
+    # Static analyzers can't see the runtime __getattr__ + find_spec dance,
+    # so import the symbol unconditionally for type checking. At runtime,
+    # the import is gated on the wandb extra being installed.
+    from .wandb import WandBHandler
 
 __all__: list[str] = [
     "ConsoleHandler",
