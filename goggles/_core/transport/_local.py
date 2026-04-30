@@ -153,6 +153,12 @@ class LocalTransport:
         self._client_sockets_lock = threading.Lock()
         self._drain_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._drain_thread: threading.Thread | None = None
+        # Set during a bounded shutdown after the drain join times out:
+        # the drain loop then discards remaining queued events instead of
+        # forwarding them to handlers. Keeps shutdown semantics honest
+        # (handlers see "nothing more is coming") and stops new
+        # ``handler.handle()`` calls from racing ``handler.close()``.
+        self._drain_aborted = threading.Event()
 
         # Client-side state
         self._client_sock: socket.socket | None = None
@@ -413,6 +419,10 @@ class LocalTransport:
             item = self._drain_queue.get()
             if item is _SENTINEL:
                 return
+            if self._drain_aborted.is_set():
+                # Bounded shutdown timed out: discard the remaining queue
+                # rather than dispatching it concurrently with close().
+                continue
             try:
                 self._bus.emit(item)
             except Exception:
@@ -685,13 +695,23 @@ class LocalTransport:
                 remaining = self._drain_queue.qsize()
                 _log.warning(
                     "goggles host shutdown: drain did not finish within "
-                    "%.1fs; %d events will not reach handlers",
+                    "%.1fs; %d queued events will be discarded",
                     timeout if timeout is not None else -1.0,
                     remaining,
                 )
+                # Tell the loop to stop dispatching; it will drain the
+                # rest of the queue as discards and exit at the SENTINEL.
+                # Wait briefly for that — once dispatch is bypassed the
+                # loop is fast. If the in-flight ``handler.handle()``
+                # call is still running, the thread won't exit until it
+                # returns; that's a race we can't safely interrupt, but
+                # marking the abort first means no further events are
+                # forwarded after this point.
+                self._drain_aborted.set()
+                self._drain_thread.join(timeout=timeout)
 
         try:
-            self._bus.shutdown()
+            self._bus.shutdown(timeout=timeout)
         except Exception:
             _log.exception("EventBus.shutdown raised")
 
