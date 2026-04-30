@@ -1333,7 +1333,11 @@ def _read_discovery_file(path: str) -> dict[str, object]:
 def test_windows_endpoint_bind_writes_port_and_token(
     windows_discovery_path: str,
 ) -> None:
-    """``bind`` must write a discovery file with both port and token."""
+    """``bind`` must write a discovery file with both port and token.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
     server, secret = _WindowsEndpoint.bind(windows_discovery_path)
     try:
         assert secret is not None and len(secret) >= 16, (
@@ -1350,7 +1354,11 @@ def test_windows_endpoint_bind_writes_port_and_token(
 def test_windows_endpoint_bind_mints_distinct_secrets(
     tmp_path: Path,
 ) -> None:
-    """Each ``bind`` call must mint a fresh secret."""
+    """Each ``bind`` call must mint a fresh secret.
+
+    Args:
+        tmp_path: pytest's per-test temporary directory.
+    """
     p1 = str(tmp_path / "a.sock")
     p2 = str(tmp_path / "b.sock")
     s1, sec1 = _WindowsEndpoint.bind(p1)
@@ -1366,7 +1374,11 @@ def test_windows_endpoint_bind_mints_distinct_secrets(
 def test_windows_endpoint_connect_then_authorize_roundtrip(
     windows_discovery_path: str,
 ) -> None:
-    """A client built by ``connect`` must satisfy ``authorize`` on accept."""
+    """A client built by ``connect`` must satisfy ``authorize`` on accept.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
     server, secret = _WindowsEndpoint.bind(windows_discovery_path)
     try:
         client = _WindowsEndpoint.connect(windows_discovery_path, timeout=2.0)
@@ -1392,6 +1404,9 @@ def test_windows_endpoint_authorize_rejects_missing_token(
 
     Mirrors a hostile local user that does ``socket.connect((host, port))``
     and waits for the host to ``pickle.loads`` whatever they send next.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
     """
     server, secret = _WindowsEndpoint.bind(windows_discovery_path)
     try:
@@ -1420,7 +1435,11 @@ def test_windows_endpoint_authorize_rejects_missing_token(
 def test_windows_endpoint_authorize_rejects_wrong_token(
     windows_discovery_path: str,
 ) -> None:
-    """Sending a token the host did not mint must be rejected."""
+    """Sending a token the host did not mint must be rejected.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
     server, secret = _WindowsEndpoint.bind(windows_discovery_path)
     try:
         addr = server.getsockname()
@@ -1445,7 +1464,11 @@ def test_windows_endpoint_authorize_rejects_wrong_token(
 def test_windows_endpoint_authorize_rejects_oversized_length(
     windows_discovery_path: str,
 ) -> None:
-    """A length prefix above the cap must be rejected before allocation."""
+    """A length prefix above the cap must be rejected before allocation.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
     server, secret = _WindowsEndpoint.bind(windows_discovery_path)
     try:
         addr = server.getsockname()
@@ -1469,7 +1492,11 @@ def test_windows_endpoint_authorize_rejects_oversized_length(
 def test_windows_endpoint_authorize_refuses_when_secret_missing(
     windows_discovery_path: str,
 ) -> None:
-    """``authorize`` must fail closed if no secret was set up by bind."""
+    """``authorize`` must fail closed if no secret was set up by bind.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+    """
     server, _secret = _WindowsEndpoint.bind(windows_discovery_path)
     try:
         addr = server.getsockname()
@@ -1498,6 +1525,9 @@ def test_windows_endpoint_read_discovery_rejects_legacy_format(
     contract cannot authenticate the client; ``connect`` must therefore
     refuse to act on the file rather than silently produce a socket
     that will be dropped by the host.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
     """
     Path(windows_discovery_path).write_text("12345", encoding="utf-8")
     sock = _WindowsEndpoint.connect(windows_discovery_path, timeout=0.2)
@@ -1512,6 +1542,11 @@ def test_windows_endpoint_local_transport_rejects_unauthenticated_client(
     Forces ``LocalTransport`` to use the Windows endpoint (and the
     Windows connect-then-bind ordering) on every platform so the
     handshake path is exercised in CI.
+
+    Args:
+        windows_discovery_path: Discovery-file path (via fixture).
+        monkeypatch: pytest's monkeypatch fixture for forcing the
+            Windows code path on non-Windows hosts.
     """
     monkeypatch.setattr("goggles._core.transport._local._IS_WINDOWS", True)
     monkeypatch.setattr(
