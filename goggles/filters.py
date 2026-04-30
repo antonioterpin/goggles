@@ -92,8 +92,8 @@ def get_backend(x: Array) -> ModuleType:
 def _buffer_set(buf: Array, idx: Array, value: Array) -> Array:
     """Set `buf[idx] = value` in a backend-aware way.
 
-    For NumPy, assignment is in-place. For JAX, this uses `.at[idx].set(value)`
-    and returns a new array.
+    Both backends return a fresh buffer object so callers can rely on
+    referential transparency: the input ``buf`` is never mutated.
 
     Args:
         buf: Ring buffer array with leading dimension = window size.
@@ -101,12 +101,12 @@ def _buffer_set(buf: Array, idx: Array, value: Array) -> Array:
         value: Sample to store at `idx`.
 
     Returns:
-        Updated buffer (same object for NumPy, new object for JAX).
+        A new buffer with the write applied.
     """
     if is_jax_array(buf):
         return buf.at[idx].set(value)
 
-    np_buf = np.asarray(buf)
+    np_buf = np.array(buf, copy=True)
     np_buf[int(np.asarray(idx))] = np.asarray(value)
     return np_buf
 
@@ -207,18 +207,23 @@ class Filter(ABC):
             Filtered output array.
 
         Raises:
-            TypeError: If the filter previously saw a different array backend.
+            TypeError: If a stateful filter previously saw a different array
+                backend. Stateless filters (whose ``init_state`` returns
+                ``None``) accept mixed backends.
         """
         cur_is_jax = is_jax_array(data)
-        if self._is_jax is None:
-            self._is_jax = cur_is_jax
-        elif self._is_jax != cur_is_jax:
-            raise TypeError(
-                "Cannot mix NumPy and JAX inputs within the same filter. "
-                "Create separate filter objects per backend."
-            )
         if self._state is None:
             self._state = self.init_state(data)
+
+        if self._state is not None:
+            if self._is_jax is None:
+                self._is_jax = cur_is_jax
+            elif self._is_jax != cur_is_jax:
+                raise TypeError(
+                    "Cannot mix NumPy and JAX inputs within the same filter. "
+                    "Create separate filter objects per backend."
+                )
+
         self._state, out = self.apply(self._state, data)
         return out
 
@@ -882,7 +887,14 @@ class StdRejectFilter(_WindowBufferFilter):
         all_valid = xp.ones_like(data, dtype=post_warmup_valid.dtype)
         valid = xp.where(warmup, all_valid, post_warmup_valid)
 
-        safe_data = xp.where(warmup, data, xp.where(valid, data, last_valid))
+        # On the first post-warmup step `last_valid` is still zero-filled;
+        # fall back to the window mean so the fallback chain (e.g. a stateful
+        # AverageFilter) doesn't see a spurious zero. Matches the slice-based
+        # eager implementation, which seeded `last_valid` with `mean`.
+        fallback_input = xp.where(last_valid_initialized, last_valid, mean)
+        safe_data = xp.where(
+            warmup, data, xp.where(valid, data, fallback_input)
+        )
 
         new_fallback_state, fallback_value = self.fallback.apply(
             fallback_state, safe_data
