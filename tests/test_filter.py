@@ -208,35 +208,6 @@ def test_averagefilter_name() -> None:
 
 
 @pytest.mark.parametrize(
-    "factory",
-    [
-        lambda: AverageFilter(window_size=3),
-        lambda: MedianFilter(window_size=3),
-        lambda: StdRejectFilter(
-            std_factor=2.0,
-            window_size=3,
-            fallback_filter=[
-                {"type": "AverageFilter", "parameters": {"window_size": 3}}
-            ],
-        ),
-    ],
-    ids=["AverageFilter", "MedianFilter", "StdRejectFilter"],
-)
-def test_windowbuffer_filter_init_state(factory: Any) -> None:
-    f = factory()
-    assert f.buffer is None, (
-        f"Filter should start with buffer=None before any update; "
-        f"got {f.buffer!r}"
-    )
-    assert f.n_seen == 0, (
-        f"Filter should start with n_seen=0 before any update; got {f.n_seen}"
-    )
-    assert f.index == 0, (
-        f"Filter should start with index=0 before any update; got {f.index}"
-    )
-
-
-@pytest.mark.parametrize(
     "window_size",
     [0, -1, 2.5, -3.5],
 )

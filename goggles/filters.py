@@ -4,6 +4,21 @@ This module provides a small, typed filtering framework to post-process streams
 of array-valued observations. All filters accept and return arrays, and are
 compatible with both NumPy (`numpy.ndarray`) and JAX (`jax.Array`) inputs.
 
+Each filter exposes two equivalent interfaces:
+
+- An ergonomic stateful API:
+    - ``step(data) -> output`` (and ``__call__``)
+    - ``reset()``
+
+- A pure functional, JIT-compatible API:
+    - ``init_state(data) -> state``: allocate the initial state pytree given a
+      sample input that determines shape and dtype.
+    - ``apply(state, data) -> (new_state, output)``: the pure step. Safe to
+      pass through ``jax.jit`` and ``jax.lax.scan``.
+
+The stateful ``step`` is implemented as a thin wrapper that lazily initializes
+internal state via ``init_state`` and threads it through ``apply``.
+
 Design goals:
 - Strong typing: filters operate on arrays only (no scalar floats).
 - Minimal backend branching: use `get_backend()` and small helpers.
@@ -23,8 +38,6 @@ from typing import TYPE_CHECKING, Any, TypeAlias, TypeGuard
 import numpy as np
 
 if TYPE_CHECKING:
-    # For static type checkers (pyright/mypy). Requires jax available in the
-    # type-checking environment, or configure your checker accordingly.
     import jax.numpy as jnp
     from jax import Array as JaxArray
 
@@ -46,6 +59,7 @@ else:
 
 
 Array: TypeAlias = np.ndarray | JaxArray
+State: TypeAlias = Any
 
 
 def is_jax_array(x: Array) -> TypeGuard[JaxArray]:
@@ -75,28 +89,39 @@ def get_backend(x: Array) -> ModuleType:
     return np
 
 
-def _buffer_set(buf: Array, idx: int, value: Array) -> Array:
+def _buffer_set(buf: Array, idx: Array, value: Array) -> Array:
     """Set `buf[idx] = value` in a backend-aware way.
 
-    For NumPy, assignment is in-place. For JAX, this uses `.at[idx].set(value)`
-    and returns a new array.
+    Both backends return a fresh buffer object so callers can rely on
+    referential transparency: the input ``buf`` is never mutated.
 
     Args:
         buf: Ring buffer array with leading dimension = window size.
-        idx: Index to write.
+        idx: Index to write (scalar int).
         value: Sample to store at `idx`.
 
     Returns:
-        Updated buffer (same object for NumPy, new object for JAX).
+        A new buffer with the write applied.
     """
     if is_jax_array(buf):
         return buf.at[idx].set(value)
 
-    # In the NumPy branch, normalize values to ndarrays so indexing and
-    # assignment are well-typed without ignore pragmas.
-    np_buf = np.asarray(buf)
-    np_buf[idx] = np.asarray(value)
+    np_buf = np.array(buf, copy=True)
+    np_buf[int(np.asarray(idx))] = np.asarray(value)
     return np_buf
+
+
+def _broadcast_mask(mask: Array, ndim: int) -> Array:
+    """Reshape a 1-D `(W,)` mask to broadcast over a `(W, *data_shape)` buffer.
+
+    Args:
+        mask: Mask of shape `(W,)`.
+        ndim: Number of trailing dimensions in the buffer beyond `W`.
+
+    Returns:
+        Mask reshaped to `(W,) + (1,) * ndim`.
+    """
+    return mask.reshape((mask.shape[0],) + (1,) * ndim)
 
 
 @dataclass(frozen=True)
@@ -138,16 +163,17 @@ class Filter(ABC):
     """Abstract base class for array filters.
 
     Filters are callable objects that transform an input array into an output
-    array, potentially using internal state (e.g., moving averages).
-
-    Right now the filters are not jittable due to internal state.
-    There is an issue connected to make the state a optional input.
-    https://github.com/antonioterpin/goggles/issues/120
+    array, optionally using internal state (e.g., moving averages).
 
     Subclasses must implement:
-    - `step(data)`: apply one filtering step and return filtered array.
-    - `reset()`: reset internal state.
-    - `_name()`: short string name describing the filter instance.
+        - ``init_state(data)``: build the initial state pytree from a sample
+          input. Stateless filters may return ``None``.
+        - ``apply(state, data)``: pure step returning ``(new_state, output)``.
+        - ``_name()``: short string name describing the filter instance.
+
+    The default ``step`` implementation lazily initializes ``self._state`` via
+    ``init_state`` and threads it through ``apply``. Stateful filters
+    additionally enforce a single backend (NumPy or JAX) per instance.
     """
 
     def __init__(self, prefix: str = "") -> None:
@@ -157,6 +183,8 @@ class Filter(ABC):
             prefix: Optional prefix used when building `name` for debugging.
         """
         self.prefix = prefix
+        self._state: State = None
+        self._is_jax: bool | None = None
 
     def __call__(self, data: Array) -> Array:
         """Alias for `step()`.
@@ -169,20 +197,66 @@ class Filter(ABC):
         """
         return self.step(data)
 
-    @abstractmethod
     def step(self, data: Array) -> Array:
-        """Filter `data` and return the filtered array.
+        """Filter `data` using internal state and return the filtered array.
 
         Args:
             data: Input array.
 
         Returns:
             Filtered output array.
+
+        Raises:
+            TypeError: If a stateful filter previously saw a different array
+                backend. Stateless filters (whose ``init_state`` returns
+                ``None``) accept mixed backends.
+        """
+        cur_is_jax = is_jax_array(data)
+        if self._state is None:
+            self._state = self.init_state(data)
+
+        if self._state is not None:
+            if self._is_jax is None:
+                self._is_jax = cur_is_jax
+            elif self._is_jax != cur_is_jax:
+                raise TypeError(
+                    "Cannot mix NumPy and JAX inputs within the same filter. "
+                    "Create separate filter objects per backend."
+                )
+
+        self._state, out = self.apply(self._state, data)
+        return out
+
+    def reset(self) -> None:
+        """Reset internal state and backend tracking."""
+        self._state = None
+        self._is_jax = None
+
+    @abstractmethod
+    def init_state(self, data: Array) -> State:
+        """Allocate the initial state pytree for this filter.
+
+        Args:
+            data: A sample input used to determine shape and dtype of any
+                allocated state arrays. The values are not consumed unless
+                explicitly noted by a subclass.
+
+        Returns:
+            The initial state pytree. ``None`` for stateless filters.
         """
 
     @abstractmethod
-    def reset(self) -> None:
-        """Reset any internal state held by the filter."""
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
+        """Apply one filtering step in functional form.
+
+        Args:
+            state: Current state pytree (as returned by `init_state` or a
+                previous `apply`).
+            data: Input array.
+
+        Returns:
+            A tuple `(new_state, output)`.
+        """
 
     @property
     def name(self) -> str:
@@ -200,52 +274,6 @@ class Filter(ABC):
         Returns:
             Short descriptive name.
         """
-
-
-class _BackendAware(Filter):
-    """Filter mixin that enforces a single backend (NumPy or JAX) per instance.
-
-    Stateful filters that allocate buffers should not be fed alternating NumPy
-    and JAX arrays; this class detects that and raises early.
-
-    Notes:
-        Stateless filters may not need this; they can just use `get_backend()`.
-    """
-
-    def __init__(self, prefix: str = "") -> None:
-        """Initialize the backend-aware filter.
-
-        Args:
-            prefix: Optional filter name prefix.
-        """
-        super().__init__(prefix=prefix)
-        self._is_jax: bool | None = None
-
-    def _xp(self, data: Array) -> ModuleType:
-        """Return backend module for `data`, enforcing backend consistency.
-
-        Args:
-            data: Input array.
-
-        Returns:
-            `numpy` or `jax.numpy` matching `data`.
-
-        Raises:
-            TypeError: If the filter previously saw a different backend.
-        """
-        cur_is_jax = is_jax_array(data)
-        if self._is_jax is None:
-            self._is_jax = cur_is_jax
-        elif self._is_jax != cur_is_jax:
-            raise TypeError(
-                "Cannot mix NumPy and JAX inputs within the same filter. "
-                "Create separate filter objects per backend."
-            )
-        return jnp if cur_is_jax else np  # type: ignore[return-value]
-
-    def reset(self) -> None:
-        """Reset backend selection so the instance can be reused."""
-        self._is_jax = None
 
 
 class ScaleFilter(Filter):
@@ -266,20 +294,29 @@ class ScaleFilter(Filter):
         super().__init__(prefix=prefix)
         self.scale = float(scale)
 
-    def step(self, data: Array) -> Array:
+    def init_state(self, data: Array) -> State:
+        """Stateless: returns ``None``.
+
+        Args:
+            data: Sample input (unused).
+
+        Returns:
+            ``None``.
+        """
+        del data
+        return None
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Scale the input array.
 
         Args:
+            state: Unused (stateless).
             data: Input array.
 
         Returns:
-            `data * scale`.
+            ``(state, data * scale)``.
         """
-        return data * self.scale
-
-    def reset(self) -> None:
-        """Reset filter state (no-op; this filter is stateless)."""
-        return
+        return state, data * self.scale
 
     def _name(self) -> str:
         """Return a short descriptive name.
@@ -312,23 +349,34 @@ class MinMaxFilter(Filter):
         self.min_val = float(min_val)
         self.max_val = float(max_val)
 
-    def step(self, data: Array) -> Array:
+    def init_state(self, data: Array) -> State:
+        """Stateless: returns ``None``.
+
+        Args:
+            data: Sample input (unused).
+
+        Returns:
+            ``None``.
+        """
+        del data
+        return None
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Apply min-max normalization with clipping.
 
         Args:
+            state: Unused (stateless).
             data: Input array.
 
         Returns:
-            Array scaled to [0, 1] and clipped.
+            ``(state, normalized)`` where `normalized` is scaled to [0, 1] and
+            clipped.
         """
         xp = get_backend(data)
-        return xp.clip(
+        out = xp.clip(
             (data - self.min_val) / (self.max_val - self.min_val), 0.0, 1.0
         )
-
-    def reset(self) -> None:
-        """Reset filter state (no-op; this filter is stateless)."""
-        return
+        return state, out
 
     def _name(self) -> str:
         """Return a short descriptive name.
@@ -339,16 +387,17 @@ class MinMaxFilter(Filter):
         return f"MinMaxFilter({self.min_val},{self.max_val})"
 
 
-class _WindowBufferFilter(_BackendAware):
-    """Base class for windowed filters backed by a ring buffer.
+class _WindowBufferFilter(Filter):
+    """Base class for windowed filters backed by a fixed-shape ring buffer.
 
-    This implements:
-    - backend-consistent buffer allocation (NumPy or JAX)
-    - ring-buffer indexing
-    - tracking number of samples seen
-    - backend-aware writes (`_buffer_set`)
+    State is a 3-tuple ``(buffer, index, n_seen)``:
+        - ``buffer``: shape ``(window_size, *data.shape)``, zero-initialized.
+        - ``index``: int32 scalar, next write position (modulo window_size).
+        - ``n_seen``: int32 scalar, number of samples observed so far.
 
-    Subclasses implement `step()` to compute a statistic over the valid window.
+    Subclasses implement ``_compute(xp, buf, mask_b, n_seen, data)`` to compute
+    the windowed statistic. The buffer always has shape ``(window_size, ...)``;
+    invalid (not-yet-written) slots are masked via ``mask_b``.
     """
 
     def __init__(self, window_size: int, prefix: str = "") -> None:
@@ -365,60 +414,72 @@ class _WindowBufferFilter(_BackendAware):
             raise ValueError("window_size must be a positive integer")
         super().__init__(prefix=prefix)
         self.window_size = window_size
-        self.buffer: Array | None = None
-        self.index: int = 0
-        self.n_seen: int = 0
 
-    def _push(self, data: Array) -> tuple[ModuleType, int]:
-        """Insert `data` in the ring buffer and return backend and valid length.
+    def init_state(self, data: Array) -> State:
+        """Allocate ring-buffer state matching `data`'s shape and dtype.
 
         Args:
-            data: Input array to store.
+            data: Sample input determining buffer shape and dtype.
 
         Returns:
-            A tuple `(xp, valid_len)` where:
-            - `xp` is `numpy` or `jax.numpy`
-            - `valid_len` is the number of valid samples in the buffer
-              (min(n_seen, window_size)).
+            A tuple ``(buffer, index, n_seen)``.
         """
-        xp = self._xp(data)
-        if self.buffer is None:
-            self.buffer = xp.zeros(
-                (self.window_size, *data.shape), dtype=data.dtype
-            )
+        xp = get_backend(data)
+        buffer = xp.zeros((self.window_size, *data.shape), dtype=data.dtype)
+        index = xp.asarray(0, dtype=xp.int32)
+        n_seen = xp.asarray(0, dtype=xp.int32)
+        return (buffer, index, n_seen)
 
-        # buffer is guaranteed to be non-None here
-        assert self.buffer is not None, "Buffer should be initialized"
-        self.buffer = _buffer_set(self.buffer, self.index, data)
-        self.index = (self.index + 1) % self.window_size
-        self.n_seen += 1
-        valid_len = min(self.n_seen, self.window_size)
-        return xp, valid_len
+    def _push(
+        self,
+        state: State,
+        data: Array,
+    ) -> tuple[State, ModuleType, Array, Array]:
+        """Insert `data` into the buffer and return updated state and helpers.
 
-    def reset(self) -> None:
-        """Reset buffer and counters."""
-        super().reset()
-        self.buffer = None
-        self.index = 0
-        self.n_seen = 0
+        Args:
+            state: Current ring-buffer state.
+            data: Input array to insert.
+
+        Returns:
+            A tuple ``(new_state, xp, mask_b, n_seen_new)`` where:
+                - ``new_state`` reflects `data` written at the current index.
+                - ``xp`` is the backend module.
+                - ``mask_b`` is a broadcasted validity mask of shape
+                  ``(window_size,) + (1,) * data.ndim``.
+                - ``n_seen_new`` is the post-push sample count.
+        """
+        buf, index, n_seen = state
+        xp = get_backend(data)
+        new_buf = _buffer_set(buf, index, data)
+        new_index = (index + 1) % self.window_size
+        n_seen_new = n_seen + 1
+        valid_count = xp.minimum(n_seen_new, self.window_size)
+        mask = xp.arange(self.window_size, dtype=xp.int32) < valid_count
+        mask_b = _broadcast_mask(mask, data.ndim)
+        return (new_buf, new_index, n_seen_new), xp, mask_b, valid_count
 
 
 class AverageFilter(_WindowBufferFilter):
     """Compute a simple moving average over the last `window_size` samples."""
 
-    def step(self, data: Array) -> Array:
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Insert `data` and return the window mean.
 
         Args:
+            state: Ring-buffer state.
             data: Input array.
 
         Returns:
-            Mean over the valid portion of the ring buffer.
+            ``(new_state, mean)`` over the valid portion of the buffer.
         """
-        xp, valid_len = self._push(data)
-        buf = self.buffer
-        assert buf is not None, "Buffer should be initialized"
-        return xp.mean(buf[:valid_len], axis=0)
+        new_state, xp, mask_b, valid_count = self._push(state, data)
+        buf = new_state[0]
+        divisor = xp.maximum(valid_count, 1).astype(buf.dtype)
+        total = xp.sum(
+            xp.where(mask_b, buf, xp.asarray(0, dtype=buf.dtype)), axis=0
+        )
+        return new_state, total / divisor
 
     def _name(self) -> str:
         """Return a short descriptive name.
@@ -430,21 +491,29 @@ class AverageFilter(_WindowBufferFilter):
 
 
 class MedianFilter(_WindowBufferFilter):
-    """Compute a moving median over the last `window_size` samples."""
+    """Compute a moving median over the last `window_size` samples.
 
-    def step(self, data: Array) -> Array:
+    During warm-up (when fewer than ``window_size`` samples have been
+    observed), invalid buffer slots are filled with the most recent input so
+    the median is well-defined and JIT-compatible. Once the window is full,
+    this is identical to a standard moving median.
+    """
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Insert `data` and return the window median.
 
         Args:
+            state: Ring-buffer state.
             data: Input array.
 
         Returns:
-            Median over the valid portion of the ring buffer.
+            ``(new_state, median)`` over the buffer with invalid slots filled
+            with `data`.
         """
-        xp, valid_len = self._push(data)
-        buf = self.buffer
-        assert buf is not None, "Buffer should be initialized"
-        return xp.median(buf[:valid_len], axis=0)
+        new_state, xp, mask_b, _ = self._push(state, data)
+        buf = new_state[0]
+        view = xp.where(mask_b, buf, data)
+        return new_state, xp.median(view, axis=0)
 
     def _name(self) -> str:
         """Return a short descriptive name.
@@ -455,11 +524,13 @@ class MedianFilter(_WindowBufferFilter):
         return f"MedianFilter({self.window_size})"
 
 
-class ExpAverageFilter(_BackendAware):
+class ExpAverageFilter(Filter):
     """Exponential moving average.
 
     Recurrence:
         y[n] = alpha * x[n] + (1 - alpha) * y[n-1]
+
+    The very first sample is returned unchanged (initialization).
     """
 
     def __init__(self, alpha: float, prefix: str = "") -> None:
@@ -476,28 +547,38 @@ class ExpAverageFilter(_BackendAware):
             raise ValueError("alpha must be in the range [0, 1]")
         super().__init__(prefix=prefix)
         self.alpha = float(alpha)
-        self.value: Array | None = None
 
-    def step(self, data: Array) -> Array:
+    def init_state(self, data: Array) -> State:
+        """Allocate EMA state.
+
+        Args:
+            data: Sample input determining the running value's shape and dtype.
+
+        Returns:
+            A tuple ``(value, initialized)`` where ``value`` is zero-allocated
+            and ``initialized`` is a scalar ``False``.
+        """
+        xp = get_backend(data)
+        value = xp.zeros_like(data)
+        initialized = xp.asarray(False)
+        return (value, initialized)
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Update and return the exponential moving average.
 
         Args:
+            state: Current EMA state.
             data: Input array.
 
         Returns:
-            Updated EMA value.
+            ``(new_state, ema)``. On the first call, ``ema == data``.
         """
-        self._xp(data)  # enforce backend consistency
-        if self.value is None:
-            self.value = data
-        else:
-            self.value = self.alpha * data + (1.0 - self.alpha) * self.value
-        return self.value
-
-    def reset(self) -> None:
-        """Reset EMA state."""
-        super().reset()
-        self.value = None
+        value, initialized = state
+        xp = get_backend(data)
+        next_value = self.alpha * data + (1.0 - self.alpha) * value
+        new_value = xp.where(initialized, next_value, data)
+        new_initialized = xp.asarray(True)
+        return (new_value, new_initialized), new_value
 
     def _name(self) -> str:
         """Return a short descriptive name.
@@ -508,14 +589,15 @@ class ExpAverageFilter(_BackendAware):
         return f"ExpAverageFilter({self.alpha})"
 
 
-class QuantizationFilter(_BackendAware):
+class QuantizationFilter(Filter):
     """Clamp to a range then quantize to nearest discrete level.
 
     The quantization levels are:
         min_value, min_value + step_size, ..., max_value
 
     Notes:
-        Levels are cached per instance and rebuilt on `reset()`.
+        Levels depend on the input array's number of dimensions; they are
+        materialized in `init_state`.
     """
 
     def __init__(
@@ -544,38 +626,38 @@ class QuantizationFilter(_BackendAware):
         self.min_value = float(min_value)
         self.max_value = float(max_value)
         self.step_size = float(step_size)
-        self.levels: Array | None = None
 
-    def step(self, data: Array) -> Array:
+    def init_state(self, data: Array) -> State:
+        """Materialize quantization levels broadcast over `data.ndim`.
+
+        Args:
+            data: Sample input determining trailing broadcast dimensions.
+
+        Returns:
+            The levels array of shape ``(n_levels,) + (1,) * data.ndim``.
+        """
+        xp = get_backend(data)
+        base = xp.arange(
+            self.min_value, self.max_value + self.step_size, self.step_size
+        )
+        return base.reshape((-1,) + (1,) * data.ndim)
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Clamp and quantize `data` to nearest level.
 
         Args:
+            state: Pre-computed levels array.
             data: Input array.
 
         Returns:
-            Quantized output array.
+            ``(state, quantized)``.
         """
-        xp = self._xp(data)
+        xp = get_backend(data)
+        levels = state
         clipped = xp.clip(data, self.min_value, self.max_value)
-
-        # levels shape: (n_levels, 1, 1, ..., 1) for broadcasting over data.ndim
-        if self.levels is None:
-            base = xp.arange(
-                self.min_value, self.max_value + self.step_size, self.step_size
-            )
-            self.levels = base.reshape((-1,) + (1,) * data.ndim)
-
-        levels = self.levels
-        assert levels is not None, "Quantization levels should be initialized"
-
         idx = xp.argmin(xp.abs(levels - clipped), axis=0)
         gathered = xp.take_along_axis(levels, idx[None, ...], axis=0)
-        return gathered.squeeze(axis=0)
-
-    def reset(self) -> None:
-        """Reset cached quantization levels and backend tracking."""
-        super().reset()
-        self.levels = None
+        return state, gathered.squeeze(axis=0)
 
     def _name(self) -> str:
         """Return a short descriptive name.
@@ -590,7 +672,7 @@ class QuantizationFilter(_BackendAware):
         )
 
 
-class RangeRejectFilter(_BackendAware):
+class RangeRejectFilter(Filter):
     """Replace out-of-range values using a fallback filter."""
 
     def __init__(
@@ -638,41 +720,46 @@ class RangeRejectFilter(_BackendAware):
             available_filters=available_filters,
         )
 
-        self._last_valid: Array | None = None
+    def init_state(self, data: Array) -> State:
+        """Allocate state for this filter and its fallback chain.
 
-    def step(self, data: Array) -> Array:
+        Args:
+            data: Sample input.
+
+        Returns:
+            ``(last_valid, fallback_state)``.
+        """
+        xp = get_backend(data)
+        last_valid = xp.full_like(data, self.midpoint)
+        fallback_state = self.fallback.init_state(data)
+        return (last_valid, fallback_state)
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Identify out-of-range values and replace them.
 
         Args:
+            state: ``(last_valid, fallback_state)``.
             data: Input array.
 
         Returns:
-            Array where out-of-range values have been replaced
-            by the fallback filter output.
+            ``(new_state, output)`` where out-of-range entries are replaced by
+            the fallback's output.
         """
-        xp = self._xp(data)
+        xp = get_backend(data)
+        last_valid, fallback_state = state
 
         valid = xp.logical_and(
             data >= self.min_value,
             data <= self.max_value,
         )
 
-        # Always update fallback state
-        if self._last_valid is None:
-            self._last_valid = xp.where(valid, data, self.midpoint)
-
-        safe_data = xp.where(valid, data, self._last_valid)
-        fallback_value = self.fallback.step(safe_data)
-        self._last_valid = xp.where(valid, data, self._last_valid)
-
-        # Replace only invalid entries
-        return xp.where(valid, data, fallback_value)
-
-    def reset(self) -> None:
-        """Reset own state and the fallback filter chain."""
-        super().reset()
-        self.fallback.reset()
-        self._last_valid = None
+        safe_data = xp.where(valid, data, last_valid)
+        new_fallback_state, fallback_value = self.fallback.apply(
+            fallback_state, safe_data
+        )
+        new_last_valid = xp.where(valid, data, last_valid)
+        out = xp.where(valid, data, fallback_value)
+        return (new_last_valid, new_fallback_state), out
 
     def _name(self) -> str:
         return (
@@ -735,59 +822,116 @@ class StdRejectFilter(_WindowBufferFilter):
             available_filters=available_filters,
         )
 
-        self._last_valid: Array | None = None
+    def init_state(self, data: Array) -> State:
+        """Allocate ring-buffer + last-valid + fallback state.
 
-    def step(self, data: Array) -> Array:
+        Args:
+            data: Sample input.
+
+        Returns:
+            ``(buffer, index, n_seen, last_valid, last_valid_initialized,
+            fallback_state)``.
+        """
+        xp = get_backend(data)
+        buffer, index, n_seen = super().init_state(data)
+        last_valid = xp.zeros_like(data)
+        last_valid_initialized = xp.asarray(False)
+        fallback_state = self.fallback.init_state(data)
+        return (
+            buffer,
+            index,
+            n_seen,
+            last_valid,
+            last_valid_initialized,
+            fallback_state,
+        )
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Identify outliers and replace them using the fallback filter.
 
         Args:
+            state: Filter state; see `init_state` for layout.
             data: Input array.
 
         Returns:
-            Array where outliers have been replaced
-            by the fallback filter output.
+            ``(new_state, output)``. Outliers are replaced by the fallback's
+            output once the window has filled.
         """
-        xp = self._xp(data)
+        (
+            buf,
+            index,
+            n_seen,
+            last_valid,
+            last_valid_initialized,
+            fallback_state,
+        ) = state
+        xp = get_backend(data)
 
-        # For the initial `window_size` steps, we don't have enough history to
-        # compute valid statistics. In this case, we consider all values valid
-        # and just update the fallback state with the raw data.
-        if self.buffer is None or self.n_seen < self.window_size:
-            valid = xp.ones_like(data, dtype=bool)
-            self.fallback.step(
-                data
-            )  # update fallback state with initial values
-            self._push(data)
-            return data
+        # Always compute mean/std on the current buffer (zeroed in invalid
+        # slots). These are only consumed in the post-warmup branch via
+        # `where`-based selection, so warmup behavior is unaffected by the
+        # zero-padding bias.
+        valid_count = xp.minimum(n_seen, self.window_size)
+        mask = xp.arange(self.window_size, dtype=xp.int32) < valid_count
+        mask_b = _broadcast_mask(mask, data.ndim)
+        zero = xp.asarray(0, dtype=buf.dtype)
+        masked_buf = xp.where(mask_b, buf, zero)
+        divisor = xp.maximum(valid_count, 1).astype(buf.dtype)
+        mean = xp.sum(masked_buf, axis=0) / divisor
+        centered = xp.where(mask_b, buf - mean[None], zero)
+        variance = xp.sum(centered * centered, axis=0) / divisor
+        std = xp.sqrt(variance)
 
-        buf = self.buffer
-        valid_len = min(self.n_seen, self.window_size)
-        hist = buf[:valid_len]
-        mean = xp.mean(hist, axis=0)
-        std = xp.std(hist, axis=0)
-        valid = xp.abs(data - mean) <= self.std_factor * std
+        warmup = n_seen < self.window_size
+        post_warmup_valid = xp.abs(data - mean) <= self.std_factor * std
+        all_valid = xp.ones_like(data, dtype=post_warmup_valid.dtype)
+        valid = xp.where(warmup, all_valid, post_warmup_valid)
 
-        if self._last_valid is None:
-            self._last_valid = mean
-        safe_data = xp.where(valid, data, self._last_valid)
+        # On the first post-warmup step `last_valid` is still zero-filled;
+        # fall back to the window mean so the fallback chain (e.g. a stateful
+        # AverageFilter) doesn't see a spurious zero. Matches the slice-based
+        # eager implementation, which seeded `last_valid` with `mean`.
+        fallback_input = xp.where(last_valid_initialized, last_valid, mean)
+        safe_data = xp.where(
+            warmup, data, xp.where(valid, data, fallback_input)
+        )
 
-        fallback_value = self.fallback.step(safe_data)
-        self._last_valid = xp.where(valid, data, fallback_value)
+        new_fallback_state, fallback_value = self.fallback.apply(
+            fallback_state, safe_data
+        )
 
-        # For typing
-        assert self._last_valid is not None, "Last valid should be initialized"
+        new_last_valid_post = xp.where(
+            last_valid_initialized,
+            xp.where(valid, data, fallback_value),
+            mean,
+        )
+        new_last_valid = xp.where(warmup, last_valid, new_last_valid_post)
+        new_last_valid_initialized = xp.where(
+            warmup, last_valid_initialized, xp.asarray(True)
+        )
 
-        # Prevent std collapse
-        if xp.any(valid):
-            self._push(self._last_valid)
+        out = xp.where(warmup, data, xp.where(valid, data, fallback_value))
 
-        return self._last_valid
+        # Push policy: during warmup push raw data; post-warmup push
+        # `new_last_valid` only if at least one element was valid (preserves
+        # std collapse safeguard from the eager implementation).
+        any_valid = xp.any(valid)
+        do_push = xp.logical_or(warmup, any_valid)
+        push_value = xp.where(warmup, data, new_last_valid)
+        pushed_buf = _buffer_set(buf, index, push_value)
+        new_buf = xp.where(do_push, pushed_buf, buf)
+        new_index = xp.where(do_push, (index + 1) % self.window_size, index)
+        new_n_seen = xp.where(do_push, n_seen + 1, n_seen)
 
-    def reset(self) -> None:
-        """Reset own state and the fallback filter chain."""
-        super().reset()
-        self.fallback.reset()
-        self._last_valid = None
+        new_state = (
+            new_buf,
+            new_index,
+            new_n_seen,
+            new_last_valid,
+            new_last_valid_initialized,
+            new_fallback_state,
+        )
+        return new_state, out
 
     def _name(self) -> str:
         return (
@@ -811,24 +955,36 @@ class ConcatFilter(Filter):
         super().__init__(prefix=prefix)
         self.filters = filters
 
-    def step(self, data: Array) -> Array:
+    def init_state(self, data: Array) -> State:
+        """Allocate per-child state.
+
+        All built-in filters preserve shape and dtype, so each child's
+        `init_state` is called with the original `data`.
+
+        Args:
+            data: Sample input.
+
+        Returns:
+            Tuple of child states, one per filter.
+        """
+        return tuple(f.init_state(data) for f in self.filters)
+
+    def apply(self, state: State, data: Array) -> tuple[State, Array]:
         """Apply all filters sequentially.
 
         Args:
+            state: Tuple of child states.
             data: Input array.
 
         Returns:
-            Output after applying each filter in `filters` in order.
+            ``(new_state, output)`` after applying each filter in order.
         """
+        new_states = []
         out = data
-        for f in self.filters:
-            out = f.step(out)
-        return out
-
-    def reset(self) -> None:
-        """Reset each filter in the chain."""
-        for f in self.filters:
-            f.reset()
+        for f, s in zip(self.filters, state, strict=True):
+            s_new, out = f.apply(s, out)
+            new_states.append(s_new)
+        return tuple(new_states), out
 
     def _name(self) -> str:
         """Return a short descriptive name.
