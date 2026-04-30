@@ -824,20 +824,62 @@ class EventBus:
         self.scopes: dict[str, set[str]] = defaultdict(set)
         self._lock = threading.RLock()
 
-    def shutdown(self) -> None:
-        """Shutdown the EventBus and close all handlers."""
+    def shutdown(self, timeout: float | None = None) -> None:
+        """Close every attached handler and clear scope state.
+
+        Every ``handler.close()`` is launched in its own daemon thread
+        so slow handlers run concurrently. Each thread is then joined
+        with ``timeout`` seconds; clean exits log a debug confirmation
+        and timeouts log a warning.
+
+        Args:
+            timeout: Per-handler close budget in seconds. ``None`` waits
+                indefinitely. On timeout the close thread is abandoned —
+                Python cannot safely interrupt blocking I/O — and the
+                handler may continue running in the background.
+        """
         with self._lock:
-            copy_map = {
-                scope: handlers_names.copy()
-                for scope, handlers_names in self.scopes.items()
-            }
-        for scope, handlers_names in copy_map.items():
-            for handler_name in handlers_names:
-                try:
-                    self.detach(handler_name, scope)
-                except ValueError:
-                    # Another thread may have already detached this pair.
-                    pass
+            handlers_to_close = list(self.handlers.values())
+            self.handlers.clear()
+            self.scopes.clear()
+
+        threads: list[tuple[threading.Thread, Handler]] = []
+        for handler in handlers_to_close:
+            t = threading.Thread(
+                target=self._close_handler_safely,
+                args=(handler,),
+                daemon=True,
+                name=f"goggles-close-{handler.name}",
+            )
+            t.start()
+            threads.append((t, handler))
+
+        log = logging.getLogger(__name__)
+        for t, handler in threads:
+            t.join(timeout=timeout)
+            if t.is_alive():
+                log.warning(
+                    "Handler '%s' did not confirm close within %.1fs; "
+                    "abandoning (thread continues as daemon).",
+                    handler.name,
+                    -1.0 if timeout is None else timeout,
+                )
+            else:
+                log.debug("Handler '%s' close confirmed.", handler.name)
+
+    @staticmethod
+    def _close_handler_safely(handler: Handler) -> None:
+        """Run ``handler.close()`` and log any exception it raises.
+
+        Args:
+            handler: Handler to close.
+        """
+        try:
+            handler.close()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Handler '%s' raised in close()", handler.name
+            )
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
         """Attach handler(s) under the given scopes.
@@ -1066,14 +1108,22 @@ def detach(handler_name: str, scope: str) -> None:
 def finish(timeout: float | None = None) -> None:
     """Shutdown the global transport and close all handlers.
 
+    Default behavior is to wait indefinitely so no queued events are
+    silently dropped. Pass an explicit ``timeout`` to bound the wait —
+    on timeout, the rest of the drain queue is discarded and any
+    handler still inside ``close()`` is abandoned (the thread continues
+    as a daemon). Both events are logged.
+
     Args:
-        timeout: Optional timeout in seconds for shutdown completion.
-            If None, uses ``GOGGLES_SHUTDOWN_TIMEOUT`` (default: 5.0s).
-            Set to 0 or a negative value to wait indefinitely.
+        timeout: Optional bound in seconds applied to (a) draining queued
+            events into handlers and (b) each handler's ``close()`` call.
+            If ``None``, falls back to the ``GOGGLES_SHUTDOWN_TIMEOUT``
+            env var; an unset env var or a non-positive value means no
+            deadline.
     """
     bus = get_bus()
     if timeout is None:
-        timeout = float(os.getenv("GOGGLES_SHUTDOWN_TIMEOUT", "5.0"))
+        timeout = float(os.getenv("GOGGLES_SHUTDOWN_TIMEOUT", "0"))
     if timeout <= 0:
         timeout = None
     try:

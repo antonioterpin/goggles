@@ -1,4 +1,6 @@
 import sys
+import threading
+import time
 import types
 from typing import Any, ClassVar, cast
 
@@ -177,6 +179,115 @@ def test_eventbus_detach_and_shutdown():
     bus.attach([handler_data], scopes=["train", "test"])
     bus.shutdown()
     assert not bus.handlers, "Bus should have no handlers after shutdown"
+
+
+class _SlowCloseHandler:
+    """Test handler whose ``close()`` blocks for a configurable delay.
+
+    Attributes:
+        capabilities: Event kinds claimed (just metric/log here).
+    """
+
+    capabilities: ClassVar[frozenset[gg.Kind]] = cast(
+        frozenset[gg.Kind], frozenset({"metric", "log"})
+    )
+
+    def __init__(self, name: str = "slow", close_delay: float = 0.0) -> None:
+        """Initialize a handler whose ``close`` blocks for ``close_delay``.
+
+        Args:
+            name: Handler name used as registry key.
+            close_delay: Seconds ``close`` sleeps before returning.
+        """
+        self.name = name
+        self.close_delay = close_delay
+        self.closed = False
+        self.close_started = threading.Event()
+
+    def can_handle(self, kind: gg.Kind) -> bool:
+        return kind in self.capabilities
+
+    def handle(self, event: gg.Event) -> None:
+        del event
+
+    def open(self) -> None: ...
+
+    def close(self) -> None:
+        self.close_started.set()
+        if self.close_delay > 0:
+            time.sleep(self.close_delay)
+        self.closed = True
+
+    def to_dict(self) -> dict:
+        return {
+            "cls": "_SlowCloseHandler",
+            "data": {"name": self.name, "close_delay": self.close_delay},
+        }
+
+    @classmethod
+    def from_dict(cls, serialized: dict) -> "_SlowCloseHandler":
+        return cls(**serialized)
+
+
+def test_eventbus_shutdown_default_waits_for_slow_close():
+    """``shutdown()`` with no timeout must wait for ``close()`` to return."""
+    gg.register_handler(_SlowCloseHandler)
+    bus = gg.EventBus()
+    handler = _SlowCloseHandler(name="h1", close_delay=0.3)
+    bus.attach([handler.to_dict()], scopes=["train"])
+    attached = cast(_SlowCloseHandler, bus.handlers["h1"])
+    bus.shutdown()  # timeout=None
+    assert attached.closed, "Default shutdown must wait for close() to complete"
+    assert not bus.handlers, "Handlers must be cleared after shutdown"
+
+
+def test_eventbus_shutdown_timeout_abandons_hung_close():
+    """``shutdown(timeout=T)`` must return without blocking on a hung close."""
+    gg.register_handler(_SlowCloseHandler)
+    bus = gg.EventBus()
+    handler = _SlowCloseHandler(name="h1", close_delay=5.0)
+    bus.attach([handler.to_dict()], scopes=["train"])
+    attached = cast(_SlowCloseHandler, bus.handlers["h1"])
+    start = time.monotonic()
+    bus.shutdown(timeout=0.2)
+    elapsed = time.monotonic() - start
+    assert elapsed < 2.0, (
+        f"Bounded shutdown must not block on hung close(); took {elapsed:.2f}s"
+    )
+    assert attached.close_started.is_set(), (
+        "close() must have been invoked even though we did not wait for it"
+    )
+    assert not attached.closed, (
+        "close() should still be running (sleep=5s, timeout=0.2s)"
+    )
+    assert not bus.handlers, (
+        "Handlers must still be cleared after timed-out shutdown"
+    )
+
+
+def test_eventbus_shutdown_closes_all_handlers_in_parallel():
+    """Slow handlers must close concurrently, not one-after-another.
+
+    Each handler sleeps ``delay`` seconds in close(). Serial close would
+    take ~``n*delay``; parallel close should finish in roughly ``delay``.
+    """
+    gg.register_handler(_SlowCloseHandler)
+    bus = gg.EventBus()
+    n = 4
+    delay = 0.3
+    for i in range(n):
+        handler = _SlowCloseHandler(name=f"h{i}", close_delay=delay)
+        bus.attach([handler.to_dict()], scopes=[f"s{i}"])
+    start = time.monotonic()
+    bus.shutdown()
+    elapsed = time.monotonic() - start
+    # Generous slack for thread scheduling jitter, but well below the
+    # serial baseline of n*delay = 1.2s.
+    assert elapsed < n * delay * 0.75, (
+        f"Close threads should run in parallel; serial baseline {n * delay}s, "
+        f"parallel observed {elapsed:.2f}s"
+    )
+    assert not bus.handlers, "All handlers must be cleared after shutdown"
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Iterator
 from multiprocessing import shared_memory
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 import numpy as np
 import pytest
@@ -986,6 +986,208 @@ def test_shutdown_flushes_shm_frames(socket_path: str) -> None:
             pass
     finally:
         host.shutdown(timeout=5.0)
+
+
+class _SlowHandler:
+    """Handler whose ``handle()`` and ``close()`` each sleep on call.
+
+    Used to drive shutdown timeout paths: long ``handle`` calls block the
+    drain thread; long ``close`` calls block ``EventBus.shutdown``.
+
+    Attributes:
+        name: Handler identifier.
+        capabilities: Event kinds claimed (all of them, for convenience).
+    """
+
+    name = "slow"
+    capabilities: ClassVar[frozenset[Kind]] = frozenset(
+        {"log", "metric", "image", "video", "artifact", "histogram"}
+    )
+
+    def __init__(
+        self, handle_delay: float = 0.0, close_delay: float = 0.0
+    ) -> None:
+        """Initialize the handler with configurable per-call delays.
+
+        Args:
+            handle_delay: Seconds each ``handle`` call sleeps before counting.
+            close_delay: Seconds ``close`` sleeps before returning.
+        """
+        self.handle_delay = handle_delay
+        self.close_delay = close_delay
+        self.handled = 0
+        self.closed = False
+        self._lock = threading.Lock()
+
+    def can_handle(self, kind: Kind) -> bool:
+        del kind
+        return True
+
+    def handle(self, event: Event) -> None:
+        del event
+        if self.handle_delay > 0:
+            time.sleep(self.handle_delay)
+        with self._lock:
+            self.handled += 1
+
+    def open(self) -> None: ...
+
+    def close(self) -> None:
+        if self.close_delay > 0:
+            time.sleep(self.close_delay)
+        self.closed = True
+
+    def to_dict(self) -> dict:
+        return {"cls": "_SlowHandler", "data": {}}
+
+    @classmethod
+    def from_dict(cls, serialized: dict) -> _SlowHandler:
+        del serialized
+        return cls()
+
+
+def _install_handler(
+    transport: LocalTransport, handler: _SlowHandler
+) -> None:
+    """Install ``handler`` directly into ``transport``'s host bus.
+
+    Args:
+        transport: Host-mode transport that owns the bus.
+        handler: Handler to wire under the ``global`` scope.
+    """
+    with transport._bus._lock:  # type: ignore[attr-defined]
+        transport._bus.handlers[handler.name] = cast(Any, handler)  # type: ignore[attr-defined]
+        transport._bus.scopes["global"] = {handler.name}  # type: ignore[attr-defined]
+
+
+def test_shutdown_default_timeout_waits_for_slow_drain(
+    socket_path: str,
+) -> None:
+    """``shutdown(timeout=None)`` must wait for every queued event.
+
+    Pre-fix, ``gg.finish()`` defaulted to a 5s drain budget and silently
+    dropped the tail when slow handlers couldn't keep up. The new default
+    is no deadline, so all events delivered before shutdown must reach
+    the handler regardless of how slow it is.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+    """
+    transport = LocalTransport(socket_path=socket_path)
+    handler = _SlowHandler(handle_delay=0.05)  # ~50 events at 0.05s = 2.5s
+    n = 50
+    try:
+        _install_handler(transport, handler)
+        for i in range(n):
+            transport.emit(
+                Event(
+                    kind="log",
+                    scope="global",
+                    payload=f"m{i}",
+                    filepath="t.py",
+                    lineno=i,
+                )
+            )
+    finally:
+        # timeout=None — must wait until drain finishes, however long.
+        transport.shutdown(timeout=None)
+    assert handler.handled == n, (
+        f"All {n} events must reach the handler under default no-timeout "
+        f"shutdown; got {handler.handled}"
+    )
+    assert handler.closed, (
+        "Handler must be closed by shutdown when no timeout is set"
+    )
+
+
+def test_shutdown_drain_timeout_discards_remaining_queue(
+    socket_path: str,
+) -> None:
+    """When drain times out, the rest of the queue is dropped, not flushed.
+
+    The handle call in flight when the timeout fires runs to completion
+    (Python cannot interrupt blocking I/O), but every event still in
+    the queue must be discarded — so dispatch does not race
+    ``handler.close()`` for arbitrary additional events.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+    """
+    transport = LocalTransport(socket_path=socket_path)
+    # Each handle call takes 0.5s; with 20 events queued, draining all
+    # would take ~10s. A 0.2s shutdown timeout fires after ~event 1.
+    n = 20
+    handler = _SlowHandler(handle_delay=0.5)
+    try:
+        _install_handler(transport, handler)
+        for i in range(n):
+            transport.emit(
+                Event(
+                    kind="log",
+                    scope="global",
+                    payload=f"m{i}",
+                    filepath="t.py",
+                    lineno=i,
+                )
+            )
+    finally:
+        transport.shutdown(timeout=0.2)
+
+    # Wait long enough for any in-flight handle() to finish but well
+    # short of what would be needed to drain all 20 events serially.
+    time.sleep(1.0)
+    # The in-flight call may push handled to 1; the abort flag must
+    # have stopped the rest from being dispatched.
+    assert handler.handled <= 2, (
+        f"Drain abort must discard the queued tail; processed "
+        f"{handler.handled}/{n} events (expected at most 2)"
+    )
+    assert handler.closed, "Handler must be closed after shutdown"
+
+
+def test_shutdown_per_handler_close_is_bounded(socket_path: str) -> None:
+    """``shutdown(timeout=T)`` must abandon a hung ``handler.close()``.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+    """
+    transport = LocalTransport(socket_path=socket_path)
+    # close() sleeps for 5s, but we only wait 0.3s.
+    handler = _SlowHandler(close_delay=5.0)
+    _install_handler(transport, handler)
+    start = time.monotonic()
+    transport.shutdown(timeout=0.3)
+    elapsed = time.monotonic() - start
+    # Worst case: drain (~0) + drain-abort retry (~0) + close (0.3s).
+    # Allow generous slack for thread scheduling jitter.
+    assert elapsed < 2.5, (
+        f"Bounded shutdown must not block on a hung close(); "
+        f"took {elapsed:.2f}s"
+    )
+    # The handler thread is still running close(); we did not interrupt
+    # it, but we returned without waiting for it.
+    assert not handler.closed, (
+        "close() should still be in-flight (sleep=5s, timeout=0.3s)"
+    )
+
+
+def test_shutdown_default_waits_for_slow_close(socket_path: str) -> None:
+    """``shutdown(timeout=None)`` must wait for ``handler.close()``.
+
+    Pre-fix, ``gg.finish()`` had a 5s default that bounded the wait;
+    a slow ``close()`` (e.g. wandb's ``run.finish()``) could be
+    abandoned. With the new default, close must complete cleanly.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+    """
+    transport = LocalTransport(socket_path=socket_path)
+    handler = _SlowHandler(close_delay=0.5)
+    _install_handler(transport, handler)
+    transport.shutdown(timeout=None)
+    assert handler.closed, (
+        "Handler.close() must complete cleanly under no-timeout shutdown"
+    )
 
 
 def test_shm_unlinked_on_client_send_failure(socket_path: str) -> None:

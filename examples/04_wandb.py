@@ -1,5 +1,4 @@
 import tempfile
-import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -309,8 +308,9 @@ try:
             data, name="Dynamic Random Values Histogram", step=154 + i
         )
 
-    time.sleep(2)
-    # When using asynchronous logging (like wandb), make sure to finish
+    # When using asynchronous logging (like wandb), make sure to finish.
+    # ``gg.finish()`` waits indefinitely by default so no queued events are
+    # dropped; pass ``timeout=T`` if you need a bound.
     gg.finish()
 finally:
     artifact_dir.cleanup()
