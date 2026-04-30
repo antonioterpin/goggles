@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -179,8 +180,9 @@ def test_path_style_affects_output(
     finally:
         handler._logger.removeHandler(collector)
     message = " ".join(messages)
+    expected_relative = f"{os.path.join('src', 'main.py')}:99"
     if style == "relative":
-        assert "src/main.py:99" in message, (
+        assert expected_relative in message, (
             "Relative path prefix missing from output"
         )
         assert str(fake_file) not in message, (
@@ -190,7 +192,7 @@ def test_path_style_affects_output(
         assert str(fake_file) in message, (
             "Absolute path prefix missing from output"
         )
-        assert "src/main.py:99" in message, (
+        assert expected_relative in message, (
             "File:line info missing from absolute path output"
         )
     handler.close()

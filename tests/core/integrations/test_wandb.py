@@ -1,6 +1,7 @@
 import glob
 import logging
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -692,6 +693,14 @@ def test_step_none_bypasses_buffer_to_preserve_autoincrement(
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(
+    sys.version_info >= (3, 13),
+    reason=(
+        "moviepy<2 imports fail under Py3.13 (invalid escape '\\P' in "
+        "config_defaults.py); reachable from wandb's video path. "
+        "Tracked in #182."
+    ),
+)
 def test_example_04_logs_all_keys_at_step_100_offline(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
