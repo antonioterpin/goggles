@@ -26,6 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: System :: Logging",
+    "Typing :: Typed",
 ]
 dependencies = [
     "ruamel.yaml",
@@ -45,6 +46,9 @@ Issues = "https://github.com/antonioterpin/goggles/issues"
 [tool.setuptools.packages.find]
 include = ["goggles*"]
 exclude = ["wandb*", "tests*", "examples*"]
+
+[tool.setuptools.package-data]
+goggles = ["py.typed"]
 
 [project.optional-dependencies]
 # Development and examples
