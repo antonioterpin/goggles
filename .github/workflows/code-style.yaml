@@ -13,11 +13,11 @@ jobs:
         steps:
             # Step 1: Check out the code
             - name: Check out code
-              uses: actions/checkout@v3
+              uses: actions/checkout@v6
 
             # Step 2: Set up Python
             - name: Set up Python
-              uses: actions/setup-python@v4
+              uses: actions/setup-python@v6
               with:
                   python-version: '3.10'
 
@@ -26,7 +26,7 @@ jobs:
             # The pydoclint hook is `entry: uv run pydoclint`, so the runner
             # needs uv on PATH at pre-commit time.
             - name: Install uv
-              uses: astral-sh/setup-uv@v3
+              uses: astral-sh/setup-uv@v7
               with:
                   version: "latest"
 

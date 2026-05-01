@@ -11,8 +11,11 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - name: Checkout code
-              uses: actions/checkout@v3
+              uses: actions/checkout@v6
             - name: Run Commitlint
-              uses: wagoid/commitlint-github-action@v5
-              with:
-                  configFile: commitlint.config.js
+              # No configFile: there is no commitlint.config.{js,mjs} in
+              # the tree, so the action falls back to the bundled
+              # @commitlint/config-conventional defaults. The v5 pin had
+              # the same effective behaviour but accepted a missing .js
+              # path silently; v6 errors on it.
+              uses: wagoid/commitlint-github-action@v6
