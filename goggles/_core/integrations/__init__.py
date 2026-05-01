@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     # Static analyzers can't see the runtime __getattr__ + find_spec dance,
     # so import the symbol unconditionally for type checking. At runtime,
     # the import is gated on the wandb extra being installed.
-    from .wandb import WandBHandler
+    from .wandb import WandBHandler  # noqa: F401
 
 __all__: list[str] = [
     "ConsoleHandler",

@@ -165,6 +165,9 @@ allow-init-docstring = true
 arg-type-hints-in-docstring = false
 check-return-types = false
 skip-checking-raises = false
+# Match the ruff per-file-ignore policy: tests and examples are
+# documented via comments/READMEs, not Google-style docstrings.
+exclude = '\.git|\.tox|tests/.*|examples/.*'
 
 # Pyright configuration for type checking
 # We use basedpyright but in this way pylance also
