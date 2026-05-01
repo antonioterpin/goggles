@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -12,13 +12,13 @@ authors = [
 description = "Observability framework for robotics research"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["robotics", "logging", "observability", "jax", "wandb", "experiment-tracking"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
@@ -26,6 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: System :: Logging",
+    "Typing :: Typed",
 ]
 dependencies = [
     "ruamel.yaml",
@@ -45,6 +46,9 @@ Issues = "https://github.com/antonioterpin/goggles/issues"
 [tool.setuptools.packages.find]
 include = ["goggles*"]
 exclude = ["wandb*", "tests*", "examples*"]
+
+[tool.setuptools.package-data]
+goggles = ["py.typed"]
 
 [project.optional-dependencies]
 # Development and examples
