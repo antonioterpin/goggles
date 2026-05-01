@@ -89,6 +89,7 @@ addopts = [
         "--cov-report=term-missing",
         "--cov-report=html",
         "--cov-report=xml",
+        "--cov-fail-under=75",
 ]
 testpaths = ["tests"]
 pythonpath = ["goggles"]
