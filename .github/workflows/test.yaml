@@ -10,22 +10,22 @@ jobs:
     test:
         runs-on: ubuntu-latest
 
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: ['3.10', '3.11', '3.12']
+
         steps:
             # Step 1: Check out the repository code
             - name: Check out code
               uses: actions/checkout@v3
 
-            # Step 2: Set up Python
-            - name: Set up Python
-              uses: actions/setup-python@v4
-              with:
-                  python-version: '3.10'
-
-            # Step 3: Install uv
+            # Step 2: Install uv (also provisions the requested Python)
             - name: Install uv
               uses: astral-sh/setup-uv@v3
               with:
-                  version: "latest"
+                  python-version: ${{ matrix.python-version }}
+                  enable-cache: true
 
             # Step 4: Install dependencies (+ JAX cpu version)
             - name: Install dependencies
@@ -37,14 +37,19 @@ jobs:
             - name: Run tests with coverage
               run: uv run pytest
 
-            # Upload the XML as a build artifact so we
-            # (and Codecov) can inspect it
+            # Upload the XML as a build artifact so we (and Codecov) can
+            # inspect it. Disambiguate the artifact name per matrix entry
+            # so the three Python jobs do not collide on a single name.
             - name: Upload coverage.xml artifact
               uses: actions/upload-artifact@v4
               with:
-                  name: coverage-xml
+                  name: coverage-xml-py${{ matrix.python-version }}
                   path: coverage.xml
+
+            # Only upload to Codecov from a single matrix entry to avoid
+            # double-counting reports across Python versions.
             - name: Upload coverage reports to Codecov
+              if: matrix.python-version == '3.12'
               uses: codecov/codecov-action@v5
               with:
                 token: ${{ secrets.CODECOV_TOKEN }}
