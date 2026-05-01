@@ -1,0 +1,5 @@
+# @package _global_
+# Scalar logging at ~10 kHz for 1 second.
+log_type: scalar
+num_logs: 10000
+delay: 0.0001

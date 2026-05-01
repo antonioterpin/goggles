@@ -1,6 +1,9 @@
 name: Coding style validation
 
 on:
+    push:
+        branches:
+            - '**'
     workflow_dispatch:
 
 jobs:
@@ -10,20 +13,33 @@ jobs:
         steps:
             # Step 1: Check out the code
             - name: Check out code
-              uses: actions/checkout@v3
+              uses: actions/checkout@v6
 
             # Step 2: Set up Python
             - name: Set up Python
-              uses: actions/setup-python@v4
+              uses: actions/setup-python@v6
               with:
                   python-version: '3.10'
 
-            # Step 3: Install dependencies
+            # Step 3: Install uv
+            #
+            # The pydoclint hook is `entry: uv run pydoclint`, so the runner
+            # needs uv on PATH at pre-commit time.
+            - name: Install uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  version: "latest"
+
+            # Step 4: Install dependencies
             - name: Install dependencies
               run: |
                   python -m pip install --upgrade pip
                   pip install pre-commit
 
-            # Step 4: Run pre-commit hooks
+            # Step 5: Sync dev extras so `uv run pydoclint` resolves
+            - name: Install dev extras (provides pydoclint)
+              run: uv sync --extra dev
+
+            # Step 6: Run pre-commit hooks
             - name: Run pre-commit
               run: pre-commit run --all-files

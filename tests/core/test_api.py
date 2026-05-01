@@ -1,10 +1,29 @@
 """Tests for goggles' outer API."""
 
+import importlib
 import logging
-from typing import ClassVar
+import threading
+from pathlib import Path
+from typing import Any, ClassVar, cast
+
 import pytest
 
 import goggles as gg
+
+
+class _ClassLevelLoggerHolder:
+    """Holder whose logger is captured at class-body time.
+
+    The ``gg.get_logger(...)`` call happens once when this module is
+    imported by pytest, before any test body runs. That mirrors the
+    realistic pattern of ``logger = gg.get_logger(...)`` at class scope
+    in user code, with ``gg.attach(...)`` invoked later from ``main()``.
+
+    Attributes:
+        logger: Class-level Goggles text logger captured at module load.
+    """
+
+    logger = gg.get_logger("class-level-logger-test", scope="global")
 
 
 # ---------------------------------------------------------------------
@@ -17,22 +36,24 @@ def test_get_logger_returns_expected_protocols():
     plain = gg.get_logger("plain")
     with_metrics = gg.get_logger("metrics", with_metrics=True)
 
-    assert isinstance(
-        plain, gg.TextLogger
-    ), "get_logger('plain') should return a TextLogger"
-    assert not isinstance(
-        plain, gg.GogglesLogger
-    ), "get_logger('plain') should not return a GogglesLogger"
-    assert isinstance(
-        with_metrics, gg.GogglesLogger
-    ), "get_logger(with_metrics=True) should return a GogglesLogger"
+    assert isinstance(plain, gg.TextLogger), (
+        "get_logger('plain') should return a TextLogger"
+    )
+    assert not isinstance(plain, gg.GogglesLogger), (
+        "get_logger('plain') should not return a GogglesLogger"
+    )
+    assert isinstance(with_metrics, gg.GogglesLogger), (
+        "get_logger(with_metrics=True) should return a GogglesLogger"
+    )
 
 
 def test_logger_bind_creates_new_instance():
     """Ensure that bind() returns a derived logger."""
     log = gg.get_logger("base")
     bound = log.bind(scope="run", extra_field="value")
-    assert isinstance(bound, gg.TextLogger), "bound logger should be a TextLogger"
+    assert isinstance(bound, gg.TextLogger), (
+        "bound logger should be a TextLogger"
+    )
     assert bound is not log, "bound logger should be a new instance"
 
 
@@ -41,7 +62,7 @@ def test_logger_bind_creates_new_instance():
 # ---------------------------------------------------------------------
 
 
-def test_timeit_measures_execution_time(monkeypatch):
+def test_timeit_measures_execution_time() -> None:
     """Check that @timeit executes and returns the wrapped result."""
     called = {}
 
@@ -51,9 +72,9 @@ def test_timeit_measures_execution_time(monkeypatch):
         return x + 1
 
     assert fn(1) == 2, "timeit decorated function should return correct result"
-    assert (
-        called["x"] == 1
-    ), "timeit decorated function should be called with correct args"
+    assert called["x"] == 1, (
+        "timeit decorated function should be called with correct args"
+    )
 
 
 def test_timeit_nested_does_not_conflict():
@@ -64,9 +85,9 @@ def test_timeit_nested_does_not_conflict():
     def inner(x):
         return x * 2
 
-    assert (
-        inner(3) == 6
-    ), "Nested timeit decorated function should return correct result"
+    assert inner(3) == 6, (
+        "Nested timeit decorated function should return correct result"
+    )
 
 
 def test_trace_on_error_logs_and_rethrows():
@@ -99,7 +120,7 @@ def test_trace_on_error_with_kwargs():
 class DummyHandler:
     name = "dummy"
     capabilities: ClassVar[frozenset[gg.Kind]] = frozenset({"log", "metric"})
-    handled = []
+    handled: ClassVar[list[object]] = []
 
     def can_handle(self, kind):
         return True
@@ -121,7 +142,7 @@ class DummyHandler:
         return cls()
 
 
-def test_attach_and_emit(monkeypatch):
+def test_attach_and_emit() -> None:
     """Attach dummy handler and ensure events are received."""
     gg.register_handler(DummyHandler)
     handler = DummyHandler()
@@ -131,11 +152,142 @@ def test_attach_and_emit(monkeypatch):
     log.info("event test")
     gg.finish()
 
-    assert "closed" in DummyHandler.handled, "Handler should be closed on finish"
-    # Events are now Event objects, which have .payload (previously .msg was used in dict)
+    assert "closed" in DummyHandler.handled, (
+        "Handler should be closed on finish"
+    )
     assert any(
         hasattr(e, "payload") for e in DummyHandler.handled if e != "closed"
     ), "Events should have a payload attribute"
+
+
+def _scoped_handlers() -> dict:
+    """Snapshot of (scope -> set of handler names) on the host bus."""
+    transport = cast(Any, gg.get_bus())
+    return dict(transport._bus.scopes)
+
+
+def _bus_handlers() -> dict:
+    """Snapshot of (handler name -> handler instance) on the host bus."""
+    transport = cast(Any, gg.get_bus())
+    return dict(transport._bus.handlers)
+
+
+def test_configure_is_noop_by_default() -> None:
+    """configure() with no args attaches nothing — purely a shortcut."""
+    gg.finish()  # clean slate
+    try:
+        before = _scoped_handlers()
+        gg.configure()
+        assert _scoped_handlers() == before, (
+            "configure() with default args must not change the bus state"
+        )
+    finally:
+        gg.finish()
+
+
+def test_configure_enable_console_attaches_console_handler() -> None:
+    """configure(enable_console=True) wires a ConsoleHandler on global."""
+    gg.finish()
+    try:
+        gg.configure(enable_console=True, console_level=logging.WARNING)
+        assert "global" in _scoped_handlers(), (
+            "configure(enable_console=True) should attach to 'global' by "
+            "default"
+        )
+        consoles = [
+            h
+            for h in _bus_handlers().values()
+            if isinstance(h, gg.ConsoleHandler)
+        ]
+        assert len(consoles) == 1, (
+            f"Expected exactly one ConsoleHandler, found {len(consoles)}"
+        )
+        assert consoles[0].level == logging.WARNING, (
+            "console_level should propagate to the handler"
+        )
+    finally:
+        gg.finish()
+
+
+def test_configure_respects_scopes_argument() -> None:
+    """A custom scopes list routes the auto-attached handler accordingly."""
+    gg.finish()
+    try:
+        gg.configure(enable_console=True, scopes=["train", "eval"])
+        scopes = _scoped_handlers()
+        for s in ("train", "eval"):
+            assert s in scopes, (
+                f"configure(scopes=[..., '{s}']) must attach under scope '{s}'"
+            )
+    finally:
+        gg.finish()
+
+
+def test_configure_replaces_existing_console_handler() -> None:
+    """A second configure() call swaps the console handler instance."""
+    gg.finish()
+    try:
+        gg.configure(enable_console=True, console_level=logging.INFO)
+        first = next(
+            h
+            for h in _bus_handlers().values()
+            if isinstance(h, gg.ConsoleHandler)
+        )
+        gg.configure(enable_console=True, console_level=logging.WARNING)
+        consoles = [
+            h
+            for h in _bus_handlers().values()
+            if isinstance(h, gg.ConsoleHandler)
+        ]
+        assert len(consoles) == 1, (
+            f"Reconfigure must keep exactly one console handler; "
+            f"saw {len(consoles)}"
+        )
+        assert consoles[0] is not first, (
+            "Reconfigure must install a new ConsoleHandler instance, "
+            "not silently keep the first one"
+        )
+        assert consoles[0].level == logging.WARNING, (
+            "Reconfigure must apply the new console_level (saw "
+            f"{consoles[0].level})"
+        )
+    finally:
+        gg.finish()
+
+
+def test_class_level_logger_does_not_hang_on_first_info() -> None:
+    """Logger captured at class-body scope must not hang on first .info().
+
+    Class-body resolution happens before any ``gg.attach()``; the first
+    ``.info()`` after attach must complete promptly. The emit runs on a
+    worker thread so a hang surfaces as a timed-out join rather than
+    wedging the test runner.
+    """
+    gg.register_handler(DummyHandler)
+    DummyHandler.handled.clear()
+    handler = DummyHandler()
+    gg.attach(handler, scopes=["global"])
+
+    done = threading.Event()
+
+    def _emit() -> None:
+        _ClassLevelLoggerHolder().logger.info("class-var event")
+        done.set()
+
+    t = threading.Thread(target=_emit, daemon=True)
+    t.start()
+    assert done.wait(timeout=5.0), (
+        "class-level logger.info() did not return within 5 s"
+    )
+    gg.finish()
+    assert any(
+        getattr(e, "payload", None) == "class-var event"
+        for e in DummyHandler.handled
+        if e != "closed"
+    ), (
+        "class-level logger never delivered its event — likely a stale "
+        "transport reference captured at class-body time"
+    )
 
 
 def test_eventbus_emit_routing_and_detach():
@@ -144,9 +296,9 @@ def test_eventbus_emit_routing_and_detach():
     handler = DummyHandler()
     bus.attach([handler.to_dict()], scopes=["scope"])
     assert "scope" in bus.scopes, "'scope' should be in bus scopes after attach"
-    assert (
-        handler.name in bus.handlers
-    ), "Handler should be in bus handlers after attach"
+    assert handler.name in bus.handlers, (
+        "Handler should be in bus handlers after attach"
+    )
 
     # Emit dummy event
     event_dict = {
@@ -163,7 +315,9 @@ def test_eventbus_emit_routing_and_detach():
 
     bus.detach("dummy", "scope")
     assert "scope" not in bus.scopes, "'scope' should be removed after detach"
-    assert "dummy" not in bus.handlers, "'dummy' handler should be removed after detach"
+    assert "dummy" not in bus.handlers, (
+        "'dummy' handler should be removed after detach"
+    )
 
 
 def test_detach_raises_for_invalid_scope():
@@ -217,15 +371,28 @@ def test_localstorage_handler_writes_json(tmp_path):
 
 def test_environment_overrides(monkeypatch):
     monkeypatch.setenv("GOGGLES_ASYNC", "false")
-    monkeypatch.setenv("GOGGLES_PORT", "9999")
-    monkeypatch.setenv("GOGGLES_HOST", "remote")
-
-    import importlib
 
     importlib.reload(gg)
     assert gg.GOGGLES_ASYNC is False, "GOGGLES_ASYNC env override failed"
-    assert gg.GOGGLES_PORT == "9999", "GOGGLES_PORT env override failed"
-    assert gg.GOGGLES_HOST == "remote", "GOGGLES_HOST env override failed"
+
+
+def test_goggles_socket_env_picked_up_by_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """GOGGLES_SOCKET should be honored by LocalTransport's default path.
+
+    Args:
+        monkeypatch: Fixture used to set the GOGGLES_SOCKET env var.
+        tmp_path: Fixture used to derive a unique socket path per test.
+    """
+    sock = str(tmp_path / "gg-api-test.sock")
+    monkeypatch.setenv("GOGGLES_SOCKET", sock)
+    from goggles._core.transport import _default_socket_path  # noqa: PLC0415
+
+    assert _default_socket_path() == sock, (
+        "GOGGLES_SOCKET env should drive the default socket path"
+    )
 
 
 def test_get_handler_class_error():
@@ -257,10 +424,12 @@ def test_goggles_logger_scalar_and_push(tmp_path):
     gg.finish()
 
     data = next(tmp_path.glob("*.jsonl")).read_text()
-    assert "loss" in data and "accuracy" in data, "Logged metrics missing from file"
+    assert "loss" in data and "accuracy" in data, (
+        "Logged metrics missing from file"
+    )
 
 
-def test_logger_levels_mapping(monkeypatch):
+def test_logger_levels_mapping() -> None:
     """Ensure TextLogger.log dispatches correctly by severity."""
     log = gg.get_logger("severity")
 
@@ -280,13 +449,10 @@ def test_finish_multiple_times_is_safe():
     gg.finish()  # second call should not crash
 
 
-def test_import_adds_nullhandler(monkeypatch):
+def test_import_adds_nullhandler() -> None:
     """Ensure module attaches a NullHandler at import time."""
-    import importlib
-    import goggles as gg1
-
-    importlib.reload(gg1)
-    logger = logging.getLogger(gg1.__name__)
-    assert any(
-        isinstance(h, logging.NullHandler) for h in logger.handlers
-    ), "Goggles logger should have a NullHandler by default"
+    importlib.reload(gg)
+    logger = logging.getLogger(gg.__name__)
+    assert any(isinstance(h, logging.NullHandler) for h in logger.handlers), (
+        "Goggles logger should have a NullHandler by default"
+    )

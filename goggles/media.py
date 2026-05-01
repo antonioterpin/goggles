@@ -1,13 +1,28 @@
 """Media utilities for saving images and videos from numpy arrays."""
 
-import yaml
-from typing import Literal
-import numpy as np
-import imageio
+import io
 from pathlib import Path
+from typing import Any, Literal, Protocol, cast
+
+import imageio
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.collections import LineCollection
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
+from ruamel.yaml import YAML
+
+
+class _FrameWriter(Protocol):
+    """Subset of imageio writer API used by this module."""
+
+    def append_data(self, image: np.ndarray) -> None:
+        """Append a single frame to the output stream.
+
+        Args:
+            image: Frame to append.
+        """
 
 
 def _to_uint8(arr: np.ndarray) -> np.ndarray:
@@ -15,6 +30,10 @@ def _to_uint8(arr: np.ndarray) -> np.ndarray:
 
     Args:
         arr: Input array of arbitrary dtype and range.
+
+    Returns:
+        uint8 array with values in [0, 255], suitable for saving
+            as an image or video.
     """
     if arr.dtype == np.uint8:
         return arr
@@ -39,6 +58,9 @@ def _normalize_frames(frames: np.ndarray) -> tuple[np.ndarray, str]:
 
     Returns:
         Tuple of (uint8 array, mode string).
+
+    Raises:
+        ValueError: If input shape or channel count is invalid.
     """
     arr = np.asarray(frames)
     if arr.ndim < 3:
@@ -49,7 +71,9 @@ def _normalize_frames(frames: np.ndarray) -> tuple[np.ndarray, str]:
     else:  # (T,H,W,C)
         C = arr.shape[-1]
         if C not in (1, 3, 4):
-            raise ValueError(f"Last dimension must be 1 or 3 channels, got {C}.")
+            raise ValueError(
+                f"Last dimension must be 1 or 3 channels, got {C}."
+            )
     if arr.ndim >= 4 and C == 1:
         arr = arr[..., 0]  # -> (T,H,W)
     arr_u8 = _to_uint8(arr)
@@ -98,10 +122,10 @@ def save_numpy_gif(
     """
     arr_u8, _ = _normalize_frames(frames)
     imgs = [arr_u8[i] for i in range(arr_u8.shape[0])]
-    imageio.mimsave(
+    imageio.mimwrite(  # pyright: ignore[reportCallIssue]
         out_path,
         imgs,
-        format="GIF",
+        format="GIF",  # pyright: ignore[reportArgumentType]
         duration=1.0 / float(fps),
         loop=loop,
         palettesize=256,
@@ -164,13 +188,10 @@ def save_numpy_mp4(
     if ffmpeg_params:
         writer_kwargs["ffmpeg_params"] = ffmpeg_params
 
-    with imageio.get_writer(out_path, **writer_kwargs) as writer:
-        if arr_u8.ndim == 3:
-            for i in range(arr_u8.shape[0]):
-                writer.append_data(arr_u8[i])
-        else:
-            for i in range(arr_u8.shape[0]):
-                writer.append_data(arr_u8[i])
+    with imageio.get_writer(out_path, **writer_kwargs) as writer_raw:
+        writer = cast(_FrameWriter, writer_raw)
+        for i in range(arr_u8.shape[0]):
+            writer.append_data(arr_u8[i])
 
 
 def save_numpy_image(image: np.ndarray, out_path: str, format: str) -> None:
@@ -184,7 +205,7 @@ def save_numpy_image(image: np.ndarray, out_path: str, format: str) -> None:
 
     """
     arr_u8, _ = _normalize_frames(image[np.newaxis, ...])
-    imageio.imwrite(out_path, arr_u8[0], format=format)
+    imageio.imwrite(out_path, arr_u8[0], format=format)  # pyright: ignore[reportCallIssue, reportArgumentType]
 
 
 def save_numpy_vector_field_visualization(
@@ -206,88 +227,19 @@ def save_numpy_vector_field_visualization(
         arrow_stride: Stride for downsampling arrows (every Nth point).
         dpi: Resolution of the output image.
         add_colorbar: Whether to include a colorbar.
-
     """
     # Store original backend to restore later
     original_backend = matplotlib.get_backend()
     matplotlib.use("Agg")
 
     try:
-        H, W, _ = vector_field.shape
-
-        # Create figure that matches pixel aspect; keep margins zero by default
-        fig, ax = plt.subplots(figsize=(W / 50, H / 50), dpi=dpi)
-        ax.set_aspect("equal")
-
-        # Compute scalar field and arrow color based on the selected mode
-        if mode == "magnitude":
-            scalar_field = np.linalg.norm(vector_field, axis=-1)
-            cmap = plt.cm.viridis
-            arrow_color = "white"
-        elif mode == "vorticity":
-            # Compute vorticity (curl) of the vector field: dVx/dy - dVy/dx
-            dy = np.gradient(vector_field[..., 0], axis=0)
-            dx = np.gradient(vector_field[..., 1], axis=1)
-            scalar_field = dx - dy
-            cmap = plt.cm.RdBu_r
-            arrow_color = "black"
-        else:
-            raise ValueError("mode must be 'magnitude' or 'vorticity'")
-
-        # Display scalar field as background
-        im = ax.imshow(
-            scalar_field,
-            cmap=cmap,
-            origin="lower",
-            extent=[0, W, 0, H],
-            interpolation="bilinear",
+        fig, bbox_setting, pad_setting = _build_vector_field_figure(
+            vector_field=vector_field,
+            mode=mode,
+            arrow_stride=arrow_stride,
+            dpi=dpi,
+            add_colorbar=add_colorbar,
         )
-
-        # Arrow grid
-        y_coords, x_coords = np.mgrid[0:H:arrow_stride, 0:W:arrow_stride]
-        u_sampled = vector_field[::arrow_stride, ::arrow_stride, 0]
-        v_sampled = vector_field[::arrow_stride, ::arrow_stride, 1]
-
-        # Plot arrows
-        ax.quiver(
-            x_coords,
-            y_coords,
-            u_sampled,
-            v_sampled,
-            color=arrow_color,
-            alpha=0.9,
-            scale_units="xy",
-            scale=1,
-            width=0.002,
-            headwidth=4,
-            headlength=5,
-            headaxislength=4.5,
-            linewidth=0.5,
-            edgecolor="none",
-        )
-
-        # Remove axes and ticks
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_frame_on(False)
-
-        # (1) Colorbar exactly same height as the axes
-        if add_colorbar:
-            divider = make_axes_locatable(ax)
-            # size can be tweaked; "3%" is a nice thin bar, pad is the gap
-            cax = divider.append_axes("right", size="3%", pad=0.02)
-            cb = fig.colorbar(im, cax=cax)
-            cb.ax.tick_params(length=2)
-
-            # Leave a tiny margin so ticks/labels aren't clipped
-            fig.subplots_adjust(left=0.0, right=0.98, bottom=0.0, top=1.0)
-            bbox_setting = "tight"
-            pad_setting = 0.02
-        else:
-            # (2) No colorbar: strip all outer boundaries/margins
-            fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
-            bbox_setting = "tight"
-            pad_setting = 0.0
 
         # Save
         dir.mkdir(parents=True, exist_ok=True)
@@ -306,57 +258,374 @@ def save_numpy_vector_field_visualization(
         matplotlib.use(original_backend)
 
 
-class NumpyDumper(yaml.SafeDumper):
-    """YAML Dumper that handles NumPy data types."""
+def create_numpy_vector_field_visualization(
+    vector_field: np.ndarray,
+    mode: Literal["vorticity", "magnitude"] = "magnitude",
+    arrow_stride: int = 8,
+    dpi: int = 300,
+    add_colorbar: bool = True,
+) -> np.ndarray:
+    """Create a vector field visualization as an RGB NumPy image.
 
-    pass
+    Args:
+        vector_field: Input vector field of shape (H, W, 2).
+        mode: Visualization mode.
+        arrow_stride: Stride for downsampling arrows (every Nth point).
+        dpi: Resolution used by matplotlib while rendering.
+        add_colorbar: Whether to include a colorbar.
+
+    Returns:
+        Rendered image as a uint8 array with shape (H, W, 3).
+    """
+    # Store original backend to restore later
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+
+    try:
+        fig, bbox_setting, pad_setting = _build_vector_field_figure(
+            vector_field=vector_field,
+            mode=mode,
+            arrow_stride=arrow_stride,
+            dpi=dpi,
+            add_colorbar=add_colorbar,
+        )
+
+        buf = io.BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=dpi,
+            bbox_inches=bbox_setting,  # "tight"
+            pad_inches=pad_setting,  # your 0.02
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+        buf.seek(0)
+        rgba = imageio.imread(buf)  # (H,W,4) uint8 RGBA
+
+        image = np.ascontiguousarray(rgba[..., :3])
+        return image
+
+    finally:
+        # Restore original matplotlib backend
+        matplotlib.use(original_backend)
 
 
-def _represent_numpy_scalar(dumper, value):
-    # Order matters: bool first (bool is a subclass of integer in Python)
-    if isinstance(value, np.bool_):
-        return dumper.represent_bool(bool(value))
-    if isinstance(value, np.integer):
-        return dumper.represent_int(int(value))
-    if isinstance(value, np.floating):
-        return dumper.represent_float(float(value))
-    # Handle Python built-in types that come from .item()
-    if isinstance(value, bool):
-        return dumper.represent_bool(value)
-    if isinstance(value, int):
-        return dumper.represent_int(value)
-    if isinstance(value, float):
-        return dumper.represent_float(value)
-    # Fallback: just stringify
-    return dumper.represent_str(str(value))
+def _build_vector_field_figure(
+    vector_field: np.ndarray,
+    mode: Literal["vorticity", "magnitude"],
+    arrow_stride: int,
+    dpi: int,
+    add_colorbar: bool,
+) -> tuple[Any, str, float]:
+    """Build a matplotlib figure visualizing a 2D vector field.
+
+    Args:
+        vector_field: Input vector field of shape (H, W, 2).
+        mode: Visualization mode.
+        arrow_stride: Stride for downsampling arrows (every Nth point).
+        dpi: Resolution used by matplotlib while rendering.
+        add_colorbar: Whether to include a colorbar.
+
+    Returns:
+        Tuple of (figure, bbox_setting, pad_setting) where:
+        - figure: The matplotlib figure object.
+        - bbox_setting: Value for `bbox_inches` to use when saving.
+        - pad_setting: Value for `pad_inches` to use when saving.
+
+    Raises:
+        ValueError: If `mode` is invalid or input shape is incorrect.
+    """
+    H = vector_field.shape[0]
+    W = vector_field.shape[1]
+
+    # Create figure that matches pixel aspect; keep margins zero by default
+    fig, ax = plt.subplots(figsize=(W / 50, H / 50), dpi=dpi)
+    ax.set_aspect("equal")
+
+    # Compute scalar field and arrow color based on the selected mode
+    if mode == "magnitude":
+        scalar_field = np.linalg.norm(vector_field, axis=-1)
+        cmap = plt.get_cmap("viridis")
+        arrow_color = "white"
+    elif mode == "vorticity":
+        # Compute vorticity (curl) of the vector field: dVx/dy - dVy/dx
+        dy = np.gradient(vector_field[..., 0], axis=0)
+        dx = np.gradient(vector_field[..., 1], axis=1)
+        scalar_field = dx - dy
+        cmap = plt.get_cmap("RdBu_r")
+        arrow_color = "black"
+    else:
+        raise ValueError("mode must be 'magnitude' or 'vorticity'")
+
+    # Display scalar field as background
+    im = ax.imshow(
+        scalar_field,
+        cmap=cmap,
+        origin="lower",
+        extent=(0, W, 0, H),
+        interpolation="bilinear",
+    )
+
+    # Arrow grid
+    y_coords, x_coords = np.mgrid[0:H:arrow_stride, 0:W:arrow_stride]
+    u_sampled = vector_field[::arrow_stride, ::arrow_stride, 0]
+    v_sampled = vector_field[::arrow_stride, ::arrow_stride, 1]
+
+    # Plot arrows
+    ax.quiver(
+        x_coords,
+        y_coords,
+        u_sampled,
+        v_sampled,
+        color=arrow_color,
+        alpha=0.9,
+        scale_units="xy",
+        scale=1,
+        width=0.002,
+        headwidth=4,
+        headlength=5,
+        headaxislength=4.5,
+        linewidth=0.5,
+        edgecolor="none",
+    )
+
+    # Remove axes and ticks
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_frame_on(False)
+
+    # (1) Colorbar exactly same height as the axes
+    if add_colorbar:
+        divider = make_axes_locatable(ax)
+        # size can be tweaked; "3%" is a nice thin bar, pad is the gap
+        cax = divider.append_axes("right", size="3%", pad=0.02)
+        cb = fig.colorbar(im, cax=cax)
+        cb.ax.tick_params(length=2)
+
+        # Leave a tiny margin so ticks/labels aren't clipped
+        fig.subplots_adjust(left=0.0, right=0.98, bottom=0.0, top=1.0)
+        bbox_setting = "tight"
+        pad_setting = 0.02
+    else:
+        # (2) No colorbar: strip all outer boundaries/margins
+        fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+        bbox_setting = "tight"
+        pad_setting = 0.0
+
+    return fig, bbox_setting, pad_setting
 
 
-def _represent_ndarray(dumper, data: np.ndarray):
-    if data.ndim == 0:
-        # 0-D array -> scalar
-        return _represent_numpy_scalar(dumper, data.item())
-    # Higher-D -> nested lists
-    return dumper.represent_list(data.tolist())
+def _build_trajectories_figure(
+    trajectories: np.ndarray,
+    dpi: int,
+) -> Any:
+    """Build a matplotlib figure visualizing a batch of trajectories.
+
+    Each path is drawn with its color encoding the per-step speed
+    ``||x[t+1] - x[t]||`` along the trajectory, with an open circle at
+    the start and a filled circle at the end so direction of motion is
+    unambiguous. A shared colorbar maps colors to speed.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
+            ``{2, 3}`` and ``L >= 2``.
+        dpi: Resolution used by matplotlib while rendering.
+
+    Returns:
+        The matplotlib figure.
+
+    Raises:
+        ValueError: If the input shape or dimension is invalid.
+    """
+    if trajectories.ndim != 3:
+        raise ValueError(
+            "Trajectories must have shape (N, L, dim); "
+            f"got {trajectories.shape}."
+        )
+    _, L, dim = trajectories.shape
+    if dim not in (2, 3):
+        raise ValueError(f"Trajectories dim must be 2 or 3; got {dim}.")
+    if L < 2:
+        raise ValueError(f"Trajectories must have length L >= 2; got {L}.")
+
+    # Per-step speed = ||x[t+1] - x[t]||. We share one colormap across
+    # the whole batch so segments are comparable across trajectories.
+    deltas = np.diff(trajectories, axis=1)  # (N, L-1, dim)
+    speed = np.linalg.norm(deltas, axis=-1)  # (N, L-1)
+
+    # Stack consecutive points into 2-point segments for LineCollection.
+    segments = np.stack(
+        (trajectories[:, :-1], trajectories[:, 1:]), axis=2
+    ).reshape(-1, 2, dim)  # (N*(L-1), 2, dim)
+
+    subplot_kw: dict[str, Any] = {"projection": "3d"} if dim == 3 else {}
+    fig, ax = plt.subplots(dpi=dpi, subplot_kw=subplot_kw)
+
+    lc_cls = Line3DCollection if dim == 3 else LineCollection
+    lc = lc_cls(segments, cmap="viridis", linewidth=1.0)  # pyright: ignore[reportArgumentType]
+    lc.set_array(speed.ravel())
+    ax.add_collection(lc)
+
+    # LineCollection does not auto-fit the view; set limits from data.
+    flat = trajectories.reshape(-1, dim)
+    mins = flat.min(axis=0)
+    maxs = flat.max(axis=0)
+    span = np.maximum(maxs - mins, 1e-6)
+    pad = 0.05 * span
+    ax.set_xlim(mins[0] - pad[0], maxs[0] + pad[0])
+    ax.set_ylim(mins[1] - pad[1], maxs[1] + pad[1])
+    if dim == 3:
+        ax.set_zlim(mins[2] - pad[2], maxs[2] + pad[2])  # pyright: ignore[reportAttributeAccessIssue]
+
+    # Direction markers: open circle at start, filled disc at end.
+    starts = trajectories[:, 0]
+    ends = trajectories[:, -1]
+    if dim == 2:
+        ax.scatter(
+            starts[:, 0],
+            starts[:, 1],
+            facecolors="none",
+            edgecolors="black",
+            s=14,
+            linewidths=0.7,
+            zorder=3,
+        )
+        ax.scatter(
+            ends[:, 0],
+            ends[:, 1],
+            color="black",
+            s=10,
+            zorder=3,
+        )
+        ax.set_aspect("equal")
+    else:
+        ax.scatter(
+            starts[:, 0],
+            starts[:, 1],
+            zs=starts[:, 2],
+            facecolors="none",
+            edgecolors="black",
+            s=14,
+            linewidths=0.7,
+            depthshade=False,
+        )
+        ax.scatter(
+            ends[:, 0],
+            ends[:, 1],
+            zs=ends[:, 2],
+            color="black",
+            s=10,
+            depthshade=False,
+        )
+
+    cb = fig.colorbar(lc, ax=ax, shrink=0.7, pad=0.04)
+    cb.set_label("speed (||Δx||)")
+    return fig
 
 
-def _represent_numpy_generic(dumper, data: np.generic):
-    # Handles np.int64, np.float32, np.bool_, etc.
-    return _represent_numpy_scalar(dumper, data)
+def save_numpy_trajectories_visualization(
+    trajectories: np.ndarray,
+    dir: Path,
+    name: str,
+    dpi: int = 200,
+) -> None:
+    """Save a trajectories visualization as a PNG image.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)``.
+        dir: Output directory.
+        name: Base name for the output PNG file (no extension).
+        dpi: Rendering resolution.
+    """
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+    try:
+        fig = _build_trajectories_figure(trajectories, dpi=dpi)
+        dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(
+            str(dir / f"{name}.png"),
+            dpi=dpi,
+            bbox_inches="tight",
+            pad_inches=0.05,
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+    finally:
+        matplotlib.use(original_backend)
 
 
-# Register representers
-NumpyDumper.add_representer(np.ndarray, _represent_ndarray)
-NumpyDumper.add_multi_representer(np.generic, _represent_numpy_generic)
+def create_numpy_trajectories_visualization(
+    trajectories: np.ndarray,
+    dpi: int = 200,
+) -> np.ndarray:
+    """Render a trajectories visualization to a uint8 RGB image.
+
+    Args:
+        trajectories: Array of shape ``(N, L, dim)``.
+        dpi: Rendering resolution.
+
+    Returns:
+        Rendered image as a ``uint8`` array with shape ``(H, W, 3)``.
+    """
+    original_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")
+    try:
+        fig = _build_trajectories_figure(trajectories, dpi=dpi)
+        buf = io.BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=dpi,
+            bbox_inches="tight",
+            pad_inches=0.05,
+            facecolor="white",
+            edgecolor="none",
+        )
+        plt.close(fig)
+        buf.seek(0)
+        rgba = imageio.imread(buf)
+        return np.ascontiguousarray(rgba[..., :3])
+    finally:
+        matplotlib.use(original_backend)
 
 
-def yaml_dump(obj, **kwargs) -> str:
+def _to_python(obj: Any) -> Any:
+    """Recursively convert NumPy types to their native Python equivalents.
+
+    Args:
+        obj: Arbitrary Python value, possibly nested, possibly containing
+            NumPy scalars or arrays.
+
+    Returns:
+        A value composed solely of ``dict``/``list``/builtin scalars,
+        safe to hand to a plain YAML dumper. Sequence inputs such as
+        tuples are normalized to lists.
+    """
+    if isinstance(obj, np.ndarray):
+        return _to_python(obj.tolist())
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, dict):
+        return {_to_python(k): _to_python(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_python(x) for x in obj]
+    return obj
+
+
+def yaml_dump(obj: Any) -> str:
     """Dump an object to a YAML string, handling NumPy types.
 
     Args:
-        obj: The object to dump.
-        **kwargs: Additional keyword arguments to pass to `yaml.dump`.
+        obj: The object to dump. NumPy arrays/scalars are normalized to
+            native Python types before serialization.
 
     Returns:
         YAML string representation of the object.
     """
-    return yaml.dump(obj, Dumper=NumpyDumper, **kwargs)
+    yaml = YAML(typ="safe", pure=True)
+    buf = io.StringIO()
+    yaml.dump(_to_python(obj), buf)
+    return buf.getvalue()

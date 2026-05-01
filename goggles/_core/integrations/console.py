@@ -3,13 +3,21 @@
 import logging
 from pathlib import Path
 from typing import ClassVar, Literal
+
 from typing_extensions import Self
 
 from goggles.types import Event, Kind
 
+from ._step_guard import StepGuard
+
 
 class ConsoleHandler:
-    """Handle 'log' events and output them to console using Python's logging API.
+    """Handle 'log' events and output them to console using Python's logging.
+
+    Out-of-order steps (``event.step`` strictly less than the highest step
+    previously seen on the same scope) trigger a warning but the event is
+    still emitted: console output is meant for humans reading in arrival
+    order, not for downstream replay.
 
     Attributes:
         name: Stable handler identifier.
@@ -43,6 +51,7 @@ class ConsoleHandler:
         self.path_style = path_style
         self.project_root = Path(project_root or Path.cwd())
         self._logger: logging.Logger
+        self._step_guard = StepGuard()
 
     def can_handle(self, kind: Kind) -> bool:
         """Return whether this handler can process the given kind.
@@ -60,9 +69,22 @@ class ConsoleHandler:
 
         Args:
             event: The log event to handle.
+
+        Raises:
+            ValueError:
+                If the event kind is not "log"
+                or if the event payload is not a string.
         """
         if event.kind != "log":
             raise ValueError(f"Unsupported event kind '{event.kind}'")
+
+        if self._step_guard.check(event.scope, event.step):
+            self._logger.warning(
+                "Out-of-order event (scope=%s, step=%s) — "
+                "step regressed below previously seen max",
+                event.scope,
+                event.step,
+            )
 
         level = int(event.level) if event.level else logging.NOTSET
         message = str(event.payload)
@@ -96,6 +118,9 @@ class ConsoleHandler:
     def open(self) -> None:
         """Initialize the handler (create logger and formatter)."""
         self._logger = logging.getLogger(self.name)
+        # Ensure that Goggles logs are not propagated to the root logger
+        # to avoid duplicates
+        self._logger.propagate = False
         if not self._logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(
@@ -113,7 +138,11 @@ class ConsoleHandler:
             handler.flush()
 
     def to_dict(self) -> dict:
-        """Serialize the handler for later reconstruction."""
+        """Serialize the handler for later reconstruction.
+
+        Returns:
+            A dictionary containing the handler's configuration.
+        """
         return {
             "cls": self.__class__.__name__,
             "data": {
@@ -126,7 +155,14 @@ class ConsoleHandler:
 
     @classmethod
     def from_dict(cls, serialized: dict) -> Self:
-        """Reconstruct a handler from its serialized representation."""
+        """Reconstruct a handler from its serialized representation.
+
+        Args:
+            serialized: A dictionary containing the handler's configuration.
+
+        Returns:
+            An instance of ConsoleHandler according to the serialized data.
+        """
         data = serialized.get("data", serialized)
         return cls(
             name=data["name"],

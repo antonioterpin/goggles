@@ -1,28 +1,38 @@
 """Types used in Goggles."""
 
-import numpy as np
-from typing import Literal, Any
-from typing_extensions import Self
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Any, Literal, TypeAlias
+
+import numpy as np
+from typing_extensions import Self
 
 Kind = Literal[
-    "log", "metric", "image", "video", "artifact", "histogram", "vector", "vector_field"
+    "log",
+    "metric",
+    "image",
+    "video",
+    "artifact",
+    "histogram",
+    "vector",
+    "vector_field",
+    "trajectories",
 ]
 
-Metrics = dict[str, float | int | np.ndarray]
+Metrics = Mapping[str, float | int | np.ndarray]
 Image: TypeAlias = np.ndarray
 Video: TypeAlias = np.ndarray
 Vector: TypeAlias = np.ndarray
 VectorField: TypeAlias = np.ndarray
+Trajectories: TypeAlias = np.ndarray
 
 
 @dataclass(frozen=True)
 class Event:
     """Structured event routed through the EventBus.
 
-    Args:
-        kind: Kind of event ("log", "metric", "image", "artifact").
+    Attributes:
+        kind: Kind of event ("log", "metric", "image", "artifact", etc.).
         scope: Scope of the event ("global" or "run").
         payload: Event payload.
         filepath: File path of the caller emitting the event.
@@ -31,7 +41,6 @@ class Event:
         step: Optional global step index.
         time: Optional global timestamp.
         extra: Optional extra metadata.
-
     """
 
     kind: Kind
@@ -82,7 +91,9 @@ class Event:
             Parsed Event instance.
         """
         extra_dict = {
-            k[len("extra.") :]: v for k, v in data.items() if k.startswith("extra.")
+            k[len("extra.") :]: v
+            for k, v in data.items()
+            if k.startswith("extra.")
         }
         return cls(
             kind=data["kind"],

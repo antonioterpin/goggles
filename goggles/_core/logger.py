@@ -8,14 +8,35 @@ External code should not import from this module. Instead, depend on:
   - `goggles.get_logger()` (factory returning a TextLogger/GogglesLogger).
 """
 
-import logging
 import inspect
-from typing import Any
-from collections.abc import Mapping
+import logging
+import os
+from typing import Any, TypeGuard
+
+import numpy as np
 from typing_extensions import Self
 
-from goggles import TextLogger, GogglesLogger, Event, GOGGLES_ASYNC
-from goggles.types import Metrics, Image, Video, VectorField, Vector
+from goggles import GOGGLES_ASYNC, Event, GogglesLogger, TextLogger
+from goggles.types import (
+    Image,
+    Metrics,
+    Trajectories,
+    Vector,
+    VectorField,
+    Video,
+)
+
+# Walking the call stack via `inspect.currentframe` is ~5-15 μs and
+# allocates. At 10 kHz that's measurable on the producer hot path. Set
+# GOGGLES_CAPTURE_CALLER=0 to skip it — every event will carry
+# ("<unknown>", 0) for filepath/lineno, which matters only for the console
+# formatter (wandb and file handlers don't use it).
+_CAPTURE_CALLER: bool = os.getenv("GOGGLES_CAPTURE_CALLER", "1").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+_UNKNOWN_CALLER: tuple[str, int] = ("<unknown>", 0)
 
 
 class CoreTextLogger(TextLogger):
@@ -31,36 +52,88 @@ class CoreTextLogger(TextLogger):
           constructor, or attributes from external code.
         * External users should obtain a `TextLogger` via
           `goggles.get_logger()` and program against the protocol.
-
-    Attributes:
-        _logger: Underlying `logging.Logger` instance. Internal use only.
-        _bound: Persistent structured fields merged into each record.
-            Internal use only.
-        _client: EventBus client for emitting structured events.
-
     """
 
     def __init__(
         self,
         scope: str,
         name: str | None = None,
-        to_bind: Mapping[str, Any] | None = None,
+        level: int = logging.NOTSET,
+        **to_bind: Any,
     ):
         """Initialize the CoreTextLogger.
 
         Args:
-            scope: Scope to bind the logger to (e.g., "global", "run", ecc.).
+            scope: Scope to bind the logger to (e.g., "global", "run", etc.).
             name: Optional name of the logger.
-            to_bind:
+            level: Minimum severity (standard ``logging`` levels) that this
+                logger will emit. Calls below this threshold are dropped
+                before touching the transport. ``logging.NOTSET`` (the
+                default) forwards every call.
+            **to_bind:
                 Optional initial persistent context to bind.
 
         """
-        from goggles._core.routing import get_bus
-
         self.name = name
         self._scope = scope
-        self._bound: dict[str, Any] = dict(to_bind or {})
-        self._client = get_bus()
+        self._level = int(level)
+        self._bound: dict[str, Any] = dict(**to_bind or {})
+
+    @property
+    def _client(self) -> Any:
+        """Return the live transport singleton.
+
+        Resolved lazily on every access so loggers captured at
+        class-body / module-import time (before any ``gg.attach()``)
+        always route through the current bus, and so a logger that
+        survives a ``gg.finish()`` -> rebuild cycle picks up the new
+        transport instead of holding a stale, closed reference.
+        """
+        # Importing here to avoid the goggles -> routing -> goggles cycle.
+        from goggles._core.routing import get_bus  # noqa: PLC0415
+
+        return get_bus()
+
+    def set_level(self, level: int) -> None:
+        """Set the minimum severity this logger will emit.
+
+        Calls below this threshold are dropped before touching the
+        transport. Only affects this logger instance — sibling loggers
+        obtained via separate ``get_logger(...)`` calls are untouched.
+
+        Args:
+            level: Standard ``logging`` level (e.g. ``logging.DEBUG``).
+        """
+        self._level = int(level)
+
+    def _below_level(self, severity: int) -> bool:
+        """Return whether ``severity`` is below the configured gate.
+
+        Args:
+            severity: Standard ``logging`` level of the call being made.
+
+        Returns:
+            ``True`` if the call should be dropped, ``False`` otherwise.
+        """
+        return self._level != logging.NOTSET and severity < self._level
+
+    def _dispatch(self, event: Event, *, async_mode: bool) -> None:
+        """Route ``event`` through the transport.
+
+        Args:
+            event: Event to dispatch.
+            async_mode: If True, fire-and-forget. Otherwise perform a
+                synchronous handoff to the configured transport before
+                returning. This does not imply cross-process delivery,
+                remote routing completion, or acknowledgement for
+                transports that do not provide those guarantees (for
+                example, ``LocalTransport`` in client mode, where
+                "sync" is a best-effort local-queue flush).
+        """
+        if async_mode:
+            self._client.emit(event)
+        else:
+            self._client.emit_sync(event)
 
     def bind(self, /, *, scope: str = "global", **fields: Any) -> Self:
         """Return a new logger with `fields` merged into persistent context.
@@ -76,10 +149,6 @@ class CoreTextLogger(TextLogger):
         Returns:
             Self: A new adapter with the merged persistent context.
 
-        Raises:
-            TypeError: If provided keys are not strings (may occur in stricter
-                configurations; current implementation assumes string keys).
-
         Examples:
             >>> log = get_logger("goggles")  # via public API
             >>> run_log = log.bind(scope="exp42", module="train")
@@ -89,7 +158,8 @@ class CoreTextLogger(TextLogger):
         return self.__class__(
             scope=scope,
             name=self.name,
-            to_bind={**self._bound, **fields},
+            level=self._level,
+            **{**self._bound, **fields},
         )
 
     def get_bound(self) -> dict[str, Any]:
@@ -121,8 +191,10 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.DEBUG):
+            return
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -133,10 +205,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-        if not async_mode:
-            future.result()
 
     def info(
         self,
@@ -158,8 +229,10 @@ class CoreTextLogger(TextLogger):
             **extra: Additional structured key-value pairs for this record.
 
         """
+        if self._below_level(logging.INFO):
+            return
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -170,11 +243,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def warning(
         self,
@@ -196,8 +267,10 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.WARNING):
+            return
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -208,11 +281,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def error(
         self,
@@ -234,8 +305,10 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.ERROR):
+            return
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -246,11 +319,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def critical(
         self,
@@ -272,8 +343,10 @@ class CoreTextLogger(TextLogger):
             **extra: Per-call structured fields merged with the bound context.
 
         """
+        if self._below_level(logging.CRITICAL):
+            return
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="log",
                 scope=self._scope,
@@ -284,11 +357,9 @@ class CoreTextLogger(TextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def __repr__(self) -> str:
         """Return a developer-friendly string representation.
@@ -299,7 +370,8 @@ class CoreTextLogger(TextLogger):
 
         """
         return (
-            f"{self.__class__.__name__}(name={self.name!r}, " f"bound={self._bound!r})"
+            f"{self.__class__.__name__}(name={self.name!r}, "
+            f"bound={self._bound!r})"
         )
 
 
@@ -315,33 +387,72 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         async_mode: bool = GOGGLES_ASYNC,
         **extra: Any,
     ) -> None:
-        """Emit a batch of scalar metrics.
+        """Emit a batch of metrics and/or images in one call.
+
+        Values that look like images (2-D arrays, or 3-D arrays with a
+        trailing channel dim in ``{1, 3, 4}``) are promoted to individual
+        image events; every other value is batched into a single metric
+        event. Scalars and images can be mixed freely in the same call.
 
         Args:
-            metrics: (Name,value) pairs.
+            metrics: Mapping of ``name -> value``. Values may be scalars,
+                arrays used as metrics, or image-shaped numpy arrays.
             step: Global step index.
             time: Optional global timestamp.
             async_mode: If True, do not block waiting for delivery.
-            **extra: Additional routing metadata (e.g., split="train").
-
+            **extra: Additional routing metadata (e.g. ``split="train"``)
+                forwarded both to the batched metric event and to each
+                promoted image event. For promoted image events, ``name`` is
+                always overridden with the metric key, and ``format``
+                defaults to ``"png"`` if not provided in ``extra`` or the
+                bound context.
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
-            Event(
-                kind="metric",
-                scope=self._scope,
-                payload=metrics,
-                level=None,
-                filepath=filepath,
-                lineno=lineno,
-                step=step,
-                time=time,
-                extra={**self._bound, **extra},
-            )
-        )
+        bound_extra = {**self._bound, **extra}
 
-        if not async_mode:
-            future.result()
+        scalars: dict[str, Any] = {}
+        images: dict[str, np.ndarray] = {}
+        for name, value in metrics.items():
+            if _is_push_image(value):
+                images[name] = value
+            else:
+                scalars[name] = value
+
+        if scalars:
+            self._dispatch(
+                Event(
+                    kind="metric",
+                    scope=self._scope,
+                    payload=scalars,
+                    level=None,
+                    filepath=filepath,
+                    lineno=lineno,
+                    step=step,
+                    time=time,
+                    extra=bound_extra,
+                ),
+                async_mode=async_mode,
+            )
+
+        for img_name, img in images.items():
+            self._dispatch(
+                Event(
+                    kind="image",
+                    scope=self._scope,
+                    payload=img,
+                    level=None,
+                    filepath=filepath,
+                    lineno=lineno,
+                    step=step,
+                    time=time,
+                    extra={
+                        "format": "png",
+                        **bound_extra,
+                        "name": img_name,
+                    },
+                ),
+                async_mode=async_mode,
+            )
 
     def scalar(
         self,
@@ -356,16 +467,16 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         """Emit a single scalar metric.
 
         Args:
+            name: Metric name.
             value: Metric value.
             step: Global step index.
-            name: Metric name.
             time: Optional global timestamp.
             async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata (e.g., split="train").
 
         """
         filepath, lineno = _caller_id()
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="metric",
                 scope=self._scope,
@@ -376,11 +487,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra={**self._bound, **extra},
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def image(
         self,
@@ -410,7 +519,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
         extra["format"] = format
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="image",
                 scope=self._scope,
@@ -421,11 +530,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def video(
         self,
@@ -440,6 +547,11 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         **extra: Any,
     ) -> None:
         """Emit a video artifact (encoded bytes).
+
+        Notes:
+            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1)
+                or (B, F, 1, H, W).
+            With F the number of frames, and B the batch size.
 
         Args:
             video: Video.
@@ -459,7 +571,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         extra["fps"] = fps
         extra["format"] = format
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="video",
                 scope=self._scope,
@@ -470,11 +582,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def artifact(
         self,
@@ -505,7 +615,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
             extra["name"] = name
         extra["format"] = format
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="artifact",
                 scope=self._scope,
@@ -516,11 +626,9 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
-
-        if not async_mode:
-            future.result()
 
     def vector_field(
         self,
@@ -548,7 +656,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="vector_field",
                 scope=self._scope,
@@ -559,11 +667,52 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
 
-        if not async_mode:
-            future.result()
+    def trajectories(
+        self,
+        trajectories: Trajectories,
+        step: int,
+        *,
+        name: str | None = None,
+        time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
+        **extra: Any,
+    ) -> None:
+        """Emit a batch of particle trajectories.
+
+        Args:
+            trajectories: Array of shape ``(N, L, dim)`` where ``N`` is the
+                number of trajectories, ``L`` their length, and ``dim`` the
+                spatial dimension (2 or 3).
+            step: Global step index.
+            name: Optional artifact name.
+            time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
+            **extra: Additional routing metadata (e.g.
+                ``store_visualization=True`` to also save a PNG preview).
+        """
+        filepath, lineno = _caller_id()
+        extra = {**self._bound, **extra}
+        if name is not None:
+            extra["name"] = name
+
+        self._dispatch(
+            Event(
+                kind="trajectories",
+                scope=self._scope,
+                payload=trajectories,
+                level=None,
+                filepath=filepath,
+                lineno=lineno,
+                step=step,
+                time=time,
+                extra=extra,
+            ),
+            async_mode=async_mode,
+        )
 
     def histogram(
         self,
@@ -594,7 +743,7 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
         if name is not None:
             extra["name"] = name
 
-        future = self._client.emit(
+        self._dispatch(
             Event(
                 kind="histogram",
                 scope=self._scope,
@@ -605,24 +754,149 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
                 step=step,
                 time=time,
                 extra=extra,
-            )
+            ),
+            async_mode=async_mode,
         )
 
-        if not async_mode:
-            future.result()
+    def dictionary(
+        self,
+        name: str,
+        data: dict,
+        step: int,
+        *,
+        time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
+        **extra: Any,
+    ) -> None:
+        """Emit all key-value pairs in a dictionary as separate metrics.
+
+        Notes:
+            * The `name` parameter serves as a base for the emitted metrics.
+            * Each key in the `data` dictionary is appended to the base name
+                to form the full metric name (e.g., `name/key`).
+            * Values in the dictionary are emitted according to their type:
+                - Scalars (int, float) are emitted as single metrics.
+                - 1D arrays are emitted as multiple metrics with indexed names
+                    (e.g., `name/key_0`, `name/key_1`, ...).
+                - 2D arrays are emitted as images.
+                - 3D arrays are emitted as images if the last dimension has
+                    1, 3, or 4 channels;
+                    if the last dimension has 2 channels, they are emitted
+                    as vector fields.
+            * Unsupported types are logged as errors.
+
+        Args:
+            name: Base name for the metrics.
+            data: Dictionary data.
+            step: Global step index.
+            time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
+            **extra: Additional routing metadata.
+
+        """
+        for topic, value in data.items():
+            topic_str = str(topic)
+            name_log = (
+                f"{name}{topic_str}"
+                if topic_str.startswith("/")
+                else f"{name}/{topic_str}"
+            )
+
+            kw = {
+                "step": step,
+                "time": time,
+                "async_mode": async_mode,
+                **extra,
+            }
+
+            if isinstance(value, (int, float, np.number)):
+                self.scalar(name_log, float(value), **kw)
+                continue
+
+            if isinstance(value, np.ndarray) and self._emit_dict_ndarray(
+                name_log, value, kw
+            ):
+                continue
+
+            self.error(
+                f"Unsupported type for dictionary logging: topic={topic}, "
+                f"type={type(value)}",
+                **kw,
+            )
+
+    def _emit_dict_ndarray(
+        self, name_log: str, value: np.ndarray, kw: dict[str, Any]
+    ) -> bool:
+        """Route a numpy value emitted by :meth:`dictionary` to the right API.
+
+        Args:
+            name_log: Fully-qualified metric/artifact name.
+            value: Numpy array payload.
+            kw: Pre-built kwargs (``step``, ``time``, ``async_mode``, extras)
+                forwarded to the target emit method.
+
+        Returns:
+            ``True`` if a matching emit path was dispatched, ``False`` if
+            the array shape is not supported (caller should surface an
+            error).
+        """
+        if value.size == 1:
+            self.scalar(name_log, float(value.item()), **kw)
+            return True
+        if value.ndim == 1:
+            for i, v in enumerate(value):
+                self.scalar(f"{name_log}_{i}", float(v), **kw)
+            return True
+        if value.ndim == 2:
+            self.image(value, name=name_log, **kw)
+            return True
+        if value.ndim in (3, 4):
+            channels = value.shape[2]
+            if channels in (1, 3, 4):
+                self.image(value, name=name_log, **kw)
+                return True
+            if channels == 2:
+                self.vector_field(value, name=name_log, **kw)
+                return True
+        return False
+
+
+def _is_push_image(value: Any) -> TypeGuard[np.ndarray]:
+    """Return whether ``value`` should be promoted from metric to image.
+
+    Args:
+        value: Candidate payload from a :meth:`CoreGogglesLogger.push`
+            mapping.
+
+    Returns:
+        ``True`` when the value is a 2-D numpy array, or a 3-D numpy
+        array whose trailing axis is ``1``, ``3``, or ``4`` channels.
+        Anything else (scalars, 1-D vectors, higher-rank tensors, other
+        channel counts) stays on the metric path.
+    """
+    if not isinstance(value, np.ndarray):
+        return False
+    if value.ndim == 2:
+        return True
+    return value.ndim == 3 and value.shape[-1] in (1, 3, 4)
 
 
 def _caller_id() -> tuple[str, int]:
     """Get the caller's filepath and line number for logging purposes.
 
+    Honours the ``GOGGLES_CAPTURE_CALLER`` env var: when disabled, returns
+    a constant tuple and skips the frame walk entirely — relevant for
+    producers logging at 10 kHz+ where the 5-15 μs stack walk is visible
+    in p99 latency.
+
     Returns:
         A tuple of (file path, line number).
 
     """
+    if not _CAPTURE_CALLER:
+        return _UNKNOWN_CALLER
     frame = inspect.currentframe()
     if frame is None or frame.f_back is None or frame.f_back.f_back is None:
-        return ("<unknown>", 0)
+        return _UNKNOWN_CALLER
     caller_frame = frame.f_back.f_back
-    filename = caller_frame.f_code.co_filename
-    line_number = caller_frame.f_lineno
-    return (filename, line_number)
+    return (caller_frame.f_code.co_filename, caller_frame.f_lineno)

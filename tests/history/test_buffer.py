@@ -1,10 +1,13 @@
 """Unit tests for goggles.history.buffer module."""
 
-import pytest
+from typing import Any, cast
+
 import jax
 import jax.numpy as jnp
+import pytest
+
 from goggles.history.buffer import create_history, update_history
-from goggles.history.spec import HistorySpec, HistoryFieldSpec
+from goggles.history.spec import HistoryFieldSpec, HistorySpec
 
 
 @pytest.fixture
@@ -64,7 +67,9 @@ def test_create_history_basic(sample_spec, batch_size):
     history = create_history(sample_spec, batch_size=batch_size)
     assert set(history.keys()) == {"images", "flow"}, "History keys mismatch"
     # shapes should follow (B, length, *shape)
-    assert history["images"].shape[0] == batch_size, "Images batch size mismatch"
+    assert history["images"].shape[0] == batch_size, (
+        "Images batch size mismatch"
+    )
     assert history["images"].shape[1] == 3, "Images length mismatch"
     assert history["flow"].shape[0] == batch_size, "Flow batch size mismatch"
     assert history["flow"].shape[1] == 2, "Flow length mismatch"
@@ -72,7 +77,9 @@ def test_create_history_basic(sample_spec, batch_size):
     assert jnp.all(history["flow"] == 1), "Flow not initialized to ones"
 
 
-@pytest.mark.parametrize("batch_size,length,vec_shape", [(1, 4, (2,)), (2, 4, (2,))])
+@pytest.mark.parametrize(
+    "batch_size,length,vec_shape", [(1, 4, (2,)), (2, 4, (2,))]
+)
 def test_create_history_with_randn(batch_size, length, vec_shape):
     spec = HistorySpec.from_config(
         {
@@ -89,8 +96,12 @@ def test_create_history_with_randn(batch_size, length, vec_shape):
     assert "noise" in history, "'noise' field missing in history"
     assert history["noise"].shape[0] == batch_size, "Noise batch size mismatch"
     assert history["noise"].shape[1] == length, "Noise length mismatch"
-    assert history["noise"].shape[2:] == vec_shape, "Noise vector shape mismatch"
-    assert jnp.isfinite(history["noise"]).all(), "Noise contains non-finite values"
+    assert history["noise"].shape[2:] == vec_shape, (
+        "Noise vector shape mismatch"
+    )
+    assert jnp.isfinite(history["noise"]).all(), (
+        "Noise contains non-finite values"
+    )
 
 
 def test_create_history_invalid_batch_raises(sample_spec):
@@ -104,11 +115,15 @@ def test_update_history_basic_shift_and_append(batch_size, time_len):
     new = {"x": jnp.ones((batch_size, 1, 1))}
     updated = update_history(hist, new)
     expected = jnp.concatenate(
-        [jnp.zeros((batch_size, time_len - 1, 1)), jnp.ones((batch_size, 1, 1))], axis=1
+        [
+            jnp.zeros((batch_size, time_len - 1, 1)),
+            jnp.ones((batch_size, 1, 1)),
+        ],
+        axis=1,
     )
-    assert jnp.allclose(
-        updated["x"], expected
-    ), "Update failed to correctly shift and append"
+    assert jnp.allclose(updated["x"], expected), (
+        "Update failed to correctly shift and append"
+    )
 
 
 def test_update_history_invalid_shape_raises():
@@ -138,9 +153,13 @@ def test_update_history_reset_mask(batch_size, time_len):
     updated = update_history(hist, new, reset_mask=reset_mask, spec=None)
 
     # For the first batch element (reset), should be all zeros
-    assert jnp.all(updated["x"][0] == 0), "Reset batch element should be all zeros"
+    assert jnp.all(updated["x"][0] == 0), (
+        "Reset batch element should be all zeros"
+    )
     # For a non-reset batch element, last entry should equal the appended value
-    assert updated["x"][1, -1, 0] == 99, "Non-reset batch element last entry mismatch"
+    assert updated["x"][1, -1, 0] == 99, (
+        "Non-reset batch element last entry mismatch"
+    )
 
 
 def test_update_history_missing_field_raises():
@@ -179,18 +198,20 @@ def test_update_history_reset_with_zeros(base_spec, batch_size, time_len):
     updated = update_history(hist, new, reset_mask, base_spec)
 
     # Reset batch fully zeros
-    assert jnp.all(
-        updated["zeros_field"][0] == 0
-    ), "Reset zeros_field should be all zeros"
+    assert jnp.all(updated["zeros_field"][0] == 0), (
+        "Reset zeros_field should be all zeros"
+    )
     # Non-reset batch shifted and appended
-    assert jnp.all(
-        updated["zeros_field"][1, -1] == 99
-    ), "Non-reset zeros_field last entry mismatch"
+    assert jnp.all(updated["zeros_field"][1, -1] == 99), (
+        "Non-reset zeros_field last entry mismatch"
+    )
 
 
 @pytest.mark.parametrize("batch_size,time_len", [(2, 3), (3, 4)])
 def test_update_history_reset_with_ones(base_spec, batch_size, time_len):
-    hist = {"ones_field": jnp.zeros((batch_size, time_len, 2), dtype=jnp.float32)}
+    hist = {
+        "ones_field": jnp.zeros((batch_size, time_len, 2), dtype=jnp.float32)
+    }
     new = {"ones_field": jnp.ones((batch_size, 1, 2), dtype=jnp.float32) * 5}
     reset_mask = jnp.array([True] + [False] * (batch_size - 1))
 
@@ -201,14 +222,18 @@ def test_update_history_reset_with_ones(base_spec, batch_size, time_len):
         updated["ones_field"][0], jnp.ones_like(updated["ones_field"][0])
     ), "Reset ones_field should be all ones"
     # Non-reset batch last frame == 5
-    assert jnp.allclose(
-        updated["ones_field"][1, -1], 5.0
-    ), "Non-reset ones_field last entry mismatch"
+    assert jnp.allclose(updated["ones_field"][1, -1], 5.0), (
+        "Non-reset ones_field last entry mismatch"
+    )
 
 
 @pytest.mark.parametrize("batch_size,time_len", [(2, 3), (3, 4)])
-def test_update_history_reset_with_randn_requires_rng(base_spec, batch_size, time_len):
-    hist = {"randn_field": jnp.zeros((batch_size, time_len, 2), dtype=jnp.float32)}
+def test_update_history_reset_with_randn_requires_rng(
+    base_spec, batch_size, time_len
+):
+    hist = {
+        "randn_field": jnp.zeros((batch_size, time_len, 2), dtype=jnp.float32)
+    }
     new = {"randn_field": jnp.ones((batch_size, 1, 2), dtype=jnp.float32)}
     reset_mask = jnp.array([True] + [False] * (batch_size - 1))
 
@@ -219,13 +244,13 @@ def test_update_history_reset_with_randn_requires_rng(base_spec, batch_size, tim
     rng = jax.random.PRNGKey(0)
     updated = update_history(hist, new, reset_mask, base_spec, rng=rng)
     # Ensure reset batch contains non-zero random values
-    assert not jnp.allclose(
-        updated["randn_field"][0], 0
-    ), "Reset randn_field should not be all zeros"
+    assert not jnp.allclose(updated["randn_field"][0], 0), (
+        "Reset randn_field should not be all zeros"
+    )
     # Ensure non-reset batch is correctly appended
-    assert jnp.allclose(
-        updated["randn_field"][1, -1], 1.0
-    ), "Non-reset randn_field last entry mismatch"
+    assert jnp.allclose(updated["randn_field"][1, -1], 1.0), (
+        "Non-reset randn_field last entry mismatch"
+    )
 
 
 @pytest.mark.parametrize("batch_size,time_len", [(2, 3), (3, 4)])
@@ -243,11 +268,16 @@ def test_update_history_reset_with_none_mode(base_spec, batch_size, time_len):
     # "none" mode should keep original values (no reset): compare shifted rows
     assert jnp.allclose(
         updated["none_field"][0],
-        jnp.concatenate([hist["none_field"][0, 1:], new["none_field"][0]], axis=0),
-    ), "none_field should behave like normal shift-append even if reset_mask is True"
-    assert jnp.allclose(
-        updated["none_field"][1, -1], 10.0
-    ), "Non-reset none_field last entry mismatch"
+        jnp.concatenate(
+            [hist["none_field"][0, 1:], new["none_field"][0]], axis=0
+        ),
+    ), (
+        "none_field should behave like normal shift-append "
+        "even if reset_mask is True"
+    )
+    assert jnp.allclose(updated["none_field"][1, -1], 10.0), (
+        "Non-reset none_field last entry mismatch"
+    )
 
 
 def test_update_history_reset_invalid_mode_raises():
@@ -293,7 +323,12 @@ def test_create_history_invalid_field_length():
 
 
 def test_create_history_unknown_init_fieldspec():
-    bad = HistoryFieldSpec(length=2, shape=(1,), dtype=jnp.float32, init="badinit")
+    bad = HistoryFieldSpec(
+        length=2,
+        shape=(1,),
+        dtype=jnp.float32,
+        init=cast(Any, "badinit"),
+    )
     spec = HistorySpec(fields={"a": bad})
     with pytest.raises(ValueError, match="Unknown init mode"):
         create_history(spec, batch_size=1)
@@ -309,7 +344,9 @@ def test_update_history_dim_mismatch_raises(batch_size, time_len):
         update_history(hist, new)
 
 
-@pytest.mark.parametrize("batch_size,length,vec_shape", [(1, 2, (2,)), (2, 3, (2,))])
+@pytest.mark.parametrize(
+    "batch_size,length,vec_shape", [(1, 2, (2,)), (2, 3, (2,))]
+)
 def test_create_history_none_init(batch_size, length, vec_shape):
     spec = HistorySpec.from_config(
         {
@@ -332,8 +369,12 @@ def test_create_history_none_init(batch_size, length, vec_shape):
     assert arr.dtype == jnp.float32, "Array dtype mismatch for none init"
 
 
-@pytest.mark.parametrize("batch_size,length,vec_shape", [(1, 2, (2,)), (2, 3, (2,))])
-def test_create_history_randn_requires_rng_raises(batch_size, length, vec_shape):
+@pytest.mark.parametrize(
+    "batch_size,length,vec_shape", [(1, 2, (2,)), (2, 3, (2,))]
+)
+def test_create_history_randn_requires_rng_raises(
+    batch_size, length, vec_shape
+):
     spec = HistorySpec.from_config(
         {
             "n": {
@@ -397,11 +438,8 @@ def test_update_history_randn_no_resets_uses_dummy_keys(batch_size, time_len):
     )
     hist = {"r": jnp.zeros((batch_size, time_len, 1), dtype=jnp.float32)}
     new = {"r": jnp.ones((batch_size, 1, 1), dtype=jnp.float32)}
-    # Use a numpy boolean array (or Python list) so outer host-level checks can
-    # evaluate without JAX tracer behavior. No rng provided, but no resets -> ok.
-    import numpy as _np
-
-    reset_mask = _np.array([False, False])
+    # Use a boolean mask with no resets.
+    reset_mask = jnp.array([False, False])
     with pytest.raises(ValueError, match="requires rng"):
         update_history(hist, new, reset_mask, spec=spec, rng=None)
 
@@ -411,7 +449,12 @@ def test_update_history_unknown_init_mode_in_do_reset(batch_size, time_len):
     # Build a spec where init_mode is unknown; expect update_history to raise
     bad_spec = HistorySpec(
         fields={
-            "b": HistoryFieldSpec(length=3, shape=(1,), dtype=jnp.float32, init="foo")
+            "b": HistoryFieldSpec(
+                length=3,
+                shape=(1,),
+                dtype=jnp.float32,
+                init=cast(Any, "foo"),
+            )
         }
     )
     hist = {"b": jnp.zeros((batch_size, time_len, 1), dtype=jnp.float32)}

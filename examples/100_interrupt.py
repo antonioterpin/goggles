@@ -2,24 +2,37 @@
 
 import signal
 import time
-import goggles as gg
+from types import FrameType
 
+import goggles as gg
 from goggles._core.integrations import ConsoleHandler
 
 # Instantiate a TextLogger (No metrics)
-logger = gg.get_logger(name="examples.interrupt")
+logger = gg.get_logger("examples.interrupt")
 
-gg.attach(ConsoleHandler(name="examples.interrupt.info", level=gg.INFO), ["global"])
+gg.attach(
+    ConsoleHandler(name="examples.interrupt.info", level=gg.INFO), ["global"]
+)
 
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 
 
 # simulate an existing custom SIGINT handler
-def custom_handler(signum, frame):
-    """Simulate a custom handler for SIGINT (Ctrl-C) wrapping previous handler."""
+def custom_handler(signum: int, frame: FrameType | None) -> None:
+    """Simulate a custom SIGINT handler that wraps the previous handler.
+
+    Args:
+        signum: Received signal number.
+        frame: Current stack frame at signal time.
+
+    Returns:
+        None.
+
+    """
     print("Custom handler called for SIGINT (Ctrl-C).")
     print("Now calling what was the previous handler...")
-    _prev_sigint_handler(signum, frame)  # call the previous handler if it exists
+    if callable(_prev_sigint_handler):
+        _prev_sigint_handler(signum, frame)
 
 
 # install our wrapper

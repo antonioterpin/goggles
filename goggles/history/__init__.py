@@ -14,17 +14,17 @@ Public API:
 
 from __future__ import annotations
 
-from .spec import HistoryFieldSpec, HistorySpec
 from .buffer import create_history, update_history
-from .utils import slice_history, peek_last, to_device, to_host
+from .spec import HistoryFieldSpec, HistorySpec
+from .utils import peek_last, slice_history, to_device, to_host
 
 __all__ = [
     "HistoryFieldSpec",
     "HistorySpec",
     "create_history",
-    "update_history",
-    "slice_history",
     "peek_last",
+    "slice_history",
     "to_device",
     "to_host",
+    "update_history",
 ]

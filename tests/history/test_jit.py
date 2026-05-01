@@ -1,11 +1,12 @@
-"""Tests verifying that public functions in goggles.history are JIT/VMAP friendly."""
+"""Tests for JIT/VMAP compatibility in `goggles.history`."""
 
 import jax
 import jax.numpy as jnp
 import pytest
+
 from goggles.history import create_history, update_history
-from goggles.history.utils import slice_history, peek_last
 from goggles.history.spec import HistorySpec
+from goggles.history.utils import peek_last, slice_history
 
 
 @pytest.mark.parametrize("batch_size", [1, 2, 5])
@@ -13,11 +14,9 @@ from goggles.history.spec import HistorySpec
 @pytest.mark.parametrize("shape", [(1,), (2, 3)])
 @pytest.mark.parametrize("dtype", [jnp.float32, jnp.int32])
 @pytest.mark.parametrize("init", ["zeros", "ones"])
-def test_create_history_jittable_and_vmappable(batch_size, length, shape, dtype, init):
-    spec = HistorySpec.from_config(
-        {"x": {"length": length, "shape": shape, "dtype": dtype, "init": init}}
-    )
-
+def test_create_history_jittable_and_vmappable(
+    batch_size, length, shape, dtype, init
+):
     # create_history depends only on spec and batch_size (pure inputs)
     # JIT the function (spec is a Python dataclass, so we supply as static arg)
     # JIT the function by constructing the spec inside the jitted function
@@ -28,7 +27,14 @@ def test_create_history_jittable_and_vmappable(batch_size, length, shape, dtype,
     jitted = jax.jit(
         lambda bs: create_history(
             HistorySpec.from_config(
-                {"x": {"length": length, "shape": shape, "dtype": dtype, "init": init}}
+                {
+                    "x": {
+                        "length": length,
+                        "shape": shape,
+                        "dtype": dtype,
+                        "init": init,
+                    }
+                }
             ),
             bs,
         ),
@@ -36,7 +42,9 @@ def test_create_history_jittable_and_vmappable(batch_size, length, shape, dtype,
     )
     h = jitted(batch_size)
     assert "x" in h, "'x' field missing in jitted history"
-    assert h["x"].shape == (batch_size, length, *shape), "Jitted history shape mismatch"
+    assert h["x"].shape == (batch_size, length, *shape), (
+        "Jitted history shape mismatch"
+    )
 
 
 @pytest.mark.parametrize("B", [1, 3])
@@ -50,7 +58,7 @@ def test_update_history_jittable_and_vmappable(B, T):
     out = jitted(hist, new)
     assert out["x"].shape == (B, T, 1), "Jitted update_history shape mismatch"
 
-    # vmap over per-batch row using a wrapper that operates on single-row tensors
+    # vmap over per-batch rows with a single-row wrapper.
     def per_row(h_row, n_row):
         # h_row: (T, *), n_row: (1, *) -> add batch dim and call
         h = {"x": h_row[None, ...]}

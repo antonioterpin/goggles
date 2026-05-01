@@ -1,10 +1,26 @@
 import json
+import logging
+import os
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from goggles._core.integrations.storage import LocalStorageHandler
+
+
+def _capture_logger_messages(
+    logger: logging.Logger,
+) -> tuple[list[str], logging.Handler]:
+    messages: list[str] = []
+
+    class _MessageCollector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            messages.append(record.getMessage())
+
+    collector = _MessageCollector()
+    logger.addHandler(collector)
+    return messages, collector
 
 
 @pytest.fixture
@@ -15,10 +31,14 @@ def tmp_handler(tmp_path):
     handler.close()
 
 
-def make_event(kind, payload=None, extra=None):
+def make_event(kind, payload=None, extra=None, *, scope="global", step=None):
     event = MagicMock()
+    event.scope = scope
+    event.step = step
     event_data = {
         "kind": kind,
+        "scope": scope,
+        "step": step,
         "payload": payload,
         "extra": {},  # Keep top-level empty for typing compatibility if needed
     }
@@ -43,12 +63,15 @@ def test_open_creates_directories(tmp_path):
         "videos",
         "artifacts",
         "vector_fields",
+        "trajectories",
         "histograms",
     ]:
-        assert (
-            tmp_path / sub
-        ).exists(), f"Sub-directory '{sub}' should be created on open"
-    assert (tmp_path / "log.jsonl").exists(), "log.jsonl should be created on open"
+        assert (tmp_path / sub).exists(), (
+            f"Sub-directory '{sub}' should be created on open"
+        )
+    assert (tmp_path / "log.jsonl").exists(), (
+        "log.jsonl should be created on open"
+    )
 
 
 def test_to_dict_and_from_dict_roundtrip(tmp_path):
@@ -56,9 +79,9 @@ def test_to_dict_and_from_dict_roundtrip(tmp_path):
     data = handler.to_dict()
     rebuilt = LocalStorageHandler.from_dict(data)
     assert rebuilt.name == handler.name, "Rebuilt handler name mismatch"
-    assert (
-        rebuilt._base_path == handler._base_path
-    ), "Rebuilt handler base path mismatch"
+    assert rebuilt._base_path == handler._base_path, (
+        "Rebuilt handler base path mismatch"
+    )
 
 
 # -------------------------------------------------------------------------
@@ -73,15 +96,16 @@ def test_json_serializer_numpy_types(tmp_handler):
         2,
         3,
     ], "JSON serializer should convert numpy arrays to lists"
-    assert isinstance(
-        tmp_handler._json_serializer(np.int64(5)), int
-    ), "JSON serializer should convert np.int64 to int"
-    assert isinstance(
-        tmp_handler._json_serializer(np.float32(1.0)), float
-    ), "JSON serializer should convert np.float32 to float"
-    assert "object" in tmp_handler._json_serializer(
-        object()
-    ), "JSON serializer should represent unknown objects as strings containing 'object'"
+    assert isinstance(tmp_handler._json_serializer(np.int64(5)), int), (
+        "JSON serializer should convert np.int64 to int"
+    )
+    assert isinstance(tmp_handler._json_serializer(np.float32(1.0)), float), (
+        "JSON serializer should convert np.float32 to float"
+    )
+    assert "object" in tmp_handler._json_serializer(object()), (
+        "JSON serializer should represent unknown objects as strings "
+        "containing 'object'"
+    )
 
 
 @patch("goggles._core.integrations.storage.save_numpy_image")
@@ -92,9 +116,9 @@ def test_save_image_to_file_calls_helper(mock_save, tmp_handler):
         "extra.name": "img_name",
     }
     updated = tmp_handler._save_image_to_file(event)
-    assert (
-        "images/img_name.png" in updated["payload"]
-    ), "Image payload should contain relative path to saved png"
+    assert os.path.join("images", "img_name.png") in updated["payload"], (
+        "Image payload should contain relative path to saved png"
+    )
     mock_save.assert_called_once()
 
 
@@ -107,9 +131,9 @@ def test_save_video_to_file_mp4(mock_save, tmp_handler):
         "extra.fps": 5.0,
     }
     updated = tmp_handler._save_video_to_file(event)
-    assert (
-        "videos/vid.mp4" in updated["payload"]
-    ), "Video payload should contain relative path to saved mp4"
+    assert os.path.join("videos", "vid.mp4") in updated["payload"], (
+        "Video payload should contain relative path to saved mp4"
+    )
     mock_save.assert_called_once()
 
 
@@ -123,19 +147,23 @@ def test_save_video_to_file_gif(mock_save, tmp_handler):
         "extra.loop": 1,
     }
     updated = tmp_handler._save_video_to_file(event)
-    assert (
-        "videos/anim.gif" in updated["payload"]
-    ), "Video payload should contain relative path to saved gif"
+    assert os.path.join("videos", "anim.gif") in updated["payload"], (
+        "Video payload should contain relative path to saved gif"
+    )
     mock_save.assert_called_once()
 
 
-def test_save_video_to_file_unknown_format_warns(tmp_handler, caplog):
+def test_save_video_to_file_unknown_format_warns(tmp_handler):
     event = {"payload": np.zeros((2, 2)), "extra.format": "avi"}
-    res = tmp_handler._save_video_to_file(event)
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        res = tmp_handler._save_video_to_file(event)
+    finally:
+        tmp_handler._logger.removeHandler(collector)
     assert res is None, "Should return None for unknown video format"
-    assert any(
-        "Unknown video format" in m for m in caplog.messages
-    ), "Should log a warning for unknown video format"
+    assert any("Unknown video format" in m for m in messages), (
+        "Should log a warning for unknown video format"
+    )
 
 
 def test_save_artifact_to_file_json(tmp_handler):
@@ -159,16 +187,22 @@ def test_save_artifact_to_file_yaml(tmp_handler):
     assert "key" in text, "YAML content missing expected key"
 
 
-def test_save_artifact_to_file_unknown_format_warns(tmp_handler, caplog):
+def test_save_artifact_to_file_unknown_format_warns(tmp_handler):
     event = {"payload": "data", "extra.format": "bin"}
-    res = tmp_handler._save_artifact_to_file(event)
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        res = tmp_handler._save_artifact_to_file(event)
+    finally:
+        tmp_handler._logger.removeHandler(collector)
     assert res is None, "Should return None for unknown artifact format"
-    assert any(
-        "Unknown artifact format" in m for m in caplog.messages
-    ), "Should log a warning for unknown artifact format"
+    assert any("Unknown artifact format" in m for m in messages), (
+        "Should log a warning for unknown artifact format"
+    )
 
 
-@patch("goggles._core.integrations.storage.save_numpy_vector_field_visualization")
+@patch(
+    "goggles._core.integrations.storage.save_numpy_vector_field_visualization"
+)
 def test_save_vector_field_to_file(mock_save, tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2)),
@@ -178,20 +212,61 @@ def test_save_vector_field_to_file(mock_save, tmp_handler):
     }
     updated = tmp_handler._save_vector_field_to_file(event)
     path = tmp_handler._base_path / updated["payload"]
-    assert path.exists(), f"Vector field visualization file '{path}' should exist"
+    assert path.exists(), (
+        f"Vector field visualization file '{path}' should exist"
+    )
     mock_save.assert_called_once()
 
 
-def test_save_vector_field_to_file_with_unknown_mode_warns(tmp_handler, caplog):
+def test_save_vector_field_to_file_with_unknown_mode_warns(tmp_handler):
     event = {
         "payload": np.zeros((2, 2, 2)),
         "extra.store_visualization": True,
         "extra.mode": "unknown",
     }
-    tmp_handler._save_vector_field_to_file(event)
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        tmp_handler._save_vector_field_to_file(event)
+    finally:
+        tmp_handler._logger.removeHandler(collector)
     assert any(
-        "Unknown vector field visualization mode" in m for m in caplog.messages
+        "Unknown vector field visualization mode" in m for m in messages
     ), "Should log a warning for unknown vector field visualization mode"
+
+
+@patch(
+    "goggles._core.integrations.storage.save_numpy_trajectories_visualization"
+)
+def test_save_trajectories_to_file_with_visualization(mock_save, tmp_handler):
+    event = {
+        "payload": np.random.randn(3, 10, 2),
+        "extra.store_visualization": True,
+        "extra.name": "traj",
+    }
+    updated = tmp_handler._save_trajectories_to_file(event)
+    npy_path = tmp_handler._base_path / updated["payload"]
+    assert npy_path.exists(), "Trajectories .npy file should exist"
+    assert np.load(npy_path).shape == (3, 10, 2), (
+        f"Saved trajectories shape mismatch: expected (3, 10, 2), "
+        f"got {np.load(npy_path).shape}"
+    )
+    mock_save.assert_called_once()
+
+
+def test_save_trajectories_to_file_no_visualization(tmp_handler):
+    event = {
+        "payload": np.random.randn(3, 10, 2),
+        "extra.name": "traj",
+    }
+    updated = tmp_handler._save_trajectories_to_file(event)
+    npy_path = tmp_handler._base_path / updated["payload"]
+    assert npy_path.exists(), (
+        f"Trajectories .npy file should exist at {npy_path}"
+    )
+    viz_dir = tmp_handler._trajectories_dir / "visualizations"
+    assert not viz_dir.exists() or not any(viz_dir.iterdir()), (
+        "No visualization should be written when store_visualization is absent"
+    )
 
 
 def test_save_histogram_to_file(tmp_handler):
@@ -207,12 +282,12 @@ def test_save_histogram_to_file(tmp_handler):
 
 
 def test_can_handle_recognized_and_unrecognized(tmp_handler):
-    assert tmp_handler.can_handle(
-        "image"
-    ), "LocalStorageHandler should handle 'image' events"
-    assert not tmp_handler.can_handle(
-        "nonsense"
-    ), "LocalStorageHandler should not handle 'nonsense' events"
+    assert tmp_handler.can_handle("image"), (
+        "LocalStorageHandler should handle 'image' events"
+    )
+    assert not tmp_handler.can_handle("nonsense"), (
+        "LocalStorageHandler should not handle 'nonsense' events"
+    )
 
 
 def test_handle_writes_jsonl(tmp_handler):
@@ -220,7 +295,9 @@ def test_handle_writes_jsonl(tmp_handler):
     tmp_handler.handle(event)
     log_path = tmp_handler._base_path / "log.jsonl"
     content = log_path.read_text()
-    assert '"msg": "hello"' in content, "Logged message missing from log.jsonl content"
+    assert '"msg": "hello"' in content, (
+        "Logged message missing from log.jsonl content"
+    )
 
 
 @patch.object(LocalStorageHandler, "_save_image_to_file", autospec=True)
@@ -230,10 +307,79 @@ def test_handle_image_event_uses_helper(mock_save, tmp_handler):
     mock_save.assert_called_once()
 
 
-def test_handle_invalid_media_warns(tmp_handler, caplog):
-    with patch.object(LocalStorageHandler, "_save_video_to_file", return_value=None):
+def test_handle_invalid_media_warns(tmp_handler):
+    with patch.object(
+        LocalStorageHandler, "_save_video_to_file", return_value=None
+    ):
         event = make_event("video", np.zeros((2, 2, 2, 3)))
-        tmp_handler.handle(event)
-        assert any(
-            "Skipping event logging" in m for m in caplog.messages
-        ), "Should log a warning when skipping event logging due to failure"
+        messages, collector = _capture_logger_messages(tmp_handler._logger)
+        try:
+            tmp_handler.handle(event)
+        finally:
+            tmp_handler._logger.removeHandler(collector)
+        assert any("Skipping event logging" in m for m in messages), (
+            "Should log a warning when skipping event logging due to failure"
+        )
+
+
+# -------------------------------------------------------------------------
+# Monotonic-step contract
+# -------------------------------------------------------------------------
+
+
+def test_handle_drops_backward_step_with_warning(tmp_handler):
+    # Out-of-order step within the same scope is dropped + warned.
+    messages, collector = _capture_logger_messages(tmp_handler._logger)
+    try:
+        tmp_handler.handle(make_event("metric", {"loss": 1.0}, step=10))
+        tmp_handler.handle(make_event("metric", {"loss": 0.9}, step=5))
+    finally:
+        tmp_handler._logger.removeHandler(collector)
+
+    log_path = tmp_handler._base_path / "log.jsonl"
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 1, "second (backward-step) event must be dropped"
+    assert '"loss": 1.0' in lines[0], (
+        f"First (in-order) event must remain on disk; got line: {lines[0]!r}"
+    )
+    assert any(
+        "out-of-order" in m.lower() and "step=5" in m for m in messages
+    ), "Should warn that step=5 regressed"
+
+
+def test_handle_allows_equal_and_forward_steps(tmp_handler):
+    # Equal and forward steps within the same scope are recorded.
+    tmp_handler.handle(make_event("metric", {"a": 1}, step=3))
+    tmp_handler.handle(make_event("metric", {"b": 2}, step=3))  # equal — ok
+    tmp_handler.handle(make_event("metric", {"c": 3}, step=4))  # forward — ok
+    log_path = tmp_handler._base_path / "log.jsonl"
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 3, (
+        f"All three equal/forward-step events must be recorded, "
+        f"got {len(lines)} lines: {lines}"
+    )
+
+
+def test_handle_tracks_step_per_scope(tmp_handler):
+    # Step monotonicity is tracked per scope, not globally.
+    tmp_handler.handle(make_event("metric", {"x": 1}, scope="train", step=10))
+    # Lower step on a *different* scope must still be recorded.
+    tmp_handler.handle(make_event("metric", {"x": 2}, scope="eval", step=1))
+    log_path = tmp_handler._base_path / "log.jsonl"
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 2, (
+        f"Cross-scope events must both be recorded (step monotonicity is "
+        f"per-scope), got {len(lines)} lines: {lines}"
+    )
+
+
+def test_handle_records_events_without_step(tmp_handler):
+    # Events with step=None never trigger the guard, even after a regression.
+    tmp_handler.handle(make_event("metric", {"a": 1}, step=10))
+    tmp_handler.handle(make_event("log", {"msg": "no-step"}))  # step=None
+    log_path = tmp_handler._base_path / "log.jsonl"
+    lines = log_path.read_text().splitlines()
+    assert len(lines) == 2, (
+        f"step=None events must always be recorded; "
+        f"expected 2 lines, got {len(lines)}: {lines}"
+    )

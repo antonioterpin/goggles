@@ -25,40 +25,52 @@ See Also:
     - API docs for full reference of public interfaces.
     - Internal implementations live under `goggles/_core/`
 
-"""  # noqa: D205
+"""
 
 from __future__ import annotations
 
-import portal
-from portal import packlib, client_socket
-from portal.buffers import SendBuffer, RecvBuffer
-from portal.client import Client, Future
-from portal.client_socket import ClientSocket
-from portal.server_socket import ServerSocket
+import gc
+import logging
+import os
+import threading
 from collections import defaultdict
+from collections.abc import Callable
+from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     ClassVar,
     Final,
+    Literal,
+    ParamSpec,
     Protocol,
-    runtime_checkable,
+    TypeVar,
+    cast,
     overload,
+    runtime_checkable,
 )
-from collections.abc import Callable
+
 from typing_extensions import Self
-from typing import Literal, TypeVar, ParamSpec
-import logging
-import os
-import select
-import selectors
-import time
 
-from .types import Kind, Event, VectorField, Video, Image, Vector, Metrics
+if TYPE_CHECKING:
+    from goggles._core.transport import Transport
+
+from . import filters
+from ._core.decorators import timeit as _timeit
+from ._core.decorators import trace_on_error as _trace_on_error
 from ._core.integrations import ConsoleHandler, LocalStorageHandler
-from ._core.decorators import timeit as _timeit, trace_on_error as _trace_on_error
+from .config import PrettyConfig, load_configuration, save_configuration
 from .shutdown import GracefulShutdown
-from .config import load_configuration, save_configuration
-
+from .types import (
+    Event,
+    Image,
+    Kind,
+    Metrics,
+    Trajectories,
+    Vector,
+    VectorField,
+    Video,
+)
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -101,6 +113,9 @@ def trace_on_error(
     Args:
         scope: Scope of the logged event ("global" or "run").
 
+    Returns:
+        Decorated function with same signature as input.
+
     Example:
     >>> @trace_on_error()
     ... def my_function(x, y):
@@ -114,285 +129,57 @@ def trace_on_error(
     return _trace_on_error(scope=scope)
 
 
-# Goggles port for bus communication
-GOGGLES_PORT: Final[str] = os.getenv("GOGGLES_PORT", "2304")
-
-# ---------------------------------------------------------------------------
-# Portal Monkey-Patches (Resilience)
-# ---------------------------------------------------------------------------
-
-# We patch portal at import time to handle ConnectionResetError/BrokenPipeError
-# which otherwise lead to memory leaks (orphaned futures) or livelocks.
-# NOTE: this is a temporary fix until either:
-# - portal is fixed.
-# - we switch to a different bus implementation.
-# - we fork portal and fix it there.
-
-
-# 1. Patch SendBuffer.send to propagate ConnectionResetError
-_original_send = SendBuffer.send
-
-
-def _safe_send(self, sock):
-    try:
-        return _original_send(self, sock)
-    except (BrokenPipeError, ConnectionResetError) as e:
-        raise ConnectionResetError from e
-
-
-SendBuffer.send = _safe_send
-
-
-# 2. Patch ServerSocket._loop to explicitly disconnect on write errors
-def _patched_server_loop(self):
-    writing = False
-    try:
-        while self.running or self._numsending():
-            # Use 0 timeout if we have data to send to avoid artificially slow throughput
-            timeout = 0 if writing else 0.2
-            for key, mask in self.sel.select(timeout=timeout):
-                if key.data == "signal":
-                    os.read(self.get_signal, 1)
-                    writing = self._numsending() > 0
-                elif key.data is None and self.reading:
-                    self._accept(key.fileobj)
-                elif mask & selectors.EVENT_READ and self.reading:
-                    self._recv(key.data)
-
-            # Skip send processing if not actively writing
-            if not writing:
-                continue
-
-            # Process pending send buffers
-            pending = [conn for conn in self.conns.values() if conn.sendbufs]
-            for conn in pending:
-                try:
-                    conn.sendbufs[0].send(conn.sock)
-                    if conn.sendbufs[0].done():
-                        conn.sendbufs.popleft()
-                        if not any(c.sendbufs for c in self.conns.values()):
-                            writing = False
-                except BlockingIOError:
-                    # Non-blocking send would block; try again later
-                    pass
-                except ConnectionResetError as e:
-                    self._disconnect(conn, e)
-    except Exception as e:
-        self.error = e
-
-
-ServerSocket._loop = _patched_server_loop
-
-# 3. Silence "Dropping message" log spam
-_original_server_log = ServerSocket._log
-
-
-def _silent_server_log(self, *args):
-    if args and isinstance(args[0], str) and "Dropping message" in args[0]:
-        return
-    return _original_server_log(self, *args)
-
-
-ServerSocket._log = _silent_server_log
-
-
-# 5. Patch ClientSocket._loop to fix future leaks and reconnection
-def _patched_client_loop(self):
-    recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
-    sock = None
-    poll = select.poll()
-    poll.register(self.get_signal, select.POLLIN)
-    isconn = False
-    writing = False
-
-    while self.running or (self.sendq and isconn):
-        if not isconn:
-            if not self.options.autoconn and not self.wantconn.wait(timeout=0.2):
-                continue
-            sock = self._connect()
-            if not sock:
-                break
-            poll.register(sock, select.POLLIN)
-            self.isconn.set()
-            isconn = True
-            if not self.options.autoconn:
-                self.wantconn.clear()
-            for callback in self.callbacks_conn:
-                callback()
-
-        try:
-            # Poll with 0 timeout if writing to avoid delay
-            timeout = 0 if writing else 0.2
-            fds = [fd for fd, _ in poll.poll(timeout)]
-            if self.get_signal in fds:
-                os.read(self.get_signal, 1)
-                writing = bool(self.sendq)
-
-            try:
-                recvbuf.recv(sock)
-                if recvbuf.done():
-                    if self.recvq.qsize() > self.options.max_recv_queue:
-                        raise RuntimeError("Too many incoming messages enqueued")
-                    msg = recvbuf.result()
-                    self.recvq.put(msg)
-                    for callback in self.callbacks_recv:
-                        callback(msg)
-                    recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
-            except BlockingIOError:
-                # Expected with non-blocking sockets; no data yet, retry on next poll
-                pass
-
-            if self.sendq:
-                try:
-                    self.sendq[0].send(sock)
-                    if self.sendq[0].done():
-                        self.sendq.popleft()
-                        if not self.sendq:
-                            writing = False
-                except BlockingIOError:
-                    pass
-                except ConnectionResetError:
-                    raise
-
-        except OSError as e:
-            # Disconnect and trigger high-level recovery
-            detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
-            self._log(f"Connection to server lost ({detail})")
-            self.isconn.clear()
-            isconn = False
-            if sock:
-                try:
-                    poll.unregister(sock)
-                    sock.close()
-                except Exception:
-                    pass
-            self.sendq.clear()  # Clear low-level queue; high-level Client will resend
-            recvbuf = RecvBuffer(maxsize=self.options.max_msg_size)
-            for callback in self.callbacks_disc:
-                callback()
-            continue
-
-    if sock:
-        try:
-            poll.unregister(sock)
-            sock.close()
-        except Exception:
-            pass
-    try:
-        poll.unregister(self.get_signal)
-    except Exception:
-        pass
-    # Explicitly close poll if method exists (Python 3.4+)
-    if hasattr(poll, "close"):
-        try:
-            poll.close()
-        except Exception:
-            # Ignore any errors; we're just cleaning up
-            pass
-
-
-ClientSocket._loop = _patched_client_loop
-
-# 6. Patch Client.call to avoid infinite backpressure hang
-
-_original_client_call = Client.call
-
-
-def _safe_client_call(self, method, *data):
-    # We duplicate logic because we need to inject the timeout loop
-
-    reqnum = next(self.reqnum).to_bytes(8, "little", signed=False)
-    start = time.time()
-    # Hardcoded default 30s as requested ("always on"), overrideable for tests
-    timeout_seconds = float(os.getenv("GOGGLES_TRANSPORT_TIMEOUT", "30.0"))
-
-    with self.cond:
-        while len(self.futures) >= self.maxinflight:
-            # Check for total timeout
-            if time.time() - start > timeout_seconds:
-                raise TimeoutError(
-                    f"Goggles: Timeout after {timeout_seconds}s waiting for in-flight requests to complete. "
-                    "The server may be down or unresponsive. Consider checking server connectivity "
-                    f"or increasing GOGGLES_TRANSPORT_TIMEOUT. (inflight={len(self.futures)})"
-                )
-
-            self.cond.wait(timeout=0.2)
-            try:
-                self.socket.require_connection(timeout=0)
-            except TimeoutError:
-                # Connection not established yet; try again later
-                pass
-            except (BrokenPipeError, ConnectionResetError, ConnectionRefusedError):
-                # BrokenPipe/ConnectionReset/ConnectionRefused should behave like not connected
-                pass
-
-    with self.lock:
-        self.waitmean[1] += time.time() - start
-        self.waitmean[0] += 1
-        self.sendrate[0] += 1
-
-    if self.errors:  # Raise errors of dropped futures.
-        raise self.errors.popleft()
-
-    name = method.encode("utf-8")
-    strlen = len(name).to_bytes(8, "little", signed=False)
-    sendargs = (reqnum, strlen, name, *packlib.pack(data))
-    rai = [False]
-    future = Future(rai)
-    future.sendargs = sendargs
-    self.futures[reqnum] = future
-    # Store future before sending request because the response may come fast
-    # and the response handler runs in the socket's background thread.
-    try:
-        self.socket.send(*sendargs)
-    except client_socket.Disconnected:
-        future = self.futures.pop(reqnum)
-        future.rai[0] = True
-        raise
-    return future
-
-
-Client.call = _safe_client_call
-
-
 # Handler registry for custom handlers
 _HANDLER_REGISTRY: dict[str, type] = {}
-GOGGLES_HOST: Final[str] = os.getenv("GOGGLES_HOST", "localhost")
 GOGGLES_ASYNC: Final[bool] = os.getenv("GOGGLES_ASYNC", "1").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-GOGGLES_SUPPRESS_CONNECTIVITY_LOGS: Final[bool] = os.getenv(
-    "GOGGLES_SUPPRESS_CONNECTIVITY_LOGS", "1"
-).lower() in (
     "1",
     "true",
     "yes",
 )
 
 # Cache the implementation after first use to avoid repeated imports
-__impl_get_bus: Callable[[], EventBus] | None = None
+__impl_get_bus: Callable[[], Transport] | None = None
+
+
+def freeze() -> None:
+    """Promote currently-live objects out of the GC scan set.
+
+    After attaching handlers and finishing application setup, call
+    ``freeze()`` once before entering a hot logging loop. It wraps
+    :func:`gc.freeze`: the collector still runs on churn allocated *after*
+    this call, but it no longer rescans the thousands of long-lived
+    startup objects. This collapses the gen-2 GC pauses that otherwise
+    show up as millisecond-scale spikes in high-frequency logging.
+
+    This function is idempotent and safe to call even if the user is not
+    concerned about GC jitter; it simply returns without effect if there
+    is nothing to freeze.
+    """
+    gc.freeze()
 
 
 def _make_text_logger(
     name: str | None,
     scope: str,
-    to_bind: dict[str, Any],
+    level: int,
+    **to_bind: Any,
 ) -> TextLogger:
-    from ._core.logger import CoreTextLogger
+    # Importing here to avoid circular imports
+    from ._core.logger import CoreTextLogger  # noqa: PLC0415
 
-    return CoreTextLogger(name=name, scope=scope, to_bind=to_bind)
+    return CoreTextLogger(name=name, scope=scope, level=level, **to_bind)
 
 
 def _make_goggles_logger(
     name: str | None,
     scope: str,
-    to_bind: dict[str, Any],
+    level: int,
+    **to_bind: Any,
 ) -> GogglesLogger:
-    from ._core.logger import CoreGogglesLogger
+    # Importing here to avoid circular imports
+    from ._core.logger import CoreGogglesLogger  # noqa: PLC0415
 
-    return CoreGogglesLogger(name=name, scope=scope, to_bind=to_bind)
+    return CoreGogglesLogger(name=name, scope=scope, level=level, **to_bind)
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +194,7 @@ def get_logger(
     *,
     with_metrics: Literal[False] = False,
     scope: str = "global",
+    level: int = logging.NOTSET,
     **to_bind: Any,
 ) -> TextLogger: ...
 
@@ -418,6 +206,7 @@ def get_logger(
     *,
     with_metrics: Literal[True],
     scope: str = "global",
+    level: int = logging.NOTSET,
     **to_bind: Any,
 ) -> GogglesLogger: ...
 
@@ -428,19 +217,29 @@ def get_logger(
     *,
     with_metrics: bool = False,
     scope: str = "global",
+    level: int = logging.NOTSET,
     **to_bind: Any,
 ) -> TextLogger | GogglesLogger:
-    """Return a structured logger (text-only by default, metrics-enabled on opt-in).
+    """Return a structured logger.
 
     This is the primary entry point for obtaining Goggles' structured loggers.
     Depending on the active run and configuration, the returned adapter will
     inject structured context (e.g., `RunContext` info) and persistent fields
     into each emitted log record.
 
+    The logger is by default a text-only logger, but it can be configured
+    to return a `GogglesLogger` which exposes additional methods for logging
+    metrics, media, and artifacts.
+
     Args:
         name: Logger name. If None, the root logger is used.
         with_metrics: If True, return a logger exposing `.metrics`.
         scope: The logging scope, e.g., "global" or "run".
+        level: Minimum severity this logger will emit. Defaults to
+            ``logging.NOTSET`` (emit everything); pass
+            ``logging.DEBUG`` / ``logging.INFO`` / etc. to drop
+            lower-severity records at the source. Also settable later
+            via ``logger.set_level(...)``.
         **to_bind: Fields persisted and injected into every record.
 
     Returns:
@@ -455,12 +254,16 @@ def get_logger(
         >>> # Explicit metrics surface
         >>> tlog = get_logger("train", with_metrics=True, seed=0)
         >>> tlog.scalar("loss", 0.42, step=1)
+        >>>
+        >>> # Per-file DEBUG without flooding the rest of the app.
+        >>> dbg = get_logger(__name__, level=logging.DEBUG)
+        >>> dbg.debug("detailed trace")
 
     """
     if with_metrics:
-        return _make_goggles_logger(name, scope, to_bind)
+        return _make_goggles_logger(name, scope, level, **to_bind)
     else:
-        return _make_text_logger(name, scope, to_bind)
+        return _make_text_logger(name, scope, level, **to_bind)
 
 
 @runtime_checkable
@@ -494,6 +297,19 @@ class TextLogger(Protocol):
         """
         ...
 
+    def set_level(self, level: int) -> None:
+        """Set the minimum severity this logger will emit.
+
+        Calls below ``level`` are dropped before reaching the transport.
+        Only affects this logger instance; sibling loggers obtained via
+        separate ``get_logger(...)`` calls are unaffected.
+
+        Args:
+            level: Standard ``logging`` level (e.g. ``logging.DEBUG``).
+                ``logging.NOTSET`` (the default) forwards every call.
+        """
+        ...
+
     def log(
         self,
         severity: int,
@@ -518,15 +334,23 @@ class TextLogger(Protocol):
 
         """
         if severity >= logging.CRITICAL:
-            self.critical(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.critical(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.ERROR:
-            self.error(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.error(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.WARNING:
-            self.warning(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.warning(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         elif severity >= logging.INFO:
             self.info(msg, step=step, time=time, async_mode=async_mode, **extra)
         elif severity >= logging.DEBUG:
-            self.debug(msg, step=step, time=time, async_mode=async_mode, **extra)
+            self.debug(
+                msg, step=step, time=time, async_mode=async_mode, **extra
+            )
         else:
             # Below DEBUG level; no-op by default.
             pass
@@ -736,6 +560,11 @@ class DataLogger(Protocol):
     ) -> None:
         """Emit a video artifact (encoded bytes).
 
+        Notes:
+            * For grayscale videos, input shape can be (F, H, W) or (F, H, W, 1)
+                or (B, F, 1, H, W).
+            With F the number of frames, and B the batch size.
+
         Args:
             video: Video.
             step: Global step index.
@@ -797,6 +626,30 @@ class DataLogger(Protocol):
         """
         ...
 
+    def trajectories(
+        self,
+        trajectories: Trajectories,
+        step: int,
+        *,
+        name: str | None = None,
+        time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
+        **extra: Any,
+    ) -> None:
+        """Emit a batch of particle trajectories.
+
+        Args:
+            trajectories: Array of shape ``(N, L, dim)`` with ``dim`` in
+                ``{2, 3}``.
+            step: Global step index.
+            name: Optional artifact name.
+            time: Optional global timestamp.
+            async_mode: If True, do not block waiting for delivery.
+            **extra: Additional routing metadata (e.g.
+                ``store_visualization=True`` to also save a PNG preview).
+        """
+        ...
+
     def histogram(
         self,
         histogram: Vector,
@@ -816,6 +669,43 @@ class DataLogger(Protocol):
             name: Optional artifact name.
             time: Optional global timestamp.
             static: If True, treat as static histogram.
+            async_mode: If True, do not block waiting for delivery.
+            **extra: Additional routing metadata.
+
+        """
+        ...
+
+    def dictionary(
+        self,
+        name: str,
+        data: dict,
+        step: int,
+        *,
+        time: float | None = None,
+        async_mode: bool = GOGGLES_ASYNC,
+        **extra: Any,
+    ) -> None:
+        """Emit all key-value pairs in a dictionary as separate metrics.
+
+        Notes:
+            * The `name` parameter serves as base name for the emitted metrics.
+            * Each key in the `data` dictionary is appended to the base name to
+            form the full metric name (e.g., `name/key`).
+            * Values in the dictionary are emitted according to their type:
+                - Scalars (int, float) are emitted as single metrics.
+                - 1D arrays are emitted as multiple metrics with indexed names
+                    (e.g., `name/key_0`, `name/key_1`, ...).
+                - 2D arrays are emitted as images.
+                - 3D arrays are emitted as images if the last dimension has
+                    1 or 3 channels, or as vector fields if the last dimension
+                    has 2 channels.
+             * Unsupported types are logged as errors.
+
+        Args:
+            name: Base name for the metrics.
+            data: Dictionary data.
+            step: Global step index.
+            time: Optional global timestamp.
             async_mode: If True, do not block waiting for delivery.
             **extra: Additional routing metadata.
 
@@ -886,12 +776,7 @@ class Handler(Protocol):
         ...
 
     def close(self) -> None:
-        """Flush and release resources (called when leaving a scope).
-
-        Args:
-            run: The active run context if any.
-
-        """
+        """Flush and release resources (called when leaving a scope)."""
         ...
 
     def to_dict(self) -> dict:
@@ -926,28 +811,78 @@ class Handler(Protocol):
 # EventBus and run management
 # ---------------------------------------------------------------------------
 class EventBus:
-    """Protocol for the process-wide event router."""
+    """Process-wide event router.
 
-    handlers: dict[str, Handler]
-    scopes: dict[str, set[str]]
+    Thread-safe: ``attach`` / ``detach`` / ``shutdown`` may be called
+    concurrently with ``emit``; handler invocations happen outside the
+    internal lock so a slow handler cannot block concurrent registration.
+    """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.handlers: dict[str, Handler] = {}
         self.scopes: dict[str, set[str]] = defaultdict(set)
+        self._lock = threading.RLock()
 
-    def shutdown(self) -> None:
-        """Shutdown the EventBus and close all handlers."""
-        copy_map = {
-            scope: handlers_names.copy()
-            for scope, handlers_names in self.scopes.items()
-        }
-        for scope, handlers_names in copy_map.items():
-            for handler_name in handlers_names:
-                self.detach(handler_name, scope)
+    def shutdown(self, timeout: float | None = None) -> None:
+        """Close every attached handler and clear scope state.
+
+        Every ``handler.close()`` is launched in its own daemon thread
+        so slow handlers run concurrently. Each thread is then joined
+        with ``timeout`` seconds; clean exits log a debug confirmation
+        and timeouts log a warning.
+
+        Args:
+            timeout: Per-handler close budget in seconds. ``None`` waits
+                indefinitely. On timeout the close thread is abandoned —
+                Python cannot safely interrupt blocking I/O — and the
+                handler may continue running in the background.
+        """
+        with self._lock:
+            handlers_to_close = list(self.handlers.values())
+            self.handlers.clear()
+            self.scopes.clear()
+
+        threads: list[tuple[threading.Thread, Handler]] = []
+        for handler in handlers_to_close:
+            t = threading.Thread(
+                target=self._close_handler_safely,
+                args=(handler,),
+                daemon=True,
+                name=f"goggles-close-{handler.name}",
+            )
+            t.start()
+            threads.append((t, handler))
+
+        log = logging.getLogger(__name__)
+        for t, handler in threads:
+            t.join(timeout=timeout)
+            if t.is_alive():
+                log.warning(
+                    "Handler '%s' did not confirm close within %.1fs; "
+                    "abandoning (thread continues as daemon).",
+                    handler.name,
+                    -1.0 if timeout is None else timeout,
+                )
+            else:
+                log.debug("Handler '%s' close confirmed.", handler.name)
+
+    @staticmethod
+    def _close_handler_safely(handler: Handler) -> None:
+        """Run ``handler.close()`` and log any exception it raises.
+
+        Args:
+            handler: Handler to close.
+        """
+        try:
+            handler.close()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Handler '%s' raised in close()", handler.name
+            )
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
-        """Attach a handler under the given scope.
+        """Attach handler(s) under the given scopes.
 
         Args:
             handlers:
@@ -958,16 +893,18 @@ class EventBus:
         for handler_dict in handlers:
             handler_class = _get_handler_class(handler_dict["cls"])
             handler = handler_class.from_dict(handler_dict["data"])
-            if handler.name not in self.handlers:
-                # Initialize handler and store it
+            with self._lock:
+                newly_added = handler.name not in self.handlers
+                if newly_added:
+                    self.handlers[handler.name] = handler
+                for scope in scopes:
+                    if scope not in self.scopes:
+                        self.scopes[scope] = set()
+                    self.scopes[scope].add(handler.name)
+            if newly_added:
+                # Call handler.open() outside the lock: it may do I/O
+                # (e.g. open a wandb run) and must not block readers.
                 handler.open()
-                self.handlers[handler.name] = handler
-
-            # Add to requested scopes
-            for scope in scopes:
-                if scope not in self.scopes:
-                    self.scopes[scope] = set()
-                self.scopes[scope].add(handler.name)
 
     def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
@@ -980,113 +917,229 @@ class EventBus:
           ValueError: If the handler was not attached under the requested scope.
 
         """
-        if scope not in self.scopes or handler_name not in self.scopes[scope]:
-            raise ValueError(
-                f"Handler '{handler_name}' not attached under scope '{scope}'"
-            )
-        self.scopes[scope].remove(handler_name)
-        if not self.scopes[scope]:
-            del self.scopes[scope]
-        if not any(handler_name in self.scopes[s] for s in self.scopes):
-            self.handlers[handler_name].close()
-            del self.handlers[handler_name]
+        to_close: Handler | None = None
+        with self._lock:
+            if (
+                scope not in self.scopes
+                or handler_name not in self.scopes[scope]
+            ):
+                raise ValueError(
+                    f"Handler '{handler_name}' not attached under scope "
+                    f"'{scope}'"
+                )
+            self.scopes[scope].remove(handler_name)
+            if not self.scopes[scope]:
+                del self.scopes[scope]
+            if not any(handler_name in self.scopes[s] for s in self.scopes):
+                to_close = self.handlers.pop(handler_name, None)
+        # Close outside the lock to avoid blocking emit/attach.
+        if to_close is not None:
+            try:
+                to_close.close()
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Handler '%s' raised in close()", handler_name
+                )
 
     def emit(self, event: dict | Event) -> None:
         """Emit an event to eligible handlers (errors isolated per handler).
 
+        Snapshots the routing table under the lock, then invokes handlers
+        outside of it so concurrent attach/detach calls are non-blocking.
+
         Args:
             event: The event (serialized) to emit, or an Event instance.
+
+        Raises:
+            TypeError: If `event` is neither a `dict` nor an `Event`.
 
         """
         if isinstance(event, dict):
             event = Event.from_dict(event)
         elif not isinstance(event, Event):
-            raise TypeError(f"emit expects a dict or Event, got {type(event)!r}")
+            raise TypeError(
+                f"emit expects a dict or Event, got {type(event)!r}"
+            )
 
-        # collect all scopes that this event should hit:
         scope = event.scope
-        prefix = scope + "."
 
-        # Example:
-        # event.scope == "global"
-        # matches: "global", "global.local1", "global.local2", but not "another"
-        target_scopes = [s for s in self.scopes if s == scope or s.startswith(prefix)]
-
-        if not target_scopes:
-            return
-
-        # Ensure we don't call the same handler twice
-        # if it's attached to multiple scopes
-        seen_handlers: set[str] = set()
-
-        for s in target_scopes:
-            for handler_name in self.scopes[s]:
-                if handler_name in seen_handlers:
+        # Snapshot under lock so attach/detach can't race with us.
+        with self._lock:
+            target_handlers: list[Handler] = []
+            seen: set[str] = set()
+            for s, names in self.scopes.items():
+                if s != scope and not scope.startswith(s + "."):
                     continue
-                handler = self.handlers.get(handler_name)
-                if handler and handler.can_handle(event.kind):
+                for handler_name in names:
+                    if handler_name in seen:
+                        continue
+                    seen.add(handler_name)
+                    handler = self.handlers.get(handler_name)
+                    if handler is not None:
+                        target_handlers.append(handler)
+
+        for handler in target_handlers:
+            try:
+                if handler.can_handle(event.kind):
                     handler.handle(event)
-                seen_handlers.add(handler_name)
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "Handler '%s' raised while dispatching event",
+                    handler.name,
+                )
 
 
-def get_bus() -> portal.Client:
-    """Return the process-wide EventBus singleton client.
+def get_bus() -> Transport:
+    """Return the process-wide transport singleton.
 
-    The EventBus owns handlers and routes events based on scope and kind.
+    The transport owns (host mode) or talks to (client mode) a single
+    :class:`EventBus` per machine, routing events to attached handlers.
 
     Returns:
-        The singleton EventBus client.
+        The singleton transport.
 
     """
-    global __impl_get_bus
+    global __impl_get_bus  # noqa: PLW0603
     if __impl_get_bus is None:
-        from ._core.routing import get_bus as _impl_get_bus
+        # Importing here to avoid circular imports
+        from ._core.routing import get_bus as _impl_get_bus  # noqa: PLC0415
 
-        __impl_get_bus = _impl_get_bus  # type: ignore
-    return __impl_get_bus()  # type: ignore
+        __impl_get_bus = cast(Callable[[], Any], _impl_get_bus)
+    return __impl_get_bus()
 
 
-def attach(handler: Handler, scopes: list[str] = ["global"]) -> None:
-    """Attach a handler to the global EventBus under the specified scopes.
+def attach(handler: Handler, scopes: list[str] | None = None) -> None:
+    """Attach a handler to the global transport under the specified scopes.
 
     Args:
         handler: The handler to attach.
         scopes: The scopes under which to attach.
 
-    Raises:
-        ValueError: If the handler disallows the requested scope.
-
     """
+    if scopes is None:
+        scopes = ["global"]
     bus = get_bus()
-    bus.attach([handler.to_dict()], scopes)
+    bus.attach(handlers=[handler.to_dict()], scopes=scopes)
+
+
+def configure(
+    *,
+    enable_console: bool = False,
+    console_level: int = logging.INFO,
+    console_path_style: Literal["absolute", "relative"] = "relative",
+    project_root: str | os.PathLike[str] | None = None,
+    scopes: list[str] | None = None,
+) -> None:
+    """One-call shortcut for the common "I just want a console logger" setup.
+
+    Replaces the boilerplate
+
+        gg.attach(gg.ConsoleHandler(level=logging.INFO), scopes=["global"])
+
+    with
+
+        gg.configure(enable_console=True)
+
+    Power users should keep using ``attach`` / handler classes directly --
+    this helper only covers the standard cases. Calling it with no arguments
+    is a no-op so it is safe to invoke unconditionally during library
+    initialization.
+
+    Calling ``configure(enable_console=True, ...)`` while a console handler
+    is already attached will detach the existing handler from every scope
+    it is bound to and attach a fresh one with the new options, so the
+    second call wins instead of being silently deduped by name.
+
+    Args:
+        enable_console: When True, attach a default ``ConsoleHandler``
+            under ``scopes``. When False (the default), this argument
+            does nothing.
+        console_level: Minimum level for the auto-attached console
+            handler. Ignored when ``enable_console`` is False.
+        console_path_style: Whether the console handler prints absolute
+            or project-relative source paths. Ignored when
+            ``enable_console`` is False.
+        project_root: Root path used to compute relative paths. Defaults
+            to the current working directory.
+        scopes: Scopes under which to attach the console handler.
+            Defaults to ``["global"]``.
+    """
+    if not enable_console:
+        return
+    if scopes is None:
+        scopes = ["global"]
+
+    # Replace any existing console handler so a second `configure(...)` call
+    # with new options actually takes effect (`attach()` dedupes by name and
+    # would otherwise silently keep the first instance).
+    internal_bus = cast(Any, get_bus())._bus
+    existing_scopes = [
+        s
+        for s, names in list(internal_bus.scopes.items())
+        if ConsoleHandler.name in names
+    ]
+    for s in existing_scopes:
+        try:
+            detach(ConsoleHandler.name, s)
+        except ValueError:
+            # Already detached by a concurrent caller; nothing to do.
+            pass
+
+    handler = ConsoleHandler(
+        level=console_level,
+        path_style=console_path_style,
+        project_root=Path(project_root) if project_root is not None else None,
+    )
+    attach(handler, scopes=scopes)
 
 
 def detach(handler_name: str, scope: str) -> None:
-    """Detach a handler from the global EventBus under the specified scope.
+    """Detach a handler from the global transport under the specified scope.
 
     Args:
         handler_name: The name of the handler to detach.
         scope: The scope from which to detach.
-
-    Raises:
-        ValueError: If the handler was not attached under the requested scope.
 
     """
     bus = get_bus()
     bus.detach(handler_name, scope)
 
 
-def finish() -> None:
-    """Shutdown the global EventBus and close all handlers."""
+def finish(timeout: float | None = None) -> None:
+    """Shutdown the global transport and close all handlers.
+
+    Default behavior is to wait indefinitely so no queued events are
+    silently dropped. Pass an explicit ``timeout`` to bound the wait —
+    on timeout, the rest of the drain queue is discarded and any
+    handler still inside ``close()`` is abandoned (the thread continues
+    as a daemon). Both events are logged.
+
+    Args:
+        timeout: Optional bound in seconds applied to (a) draining queued
+            events into handlers and (b) each handler's ``close()`` call.
+            If ``None``, falls back to the ``GOGGLES_SHUTDOWN_TIMEOUT``
+            env var; an unset env var or a non-positive value means no
+            deadline.
+    """
     bus = get_bus()
-    bus.shutdown().result()
+    if timeout is None:
+        timeout = float(os.getenv("GOGGLES_SHUTDOWN_TIMEOUT", "0"))
+    if timeout <= 0:
+        timeout = None
+    try:
+        bus.shutdown(timeout=timeout)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Error while shutting down transport"
+        )
 
 
 def register_handler(handler_class: type) -> None:
     """Register a custom handler class for serialization/deserialization.
 
     Args:
-        handler_class: The handler class to register. Must have a __name__ attribute.
+        handler_class: The handler class to register.
+            Must have a __name__ attribute.
 
     Example:
         class CustomHandler(gg.ConsoleHandler):
@@ -1119,9 +1172,12 @@ def _get_handler_class(class_name: str) -> type:
     if class_name in globals():
         return globals()[class_name]
 
+    available_handlers = list(_HANDLER_REGISTRY.keys()) + [
+        k for k in globals().keys() if k.endswith("Handler")
+    ]
     raise KeyError(
         f"Handler class '{class_name}' not found. "
-        f"Available handlers: {list(_HANDLER_REGISTRY.keys()) + [k for k in globals().keys() if k.endswith('Handler')]}"
+        f"Available handlers: {available_handlers}"
     )
 
 
@@ -1141,32 +1197,38 @@ except Exception:
     WandBHandler = None
 
 __all__ = [
-    "TextLogger",
+    "CRITICAL",
+    "DEBUG",
+    "ERROR",
+    "INFO",
+    "WARNING",
+    "ConsoleHandler",
+    "Event",
+    "EventBus",
     "GogglesLogger",
-    "get_logger",
+    "GracefulShutdown",
+    "Image",
+    "Kind",
+    "LocalStorageHandler",
+    "Metrics",
+    "PrettyConfig",
+    "TextLogger",
+    "Trajectories",
+    "Vector",
+    "VectorField",
+    "Video",
+    "WandBHandler",
     "attach",
     "detach",
-    "register_handler",
+    "filters",
+    "finish",
+    "freeze",
+    "get_logger",
     "load_configuration",
+    "register_handler",
     "save_configuration",
     "timeit",
     "trace_on_error",
-    "GracefulShutdown",
-    "ConsoleHandler",
-    "LocalStorageHandler",
-    "WandBHandler",
-    "Event",
-    "Kind",
-    "Metrics",
-    "Image",
-    "Video",
-    "Vector",
-    "VectorField",
-    "INFO",
-    "DEBUG",
-    "WARNING",
-    "ERROR",
-    "CRITICAL",
 ]
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ logger.warning("This is a warning!")
 logger.error("This is an error!")
 logger.critical("This is critical!")
 
-# If we attach a handler with a lower logging level, debug messages will be shown.
+# Lowering handler log level makes debug messages visible.
 gg.attach(
     gg.ConsoleHandler(name="examples.basic.debug_console", level=gg.DEBUG),
     scopes=["global"],
@@ -32,5 +32,14 @@ logger.debug("This is a synchronous debug message.", async_mode=False)
 # Note that having attached two handlers will result in duplicated outputs
 # if both are eligible.
 logger.info("This message will be logged by both handlers.")
+
+# Per-logger severity gate — useful to silence a noisy module without
+# touching the rest of the app's log level. Below, `noisy` drops DEBUG
+# locally while every other logger keeps emitting at its own level.
+# Also settable at construction: `gg.get_logger(__name__, level=gg.WARNING)`.
+noisy = gg.get_logger("examples.basic.noisy")
+noisy.set_level(gg.WARNING)
+noisy.debug("dropped — below the gate")
+noisy.warning("shown — at/above the gate")
 
 gg.finish()

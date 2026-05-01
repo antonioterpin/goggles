@@ -205,3 +205,7 @@ cython_debug/
 
 # Runs folder
 /runs/
+
+# Hydra output directories from examples/105_benchmark.py
+/outputs/
+/multirun/

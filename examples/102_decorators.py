@@ -17,26 +17,57 @@ gg.attach(
 class TestClass:
     """A class to demonstrate the use of Goggles decorators."""
 
-    def __init__(self, x):
-        """Initialize the class with a value."""
+    def __init__(self, x: float) -> None:
+        """Initialize the class with a value.
+
+        Args:
+            x: Numerator used by `fail_method`.
+
+        """
         self.x = x
 
     @gg.timeit(severity=gg.DEBUG, name="compute_sum")
-    def compute(self, n):
-        """Compute the sum of integers from 0 to n-1."""
+    def compute(self, n: int) -> int:
+        """Compute the sum of integers from 0 to n-1.
+
+        Args:
+            n: Upper bound (exclusive).
+
+        Returns:
+            Sum of integers from `0` to `n - 1`.
+
+        """
         total = 0
         for i in range(n):
             total += i
         return total
 
-    @gg.timeit(severity=gg.INFO, name="fast_computation")  # This will also show timing
-    def fast_compute(self, n):
-        """Compute sum using mathematical formula (faster)."""
+    @gg.timeit(
+        severity=gg.INFO, name="fast_computation"
+    )  # This will also show timing
+    def fast_compute(self, n: int) -> int:
+        """Compute sum using mathematical formula (faster).
+
+        Args:
+            n: Upper bound (exclusive).
+
+        Returns:
+            Sum of integers from `0` to `n - 1`.
+
+        """
         return n * (n - 1) // 2
 
     @gg.trace_on_error()
-    def fail_method(self, y):
-        """Intentionally raise a ZeroDivisionError."""
+    def fail_method(self, y: float) -> float:
+        """Divide the stored value by `y`.
+
+        Args:
+            y: Divisor value.
+
+        Returns:
+            Quotient of `self.x / y`.
+
+        """
         return self.x / y
 
 
