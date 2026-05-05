@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
 import plotly.graph_objects as go
-import wandb
 from typing_extensions import Self
 
+import wandb
 from goggles.media import create_numpy_vector_field_visualization
 from goggles.types import Kind
 
@@ -206,6 +207,9 @@ class WandBHandler:
         }
     )
     GLOBAL_SCOPE: ClassVar[str] = "global"
+    _WANDB_INIT_RESERVED_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {"project", "entity", "name", "config", "group", "tags", "reinit"}
+    )
 
     def __init__(
         self,
@@ -216,6 +220,7 @@ class WandBHandler:
         group: str | None = None,
         tags: Sequence[str] | None = None,
         reinit: Reinit = "create_new",
+        wandb_init_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         """Initialize the W&B handler.
 
@@ -234,9 +239,12 @@ class WandBHandler:
             reinit: W&B reinitialization strategy when opening runs.
                 One of:
                 {"finish_previous", "return_previous", "create_new", "default"}.
+            wandb_init_kwargs: Additional keyword arguments forwarded to
+                ``wandb.init``.
 
         Raises:
-            ValueError: If `reinit` is not a valid option.
+            ValueError: If `reinit` is not a valid option, or if
+                `wandb_init_kwargs` contains invalid or handler-owned keys.
             TypeError: If `tags` is a `str` or contains non-string items.
         """
         self._logger = logging.getLogger(self.name)
@@ -279,6 +287,9 @@ class WandBHandler:
             dict(config) if config is not None else {}
         )
         self._reinit: Reinit = reinit or "finish_previous"
+        self._wandb_init_kwargs = self._validate_wandb_init_kwargs(
+            wandb_init_kwargs
+        )
         self._runs: dict[str, Run] = {}
         self._wandb_run: Run | None = None
         self._current_scope: str | None = None
@@ -292,6 +303,55 @@ class WandBHandler:
         # ``step is None`` events bypass the buffer to preserve W&B's
         # auto-increment semantics.
         self._pending: dict[str, dict[str, Any]] = {}
+
+    @classmethod
+    def _validate_wandb_init_kwargs(
+        cls, wandb_init_kwargs: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
+        """Validate extra ``wandb.init`` kwargs and return a dict copy.
+
+        Args:
+            wandb_init_kwargs: Additional keyword arguments to forward to
+                ``wandb.init``.
+
+        Returns:
+            A copied dictionary of validated keyword arguments.
+
+        Raises:
+            ValueError: If a key is unknown to ``wandb.init`` or conflicts
+                with parameters managed directly by this handler.
+        """
+        if wandb_init_kwargs is None:
+            return {}
+
+        init_kwargs = dict(wandb_init_kwargs)
+        reserved = sorted(
+            set(init_kwargs).intersection(cls._WANDB_INIT_RESERVED_KEYS)
+        )
+        if reserved:
+            raise ValueError(
+                "wandb_init_kwargs cannot override handler-owned "
+                f"wandb.init parameters: {', '.join(reserved)}."
+            )
+
+        signature = inspect.signature(wandb.init)
+        parameters = signature.parameters
+        accepts_var_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        unknown = sorted(
+            key
+            for key in init_kwargs
+            if key not in parameters and not accepts_var_kwargs
+        )
+        if unknown:
+            raise ValueError(
+                "Unknown wandb.init keyword argument(s) in "
+                f"wandb_init_kwargs: {', '.join(unknown)}."
+            )
+
+        return init_kwargs
 
     def can_handle(self, kind: str) -> bool:
         """Return True if the handler supports this event kind.
@@ -609,6 +669,7 @@ class WandBHandler:
                 "reinit": self._reinit,
                 "group": self._group,
                 "tags": list(self._tags) if self._tags is not None else None,
+                "wandb_init_kwargs": self._wandb_init_kwargs,
             },
         }
 
@@ -622,14 +683,16 @@ class WandBHandler:
         Returns:
             The reconstructed WandBHandler instance.
         """
+        data = serialized.get("data", serialized)
         return cls(
-            project=serialized.get("project"),
-            entity=serialized.get("entity"),
-            run_name=serialized.get("run_name"),
-            config=serialized.get("config"),
-            reinit=serialized.get("reinit", "create_new"),
-            group=serialized.get("group"),
-            tags=serialized.get("tags"),
+            project=data.get("project"),
+            entity=data.get("entity"),
+            run_name=data.get("run_name"),
+            config=data.get("config"),
+            reinit=data.get("reinit", "create_new"),
+            group=data.get("group"),
+            tags=data.get("tags"),
+            wandb_init_kwargs=data.get("wandb_init_kwargs"),
         )
 
     def _stage(
@@ -710,6 +773,7 @@ class WandBHandler:
             group=self._group,
             tags=list(self._tags) if self._tags is not None else None,
             reinit=self._reinit,
+            **self._wandb_init_kwargs,
         )
         self._runs[scope] = run
         return run
