@@ -334,7 +334,11 @@ class WandBHandler:
                 f"wandb.init parameters: {', '.join(reserved)}."
             )
 
-        signature = inspect.signature(wandb.init)
+        try:
+            signature = inspect.signature(wandb.init)
+        except (TypeError, ValueError):
+            return init_kwargs
+
         parameters = signature.parameters
         accepts_var_kwargs = any(
             parameter.kind is inspect.Parameter.VAR_KEYWORD

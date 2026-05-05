@@ -297,6 +297,21 @@ def test_wandb_init_kwargs_roundtrip_serialization(mock_wandb):
     assert serialized["data"]["wandb_init_kwargs"] == init_kwargs
     assert rebuilt.to_dict()["data"]["wandb_init_kwargs"] == init_kwargs
 
+    event = make_event(payload={"loss": 1.0})
+    rebuilt.handle(event)
+
+    mock_wandb.init.assert_called_once_with(
+        project="proj",
+        entity=None,
+        name=None,
+        config={"scope": "global"},
+        group=None,
+        tags=None,
+        reinit="create_new",
+        save_code=True,
+        settings={"code_dir": "."},
+    )
+
 
 def test_handle_artifact_uploads_file(mock_wandb, tmp_path):
     artifact_file = tmp_path / "random_artifact.npy"
