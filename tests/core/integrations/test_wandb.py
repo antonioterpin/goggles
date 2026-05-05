@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+import wandb as _real_wandb
 from wandb.proto import wandb_internal_pb2 as pb
 from wandb.sdk.internal.datastore import DataStore
 
@@ -41,36 +42,6 @@ def _moviepy_video_importable() -> bool:
 _MOVIEPY_USABLE = _moviepy_video_importable()
 
 
-def _wandb_init_signature(
-    entity=None,
-    project=None,
-    dir=None,
-    id=None,
-    name=None,
-    notes=None,
-    tags=None,
-    config=None,
-    config_exclude_keys=None,
-    config_include_keys=None,
-    allow_val_change=None,
-    group=None,
-    job_type=None,
-    mode=None,
-    force=None,
-    anonymous=None,
-    reinit=None,
-    resume=None,
-    resume_from=None,
-    fork_from=None,
-    save_code=None,
-    tensorboard=None,
-    sync_tensorboard=None,
-    monitor_gym=None,
-    settings=None,
-):
-    return None
-
-
 def _capture_logger_messages(
     logger: logging.Logger,
 ) -> tuple[list[str], logging.Handler]:
@@ -88,7 +59,7 @@ def _capture_logger_messages(
 @pytest.fixture
 def mock_wandb(monkeypatch):
     mock = MagicMock()
-    mock.init.__signature__ = inspect.signature(_wandb_init_signature)
+    mock.init.__signature__ = inspect.signature(_real_wandb.init)
     monkeypatch.setattr(wandb_module, "wandb", mock)
     return mock
 
@@ -303,7 +274,7 @@ def test_wandb_init_kwargs_roundtrip_serialization(mock_wandb):
     mock_wandb.init.assert_called_once_with(
         project="proj",
         entity=None,
-        name=None,
+        name="run-global",
         config={"scope": "global"},
         group=None,
         tags=None,
