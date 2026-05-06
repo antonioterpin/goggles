@@ -10,12 +10,19 @@ from goggles import WandBHandler
 # In this example, we set up a logger that outputs to Weights & Biases (W&B).
 # `group` and `tags` flow straight through to `wandb.init`, so every run this
 # handler creates lands in the same W&B group with the same searchable tags.
+# Use `wandb_init_kwargs` for less-common `wandb.init` options that Goggles
+# does not expose directly. Here, W&B saves the entry-point source file and
+# looks for code relative to the repository root.
 logger: gg.GogglesLogger = gg.get_logger("examples.basic", with_metrics=True)
 handler = WandBHandler(
     project="goggles_example",
     run_name="example_run",
     group="goggles_example_group",
     tags=["example", "smoke-test"],
+    wandb_init_kwargs={
+        "save_code": True,
+        "settings": {"code_dir": "."},
+    },
 )
 gg.attach(handler, scopes=["global"])
 

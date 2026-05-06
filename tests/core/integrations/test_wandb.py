@@ -9,11 +9,11 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-import wandb as _real_wandb
 from wandb.proto import wandb_internal_pb2 as pb
 from wandb.sdk.internal.datastore import DataStore
 
 import goggles._core.integrations.wandb as wandb_module
+import wandb as _real_wandb
 from goggles._core.integrations.wandb import WandBHandler
 
 
