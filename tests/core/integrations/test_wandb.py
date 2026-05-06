@@ -1,5 +1,6 @@
 import glob
 import importlib
+import inspect
 import logging
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+import wandb as _real_wandb
 from wandb.proto import wandb_internal_pb2 as pb
 from wandb.sdk.internal.datastore import DataStore
 
@@ -57,6 +59,7 @@ def _capture_logger_messages(
 @pytest.fixture
 def mock_wandb(monkeypatch):
     mock = MagicMock()
+    mock.init.__signature__ = inspect.signature(_real_wandb.init)
     monkeypatch.setattr(wandb_module, "wandb", mock)
     return mock
 
@@ -129,7 +132,15 @@ def test_handle_unsupported_kind_warns(mock_wandb):
 def test_get_or_create_run_creates_new(mock_wandb):
     h = WandBHandler(project="proj", entity="ent", run_name="base")
     run = h._get_or_create_run("scope1", extra_config={})
-    mock_wandb.init.assert_called_once()
+    mock_wandb.init.assert_called_once_with(
+        project="proj",
+        entity="ent",
+        name="base-scope1",
+        config={"scope": "scope1"},
+        group=None,
+        tags=None,
+        reinit="create_new",
+    )
     assert h._runs["scope1"] == run, (
         "Run should be cached under the given scope"
     )
@@ -208,6 +219,69 @@ def test_tags_must_be_sequence_of_strings(mock_wandb):
         WandBHandler(project="proj", tags="single-tag")
     with pytest.raises(TypeError, match="tags"):
         WandBHandler(project="proj", tags=[1, 2])  # pyright: ignore[reportArgumentType]
+
+
+def test_wandb_init_kwargs_forwarded_on_first_event(mock_wandb):
+    init_kwargs = {"save_code": True, "settings": {"code_dir": "."}}
+    h = WandBHandler(
+        project="proj",
+        entity="ent",
+        run_name="base",
+        wandb_init_kwargs=init_kwargs,
+    )
+    event = make_event(payload={"loss": 1.0})
+
+    h.handle(event)
+
+    mock_wandb.init.assert_called_once_with(
+        project="proj",
+        entity="ent",
+        name="base",
+        config={"scope": "global"},
+        group=None,
+        tags=None,
+        reinit="create_new",
+        save_code=True,
+        settings={"code_dir": "."},
+    )
+
+
+def test_wandb_init_kwargs_unknown_key_raises(mock_wandb):
+    with pytest.raises(ValueError, match=r"Unknown wandb.init.*unknown_key"):
+        WandBHandler(wandb_init_kwargs={"unknown_key": True})
+
+
+def test_wandb_init_kwargs_reserved_key_raises(mock_wandb):
+    with pytest.raises(ValueError, match=r"handler-owned.*project"):
+        WandBHandler(wandb_init_kwargs={"project": "override"})
+    with pytest.raises(ValueError, match=r"handler-owned.*tags"):
+        WandBHandler(wandb_init_kwargs={"tags": ["x"]})
+
+
+def test_wandb_init_kwargs_roundtrip_serialization(mock_wandb):
+    init_kwargs = {"save_code": True, "settings": {"code_dir": "."}}
+    h = WandBHandler(project="proj", wandb_init_kwargs=init_kwargs)
+
+    serialized = h.to_dict()
+    rebuilt = WandBHandler.from_dict(serialized)
+
+    assert serialized["data"]["wandb_init_kwargs"] == init_kwargs
+    assert rebuilt.to_dict()["data"]["wandb_init_kwargs"] == init_kwargs
+
+    event = make_event(payload={"loss": 1.0})
+    rebuilt.handle(event)
+
+    mock_wandb.init.assert_called_once_with(
+        project="proj",
+        entity=None,
+        name="run-global",
+        config={"scope": "global"},
+        group=None,
+        tags=None,
+        reinit="create_new",
+        save_code=True,
+        settings={"code_dir": "."},
+    )
 
 
 def test_handle_artifact_uploads_file(mock_wandb, tmp_path):

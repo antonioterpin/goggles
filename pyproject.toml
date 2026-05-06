@@ -159,6 +159,9 @@ convention = "google"
 max-line-length = 80
 max-doc-length = 80
 
+[tool.ruff.lint.isort]
+known-third-party = ["wandb"]
+
 # Pydoclint configuration
 # Pydoclint is used together with Ruff because
 # Ruff hasn't yet implemented all the checks that Pydoclint provides.
@@ -193,4 +196,3 @@ reportUnusedVariable = false
 enableTypeIgnoreComments = false
 reportIgnoreCommentWithoutRule = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
-
