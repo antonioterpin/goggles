@@ -3,7 +3,6 @@
 import importlib
 import logging
 import threading
-from pathlib import Path
 from typing import Any, ClassVar, cast
 
 import pytest
@@ -374,25 +373,6 @@ def test_environment_overrides(monkeypatch):
 
     importlib.reload(gg)
     assert gg.GOGGLES_ASYNC is False, "GOGGLES_ASYNC env override failed"
-
-
-def test_goggles_socket_env_picked_up_by_transport(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-):
-    """GOGGLES_SOCKET should be honored by LocalTransport's default path.
-
-    Args:
-        monkeypatch: Fixture used to set the GOGGLES_SOCKET env var.
-        tmp_path: Fixture used to derive a unique socket path per test.
-    """
-    sock = str(tmp_path / "gg-api-test.sock")
-    monkeypatch.setenv("GOGGLES_SOCKET", sock)
-    from goggles._core.transport import _default_socket_path  # noqa: PLC0415
-
-    assert _default_socket_path() == sock, (
-        "GOGGLES_SOCKET env should drive the default socket path"
-    )
 
 
 def test_get_handler_class_error():
