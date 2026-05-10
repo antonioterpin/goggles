@@ -1,3 +1,4 @@
+# pyright: reportAttributeAccessIssue=false, reportInvalidTypeArguments=false
 """iceoryx2-backed Goggles transport.
 
 Replaces the previous LocalTransport (Unix-socket / Windows-TCP+token
@@ -29,8 +30,8 @@ import time
 import uuid
 from typing import Any
 
-import iceoryx2 as iox2
-from iceoryx2 import Slice
+import iceoryx2 as iox2  # type: ignore[import-untyped]
+from iceoryx2 import Slice  # type: ignore[import-untyped]
 
 from goggles.types import Event
 
@@ -101,16 +102,19 @@ class LocalTransport:
         immediately before :meth:`shutdown` are still observed by
         local handlers. Cross-process delivery is best-effort: errors
         are logged but never raised.
+
+        Args:
+            event: Event to dispatch and publish.
         """
         if not self._running:
             return
         try:
             self._bus.emit(event)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("EventBus.emit raised on local emit")
         try:
             body = pickle.dumps(event, protocol=5)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("Failed to pickle event for cross-process emit")
             return
         total = _HEADER_BYTES + len(body)
@@ -128,11 +132,9 @@ class LocalTransport:
                     _LEN_BYTES,
                 )
                 if body:
-                    ctypes.memmove(
-                        base + _HEADER_BYTES, body, len(body)
-                    )
+                    ctypes.memmove(base + _HEADER_BYTES, body, len(body))
                 sample.assume_init().send()
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("iceoryx2 publish failed")
 
     def emit_sync(self, event: Event) -> None:
@@ -141,19 +143,38 @@ class LocalTransport:
         With iceoryx2 there is no cross-process ack and ``emit``
         already dispatches to the local bus before publishing, so the
         ``_sync`` variant has no extra work to do.
+
+        Args:
+            event: Event to dispatch and publish.
         """
         self.emit(event)
 
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
-        """Attach handlers under the given scopes (local process only)."""
+        """Attach handlers under the given scopes (local process only).
+
+        Args:
+            handlers: Serialized handler dicts (see ``Handler.to_dict``).
+            scopes: Scopes under which to attach.
+        """
         self._bus.attach(handlers, scopes)
 
     def detach(self, handler_name: str, scope: str) -> None:
-        """Detach a handler from the given scope (local process only)."""
+        """Detach a handler from the given scope (local process only).
+
+        Args:
+            handler_name: Name of the handler to detach.
+            scope: Scope to detach from.
+        """
         self._bus.detach(handler_name, scope)
 
     def shutdown(self, timeout: float | None = None) -> None:
-        """Stop the dispatch thread and shut the local bus down."""
+        """Stop the dispatch thread and shut the local bus down.
+
+        Args:
+            timeout: Per-handler close budget in seconds passed through
+                to :meth:`EventBus.shutdown`. ``None`` waits
+                indefinitely.
+        """
         if not self._running:
             return
         self._running = False
@@ -161,13 +182,14 @@ class LocalTransport:
         self._thread.join(timeout=1.0)
         try:
             self._bus.shutdown(timeout=timeout)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log.exception("EventBus.shutdown raised")
-        with self._publisher_lock:
-            self._publisher = None
-        self._subscriber = None
-        self._service = None
-        self._iox_node = None
+        # iceoryx2 owns the SHM lifetime; dropping the underlying
+        # ``Node`` together with its publisher / subscriber / service
+        # happens when this transport is itself garbage-collected.
+        # Re-binding those attributes to ``None`` here would force
+        # every accessor to None-check a value that the running flag
+        # already gates, so we leave them in place.
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -189,12 +211,12 @@ class LocalTransport:
                 event = pickle.loads(
                     bytes(buf[_HEADER_BYTES : _HEADER_BYTES + length])
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception("Failed to unpickle inbound event")
                 continue
             try:
                 self._bus.emit(event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 _log.exception("EventBus.emit raised on inbound event")
 
 
