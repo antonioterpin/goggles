@@ -88,4 +88,5 @@ the old behavior.
 - **Filters**: initialize ring-buffer index in `__init__`. (#144)
 - **Typing**: covariant `Metrics` type. (#135)
 
+[Unreleased]: https://github.com/antonioterpin/goggles/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/antonioterpin/goggles/compare/v0.1.9...v0.2.0

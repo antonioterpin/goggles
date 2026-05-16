@@ -491,6 +491,33 @@ class WandBHandler:
     def _handle_artifact(
         self, run: Run, payload: Any, extra: dict[str, Any]
     ) -> None:
+        """Upload an artifact event to W&B.
+
+        Payload schema (required keys are checked at runtime; unknown
+        keys are ignored):
+
+        - ``path`` (str, required): filesystem path to the artifact. If
+          ``path`` is a directory, the tree is uploaded recursively via
+          ``Artifact.add_dir`` (useful for Orbax / multi-shard
+          checkpoints); otherwise it is uploaded as a single file via
+          ``Artifact.add_file``. Non-existent paths are skipped with a
+          warning.
+        - ``name`` (str, optional): artifact name in the W&B collection.
+          Defaults to ``"artifact"``.
+        - ``type`` (str, optional): artifact type. Defaults to ``"misc"``.
+        - ``aliases`` (sequence[str], optional): aliases to attach to
+          this version of the artifact, e.g. ``["best"]`` or
+          ``["latest", "step-42"]``. ``str``/``bytes`` (also
+          ``Sequence``) and non-string elements are rejected with a
+          warning so they do not get iterated character-by-character
+          into nonsense aliases; the upload still proceeds unaliased.
+
+        Args:
+            run: Active W&B run for the artifact's scope.
+            payload: Mapping describing the artifact (see schema above).
+            extra: Routing metadata attached to the event; forwarded as
+                the artifact's ``metadata`` field.
+        """
         if not isinstance(payload, Mapping):
             self._logger.warning(
                 "Artifact payload must be a mapping; got %r", type(payload)
