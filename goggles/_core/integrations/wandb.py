@@ -511,10 +511,12 @@ class WandBHandler:
                 "Artifact path does not exist: %s; skipping.", path
             )
             return
-        if aliases is not None and not isinstance(aliases, Sequence):
+        if aliases is not None and (
+            isinstance(aliases, str) or not isinstance(aliases, Sequence)
+        ):
             self._logger.warning(
-                "Artifact 'aliases' must be a sequence of strings; "
-                "got %r; ignoring.",
+                "Artifact 'aliases' must be a sequence of strings, not a "
+                "bare str; got %r; ignoring.",
                 type(aliases),
             )
             aliases = None

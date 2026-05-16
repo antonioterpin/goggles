@@ -405,6 +405,45 @@ def test_handle_artifact_forwards_aliases(mock_wandb, tmp_path):
     )
 
 
+def test_handle_artifact_invalid_aliases_type_warns(mock_wandb, tmp_path):
+    """A non-sequence ``aliases`` is dropped with a warning, not forwarded.
+
+    Forwarding a bare string would be silently iterated character by
+    character by W&B; forwarding a scalar would raise inside
+    ``log_artifact``. The guard turns it into a noisy no-op so the
+    upload still goes through unaliased.
+    """
+    artifact_file = tmp_path / "ckpt.bin"
+    artifact_file.write_bytes(b"x")
+
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="artifact",
+        scope="global",
+        payload={
+            "path": str(artifact_file),
+            "name": "ckpt",
+            "type": "checkpoint",
+            "aliases": "best",
+        },
+        step=0,
+        extra={},
+    )
+
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(event)
+    finally:
+        h._logger.removeHandler(collector)
+
+    assert any("aliases" in m.lower() for m in messages), (
+        "Should warn when aliases is not a sequence"
+    )
+    mock_wandb.init.return_value.log_artifact.assert_called_once_with(
+        mock_wandb.Artifact.return_value
+    )
+
+
 def test_handle_artifact_missing_path_warns(mock_wandb, tmp_path):
     """A non-existent ``path`` skips the upload with a warning.
 
