@@ -512,12 +512,20 @@ class WandBHandler:
             )
             return
         if aliases is not None and (
-            isinstance(aliases, str) or not isinstance(aliases, Sequence)
+            isinstance(aliases, (str, bytes))
+            or not isinstance(aliases, Sequence)
         ):
             self._logger.warning(
                 "Artifact 'aliases' must be a sequence of strings, not a "
-                "bare str; got %r; ignoring.",
+                "bare str/bytes; got %r; ignoring.",
                 type(aliases),
+            )
+            aliases = None
+        if aliases is not None and not all(isinstance(a, str) for a in aliases):
+            self._logger.warning(
+                "Artifact 'aliases' must contain only strings; got %r; "
+                "ignoring.",
+                [type(a).__name__ for a in aliases],
             )
             aliases = None
         artifact = wandb.Artifact(name=name, type=art_type, metadata=extra)
