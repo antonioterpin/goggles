@@ -599,13 +599,6 @@ class CoreGogglesLogger(GogglesLogger, CoreTextLogger):
     ) -> None:
         """Emit a generic artifact (encoded bytes).
 
-        The WandB integration accepts a ``{"path": ..., "name": ...,
-        "type": ..., "aliases": [...]}`` mapping; ``path`` may point to
-        a file or to a directory (e.g. an Orbax checkpoint tree), and
-        ``aliases`` (optional) tags the version inside the W&B artifact
-        collection — pass ``["best"]`` or ``["latest"]`` to mark
-        checkpoints.
-
         Args:
             data: Artifact data.
             step: Global step index.
