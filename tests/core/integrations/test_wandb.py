@@ -336,6 +336,108 @@ def test_handle_artifact_non_mapping_warns(mock_wandb):
     mock_wandb.Artifact.assert_not_called()
 
 
+def test_handle_artifact_uploads_directory(mock_wandb, tmp_path):
+    """Directory paths are uploaded recursively via ``Artifact.add_dir``.
+
+    Multi-file artifacts (such as Orbax model checkpoints) live in a
+    directory tree on disk. The WandB integration must dispatch to
+    ``add_dir`` instead of ``add_file`` so the full tree is uploaded as
+    one artifact.
+    """
+    ckpt_dir = tmp_path / "checkpoint_step_42"
+    ckpt_dir.mkdir()
+    (ckpt_dir / "params.msgpack").write_bytes(b"weights")
+    (ckpt_dir / "opt_state.msgpack").write_bytes(b"opt")
+
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="artifact",
+        scope="global",
+        payload={
+            "path": str(ckpt_dir),
+            "name": "model_checkpoint",
+            "type": "checkpoint",
+        },
+        step=42,
+        extra={},
+    )
+
+    h.handle(event)
+
+    mock_wandb.Artifact.assert_called_once_with(
+        name="model_checkpoint", type="checkpoint", metadata={}
+    )
+    mock_wandb.Artifact.return_value.add_dir.assert_called_once_with(
+        str(ckpt_dir)
+    )
+    mock_wandb.Artifact.return_value.add_file.assert_not_called()
+    mock_wandb.init.return_value.log_artifact.assert_called_once()
+
+
+def test_handle_artifact_forwards_aliases(mock_wandb, tmp_path):
+    """Aliases in the payload reach ``run.log_artifact`` verbatim.
+
+    WandB exposes artifact aliases as the mechanism for marking the
+    "best" or "latest" version of a checkpoint within an artifact
+    collection; without forwarding them, callers cannot tag uploads.
+    """
+    artifact_file = tmp_path / "ckpt.bin"
+    artifact_file.write_bytes(b"x")
+
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="artifact",
+        scope="global",
+        payload={
+            "path": str(artifact_file),
+            "name": "model_checkpoint",
+            "type": "checkpoint",
+            "aliases": ["best", "step-42"],
+        },
+        step=42,
+        extra={},
+    )
+
+    h.handle(event)
+
+    mock_wandb.init.return_value.log_artifact.assert_called_once_with(
+        mock_wandb.Artifact.return_value, aliases=["best", "step-42"]
+    )
+
+
+def test_handle_artifact_missing_path_warns(mock_wandb, tmp_path):
+    """A non-existent ``path`` skips the upload with a warning.
+
+    Without this guard, ``Artifact.add_file`` raises deep inside the
+    handler thread and crashes the dispatch loop. Detecting it early
+    surfaces a clear message and keeps the handler running.
+    """
+    missing = tmp_path / "does_not_exist"
+    h = WandBHandler(project="proj")
+    event = SimpleNamespace(
+        kind="artifact",
+        scope="global",
+        payload={
+            "path": str(missing),
+            "name": "ckpt",
+            "type": "checkpoint",
+        },
+        step=0,
+        extra={},
+    )
+
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(event)
+    finally:
+        h._logger.removeHandler(collector)
+
+    assert any("does not exist" in m.lower() for m in messages), (
+        "Should warn when artifact path is missing"
+    )
+    mock_wandb.Artifact.assert_not_called()
+
+
 def test_handle_vector_field_logs_image(mock_wandb, monkeypatch):
     h = WandBHandler(project="proj")
     event = SimpleNamespace(
