@@ -405,13 +405,26 @@ def test_handle_artifact_forwards_aliases(mock_wandb, tmp_path):
     )
 
 
-def test_handle_artifact_invalid_aliases_type_warns(mock_wandb, tmp_path):
-    """A non-sequence ``aliases`` is dropped with a warning, not forwarded.
+@pytest.mark.parametrize(
+    "bad_aliases",
+    [
+        "best",  # str: matches Sequence but iterates char-by-char
+        b"best",  # bytes: matches Sequence but iterates byte-by-byte
+        42,  # scalar: not a Sequence at all
+        ["best", 123],  # list with non-string element
+    ],
+    ids=["bare-str", "bare-bytes", "scalar", "non-string-element"],
+)
+def test_handle_artifact_invalid_aliases_warn_and_drop(
+    mock_wandb, tmp_path, bad_aliases
+):
+    """Invalid ``aliases`` payloads warn and the upload proceeds unaliased.
 
-    Forwarding a bare string would be silently iterated character by
-    character by W&B; forwarding a scalar would raise inside
-    ``log_artifact``. The guard turns it into a noisy no-op so the
-    upload still goes through unaliased.
+    Forwarding a ``str``/``bytes`` would be silently iterated and produce
+    nonsense aliases like ``['b','e','s','t']``; a scalar would crash
+    ``run.log_artifact``; non-string elements would fail server-side. The
+    guard turns each into a noisy no-op so the upload still goes
+    through.
     """
     artifact_file = tmp_path / "ckpt.bin"
     artifact_file.write_bytes(b"x")
@@ -424,7 +437,7 @@ def test_handle_artifact_invalid_aliases_type_warns(mock_wandb, tmp_path):
             "path": str(artifact_file),
             "name": "ckpt",
             "type": "checkpoint",
-            "aliases": "best",
+            "aliases": bad_aliases,
         },
         step=0,
         extra={},
@@ -437,7 +450,7 @@ def test_handle_artifact_invalid_aliases_type_warns(mock_wandb, tmp_path):
         h._logger.removeHandler(collector)
 
     assert any("aliases" in m.lower() for m in messages), (
-        "Should warn when aliases is not a sequence"
+        "Should warn when aliases payload is invalid"
     )
     mock_wandb.init.return_value.log_artifact.assert_called_once_with(
         mock_wandb.Artifact.return_value
