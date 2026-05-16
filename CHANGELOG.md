@@ -5,6 +5,22 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (pre-1.0: minor bumps may carry breaking changes).
 
+## [Unreleased]
+
+### Added
+
+- **W&B artifact: directory uploads + aliases.** The artifact payload
+  `path` may now point to a directory (uploaded recursively via
+  `Artifact.add_dir`), and an optional `aliases` field is forwarded to
+  `run.log_artifact` so callers can tag versions (e.g. `["best"]`,
+  `["latest"]`). Enables clean Orbax/PyTorch checkpoint uploads
+  without tar-balling.
+
+### Fixed
+
+- **W&B artifact**: skip with a warning when `path` does not exist
+  instead of crashing the dispatch loop on `Artifact.add_file`.
+
 ## [0.2.0] - 2026-05-01
 
 First release after a substantial rework of the transport layer, the

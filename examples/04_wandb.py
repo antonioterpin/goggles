@@ -103,6 +103,25 @@ try:
         step=100,
     )
 
+    # Directory uploads + aliases: an Orbax/PyTorch checkpoint is a
+    # tree of files, so pass the *directory* as `path` and W&B will
+    # add it recursively. `aliases` tags the version inside the W&B
+    # artifact collection (think `:best`, `:latest`) — handy when you
+    # want a stable URL pointing to your best checkpoint.
+    ckpt_dir = Path(artifact_dir.name) / "checkpoint_step_100"
+    ckpt_dir.mkdir()
+    np.save(ckpt_dir / "params.npy", np.random.rand(8, 8))
+    np.save(ckpt_dir / "opt_state.npy", np.random.rand(8, 8))
+    logger.artifact(
+        {
+            "path": str(ckpt_dir),
+            "name": "model_checkpoint",
+            "type": "checkpoint",
+            "aliases": ["best", "step-100"],
+        },
+        step=100,
+    )
+
     def lamb_oseen_velocity(
         points: np.ndarray,
         vortices: list[tuple[float, float, float, float]],

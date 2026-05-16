@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any, ClassVar, Literal, TypeAlias, cast
 
 import numpy as np
@@ -498,14 +499,34 @@ class WandBHandler:
         path = payload.get("path")
         name = payload.get("name", "artifact")
         art_type = payload.get("type", "misc")
+        aliases = payload.get("aliases")
         if not isinstance(path, str):
             self._logger.warning(
                 "Artifact missing valid 'path' field; skipping."
             )
             return
+        path_obj = Path(path)
+        if not path_obj.exists():
+            self._logger.warning(
+                "Artifact path does not exist: %s; skipping.", path
+            )
+            return
+        if aliases is not None and not isinstance(aliases, Sequence):
+            self._logger.warning(
+                "Artifact 'aliases' must be a sequence of strings; "
+                "got %r; ignoring.",
+                type(aliases),
+            )
+            aliases = None
         artifact = wandb.Artifact(name=name, type=art_type, metadata=extra)
-        artifact.add_file(path)
-        run.log_artifact(artifact)
+        if path_obj.is_dir():
+            artifact.add_dir(path)
+        else:
+            artifact.add_file(path)
+        if aliases is None:
+            run.log_artifact(artifact)
+        else:
+            run.log_artifact(artifact, aliases=list(aliases))
 
     def _handle_histogram(
         self,
