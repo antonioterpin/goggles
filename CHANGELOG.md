@@ -7,8 +7,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-24
+
 ### Added
 
+- **W&B: `wandb_init_kwargs` escape hatch.** The handler accepts an
+  optional `wandb_init_kwargs` mapping forwarded verbatim to
+  `wandb.init`, with validation that rejects invalid or handler-owned
+  keys. (#210)
 - **W&B artifact: directory uploads + aliases.** The artifact payload
   `path` may now point to a directory (uploaded recursively via
   `Artifact.add_dir`), and an optional `aliases` field is forwarded to
@@ -88,5 +94,6 @@ the old behavior.
 - **Filters**: initialize ring-buffer index in `__init__`. (#144)
 - **Typing**: covariant `Metrics` type. (#135)
 
-[Unreleased]: https://github.com/antonioterpin/goggles/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/antonioterpin/goggles/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/antonioterpin/goggles/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/antonioterpin/goggles/compare/v0.1.9...v0.2.0
