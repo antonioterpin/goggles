@@ -1,7 +1,8 @@
 """Dedicated host process for the goggles transport.
 
-Run as ``python -m goggles._core.host``, or let it be spawned automatically
-when ``GOGGLES_DEDICATED_HOST`` is set (see :mod:`goggles._core.routing`).
+Run as ``python -m goggles._core.host``. goggles spawns this automatically by
+default (see :mod:`goggles._core.routing`); set ``GOGGLES_DEDICATED_HOST=0`` to
+host in-process instead.
 
 The host binds the ``GOGGLES_SOCKET`` endpoint and becomes the transport HOST:
 it owns the :class:`~goggles.EventBus` and runs every attached handler --
@@ -20,10 +21,13 @@ drains any queued events into the handlers and closes them (which is where
 
 from __future__ import annotations
 
+import importlib
 import os
 import signal
 import sys
 import threading
+
+from goggles._core.transport import LocalTransport
 
 
 def run() -> int:  # pragma: no cover - entrypoint, run only in a subprocess
@@ -47,8 +51,6 @@ def run() -> int:  # pragma: no cover - entrypoint, run only in a subprocess
     # the modules named in ``GOGGLES_HOST_IMPORTS`` (comma/space separated) so
     # their handlers can be reconstructed here.
     _import_host_modules()
-
-    from goggles._core.transport import LocalTransport  # noqa: PLC0415
 
     transport = LocalTransport()
     if not transport.is_host:
@@ -93,8 +95,6 @@ def _import_host_modules() -> None:
     ``register_handler`` calls) live in application modules the host would
     not otherwise import. Failures are logged and skipped.
     """
-    import importlib  # noqa: PLC0415
-
     spec = os.environ.get("GOGGLES_HOST_IMPORTS", "")
     for name in spec.replace(",", " ").split():
         try:

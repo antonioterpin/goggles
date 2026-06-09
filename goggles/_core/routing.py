@@ -7,16 +7,19 @@ a Unix domain socket to the host process on the same machine.
 
 Dedicated host process
 ----------------------
-By default the *host* (the process that owns the :class:`~goggles.EventBus`
-and runs the handlers) is simply the first process to bind the socket -- which
-is usually the application itself, so heavy handlers (e.g. the W&B uploader)
-run on the application's interpreter and can starve its latency-critical
-paths. Setting ``GOGGLES_DEDICATED_HOST=1`` makes goggles spawn a dedicated
-:mod:`goggles._core.host` subprocess to be the host instead; the application
-(and every other process) then connects as a *client*, and the spawning
-process terminates the host on :func:`goggles.finish` (with an ``atexit``
-backstop). Handlers are unaffected: they already cross to the host as
-serialized specs, so ``attach(WandBHandler(...))`` runs inside the subprocess.
+By default goggles spawns a dedicated :mod:`goggles._core.host` subprocess to
+be the *host* (the process that owns the :class:`~goggles.EventBus` and runs
+the handlers); the application -- and every other process -- then connects as
+a *client*, and the spawning process terminates the host on
+:func:`goggles.finish` (with an ``atexit`` backstop). This keeps heavy handlers
+(e.g. the W&B uploader) off the application's interpreter so they cannot starve
+its latency-critical paths. Handlers are unaffected: they already cross to the
+host as serialized specs, so ``attach(WandBHandler(...))`` runs inside the
+subprocess.
+
+Set ``GOGGLES_DEDICATED_HOST=0`` (or ``false``/``no``/``off``) to opt out and
+host in-process instead -- the first process to bind the socket becomes the
+host, as before.
 """
 
 from __future__ import annotations
@@ -49,8 +52,11 @@ __host_lock = threading.Lock()
 __atexit_registered = False
 
 _DEDICATED_HOST_ENV = "GOGGLES_DEDICATED_HOST"
-# How long to wait for a freshly spawned host to bind + signal readiness.
-_HOST_SPAWN_TIMEOUT_S = 30.0
+# How long to wait for a freshly spawned host to bind + signal readiness
+# before falling back to an in-process host. Binding is normally well under a
+# second; this only bounds the pathological "child started but hung" case,
+# since the first log blocks on it.
+_HOST_SPAWN_TIMEOUT_S = 10.0
 # Bounded wait used by the atexit backstop so interpreter shutdown never hangs
 # on a wedged host (an explicit ``finish()`` may pass a different budget).
 _HOST_ATEXIT_TIMEOUT_S = 30.0
@@ -66,9 +72,12 @@ def get_bus() -> Transport:
     default). Subsequent calls return the same instance; if the prior
     singleton was shut down, a fresh one is constructed.
 
-    When ``GOGGLES_DEDICATED_HOST`` is set, a dedicated host subprocess is
-    spawned (once per process, and only if no host is already listening)
-    before the transport is built, so this process comes up as a client.
+    By default a dedicated host subprocess is spawned (once per process, and
+    only if no host is already listening) before the transport is built, so
+    this process comes up as a client. The first call therefore blocks
+    briefly while the host binds. Set ``GOGGLES_DEDICATED_HOST=0`` to skip
+    this and host in-process. A spawn failure is non-fatal: it logs and
+    falls back to an in-process host.
 
     Returns:
         The singleton transport.
@@ -98,16 +107,19 @@ def reset_bus() -> None:
 
 
 def _dedicated_host_enabled() -> bool:
-    """Whether ``GOGGLES_DEDICATED_HOST`` requests a dedicated host process.
+    """Whether goggles should run the host in a dedicated subprocess.
+
+    Dedicated hosting is the default; set ``GOGGLES_DEDICATED_HOST`` to a
+    falsy value (``0``/``false``/``no``/``off``) to host in-process instead.
 
     Returns:
-        ``True`` when the env var is a truthy value.
+        ``True`` unless the env var is explicitly set to a falsy value.
     """
-    return os.getenv(_DEDICATED_HOST_ENV, "0").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
+    return os.getenv(_DEDICATED_HOST_ENV, "1").lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
     )
 
 
@@ -151,10 +163,13 @@ def _host_is_listening(socket_path: str) -> bool:
 def _spawn_dedicated_host() -> None:
     """Ensure a dedicated host subprocess owns the endpoint (idempotent).
 
-    No-op unless ``GOGGLES_DEDICATED_HOST`` is set. Spawns at most one host
-    per process; if another host already listens on the socket this process
-    simply becomes a client. On failure it logs and returns, leaving the
-    caller to fall back to an in-process host.
+    Spawns a dedicated host by default; a no-op only when
+    ``GOGGLES_DEDICATED_HOST`` is falsy (``0``/``false``/``no``/``off``).
+    Spawns at most one host per process; if another host already listens on
+    the socket this process simply becomes a client. Any failure -- the
+    subprocess cannot be started, or it never signals readiness -- is
+    non-fatal: it logs and returns, leaving the caller to fall back to an
+    in-process host.
     """
     global __host_proc, __atexit_registered  # noqa: PLW0603
     if not _dedicated_host_enabled():
@@ -162,25 +177,34 @@ def _spawn_dedicated_host() -> None:
     with __host_lock:
         if __host_proc is not None and __host_proc.poll() is None:
             return  # we already spawned a live host
-        socket_path = _resolve_socket_path()
-        if _host_is_listening(socket_path):
-            return  # already hosted (by us or elsewhere); be a client
-
-        ready_path = os.path.join(
-            tempfile.gettempdir(),
-            f"goggles-host-ready-{uuid.uuid4().hex}",
-        )
-        env = os.environ.copy()
-        env["GOGGLES_SOCKET"] = socket_path
-        env["GOGGLES_HOST_READY"] = ready_path
-        # The child binds the socket directly; never let it recurse into
-        # spawning another host.
-        env.pop(_DEDICATED_HOST_ENV, None)
-
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "goggles._core.host"],
-            env=env,
-        )
+        try:
+            socket_path = _resolve_socket_path()
+            if _host_is_listening(socket_path):
+                return  # already hosted (by us or elsewhere); be a client
+            ready_path = os.path.join(
+                tempfile.gettempdir(),
+                f"goggles-host-ready-{uuid.uuid4().hex}",
+            )
+            env = os.environ.copy()
+            env["GOGGLES_SOCKET"] = socket_path
+            env["GOGGLES_HOST_READY"] = ready_path
+            # The child binds the socket directly; never let it recurse into
+            # spawning another host.
+            env.pop(_DEDICATED_HOST_ENV, None)
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "goggles._core.host"],
+                env=env,
+            )
+        except Exception:
+            # Spawning can fail in restricted environments (no fork/exec,
+            # resource limits, ...). Never let that crash the caller's first
+            # log -- fall back to an in-process host.
+            _log.warning(
+                "goggles: could not spawn a dedicated host; "
+                "falling back to an in-process host.",
+                exc_info=True,
+            )
+            return
 
         if not _wait_for_ready(proc, ready_path):
             _log.warning(
@@ -277,7 +301,19 @@ def _terminate_dedicated_host(timeout: float | None = None) -> None:
 
 
 def _atexit_terminate_host() -> None:
-    """``atexit`` backstop: reap the host with a bounded wait (no hang)."""
+    """``atexit`` backstop: flush the client, then reap the host (bounded).
+
+    Mirrors :func:`goggles.finish` so a program that exits without calling it
+    still ships its queued events to the host before the host is torn down.
+    No-op once ``finish()`` has run (the transport is already shut down and
+    the host already reaped). Bounded so interpreter shutdown never hangs.
+    """
+    transport = __singleton_transport
+    if transport is not None and transport.is_running:
+        try:
+            transport.shutdown(timeout=_HOST_ATEXIT_TIMEOUT_S)
+        except Exception:  # best effort
+            pass
     _terminate_dedicated_host(timeout=_HOST_ATEXIT_TIMEOUT_S)
 
 

@@ -1,16 +1,15 @@
-"""Example: run the goggles host in a dedicated subprocess.
+"""Example: handlers run in a dedicated host subprocess (the default).
 
-By default the goggles *host* -- the process that owns the EventBus and runs
-the handlers -- is whichever process first binds the socket, which is usually
-the application itself. Heavy or blocking handlers (notably the W&B uploader)
-then run on the application's interpreter and can starve its latency-critical
-paths (RPC servers, control/sim loops) when logging back-pressures.
+By default goggles spawns a dedicated host subprocess to own the EventBus and
+run the handlers, so *this* process -- and every other -- connects as a
+*client*. That keeps heavy or blocking handlers (notably the W&B uploader) off
+the application's interpreter, where they could otherwise starve its
+latency-critical paths (RPC servers, control/sim loops) when logging
+back-pressures.
 
-Setting ``GOGGLES_DEDICATED_HOST=1`` makes goggles spawn a dedicated host
-subprocess instead: this process (and every other) connects as a *client*, the
-handlers run in the subprocess, and ``gg.finish()`` drains and terminates it.
-Handlers are unchanged -- ``attach(...)`` ships them to the host over the wire,
-so a ``WandBHandler`` attached here uploads from the subprocess, not from here.
+Nothing special is needed -- it is the default. Set ``GOGGLES_DEDICATED_HOST=0``
+to opt out and host in-process instead (the first process to bind the socket
+becomes the host).
 
 Run:
     python examples/08_dedicated_host.py
@@ -23,11 +22,11 @@ import goggles as gg
 
 
 def main() -> None:
-    """Attach a handler (it runs in the dedicated host) and log a few events."""
-    # Opt in BEFORE the first goggles call: the host is spawned lazily on the
-    # first ``get_bus()`` / ``attach()``. Bound the host's graceful-shutdown
-    # budget (drain + handler close, e.g. finishing W&B runs) for the demo.
-    os.environ.setdefault("GOGGLES_DEDICATED_HOST", "1")
+    """Log a few events; the handler runs in the dedicated host subprocess."""
+    # The dedicated host is already the default -- no GOGGLES_DEDICATED_HOST
+    # needed. (To host in-process instead, set GOGGLES_DEDICATED_HOST=0 before
+    # the first goggles call.) Bound the host's graceful-shutdown budget
+    # (drain + handler close, e.g. finishing W&B runs) for the demo.
     os.environ.setdefault("GOGGLES_SHUTDOWN_TIMEOUT", "30")
 
     gg.attach(

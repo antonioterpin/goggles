@@ -9,18 +9,22 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
-- **Dedicated host process (`GOGGLES_DEDICATED_HOST`).** Setting
-  `GOGGLES_DEDICATED_HOST=1` makes goggles spawn a dedicated subprocess to be
-  the transport host, so the `EventBus` and every handler (notably the
-  blocking W&B uploader) run there instead of on the application's
-  interpreter -- keeping logging back-pressure from starving the app's
-  latency-critical paths (RPC servers, control/sim loops). The application
-  and every other process connect as clients; handlers are unchanged
-  (`attach(...)` already ships them to the host over the wire). `gg.finish()`
-  drains and terminates the host (with an `atexit` backstop), and
-  `GOGGLES_HOST_IMPORTS` lets the host import modules that define custom
-  handlers. See `examples/08_dedicated_host.py` and
+- **Dedicated host process for handlers (on by default).** goggles spawns a
+  dedicated subprocess to be the transport host (owning the `EventBus` and
+  running every handler, notably the blocking W&B uploader), so the
+  application and every other process connect as clients -- keeping logging
+  back-pressure from starving the app's latency-critical paths (RPC servers,
+  control/sim loops). Set `GOGGLES_DEDICATED_HOST=0` (or `false`/`no`/`off`)
+  to host in-process instead (the first process to bind the socket becomes the
+  host). Handlers are unchanged (`attach(...)` already ships them to the host
+  over the wire); `gg.finish()` drains and terminates the host (with an
+  `atexit` backstop). See `examples/08_dedicated_host.py` and
   [docs/guides/transport.md](docs/guides/transport.md).
+- **`GOGGLES_HOST_IMPORTS`** -- comma/space-separated modules the dedicated
+  host imports at startup, so custom handlers registered via
+  `register_handler` can be reconstructed there.
+- **`is_host`** is now part of the `Transport` protocol, so callers can tell
+  whether they own the bus or connect to a (possibly dedicated) host.
 
 ### Fixed
 

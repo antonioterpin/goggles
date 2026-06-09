@@ -1,9 +1,14 @@
-"""Tests for the dedicated host process (``GOGGLES_DEDICATED_HOST``).
+"""Tests for the dedicated host process (default; ``GOGGLES_DEDICATED_HOST``).
 
-When the env var is set, :func:`goggles._core.routing.get_bus` spawns a
-dedicated :mod:`goggles._core.host` subprocess to own the EventBus + handlers,
-so the application is a client and handler work (e.g. W&B uploads) runs off the
-application's interpreter. :func:`goggles.finish` reaps the subprocess.
+By default :func:`goggles._core.routing.get_bus` spawns a dedicated
+:mod:`goggles._core.host` subprocess to own the EventBus + handlers, so the
+application is a client and handler work (e.g. W&B uploads) runs off the
+application's interpreter. ``GOGGLES_DEDICATED_HOST=0`` opts out (in-process
+host). :func:`goggles.finish` drains and reaps the subprocess.
+
+The suite-wide autouse fixture in ``tests/conftest.py`` disables the dedicated
+host by default; these tests re-enable it (or assert the disabled path)
+explicitly.
 """
 
 from __future__ import annotations
@@ -44,9 +49,11 @@ def _wait_until(
 
 
 @pytest.fixture
-def dedicated_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+def default_host_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A unique socket with the dedicated host left at its default (on)."""
     path = _unique_socket()
-    monkeypatch.setenv("GOGGLES_DEDICATED_HOST", "1")
+    # Clear the suite-wide opt-out so we exercise the real default (on).
+    monkeypatch.delenv("GOGGLES_DEDICATED_HOST", raising=False)
     monkeypatch.setenv("GOGGLES_SOCKET", path)
     # Bound the host's graceful-shutdown budget so tests never hang.
     monkeypatch.setenv("GOGGLES_SHUTDOWN_TIMEOUT", "10")
@@ -64,9 +71,10 @@ def dedicated_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
 
 
 @pytest.fixture
-def plain_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+def disabled_host_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A unique socket with the dedicated host explicitly disabled."""
     path = _unique_socket()
-    monkeypatch.delenv("GOGGLES_DEDICATED_HOST", raising=False)
+    monkeypatch.setenv("GOGGLES_DEDICATED_HOST", "0")
     monkeypatch.setenv("GOGGLES_SOCKET", path)
     routing.reset_bus()
     try:
@@ -79,28 +87,50 @@ def plain_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
             pass
 
 
-def test_disabled_by_default_hosts_in_process(plain_socket: str) -> None:
+def test_dedicated_host_enabled_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Default (unset) is ON.
+    monkeypatch.delenv("GOGGLES_DEDICATED_HOST", raising=False)
+    assert routing._dedicated_host_enabled() is True
+    # Only explicit falsy values disable it.
+    for value in ("0", "false", "no", "off", "OFF", "False"):
+        monkeypatch.setenv("GOGGLES_DEDICATED_HOST", value)
+        assert routing._dedicated_host_enabled() is False, value
+    for value in ("1", "true", "yes", "on", "anything"):
+        monkeypatch.setenv("GOGGLES_DEDICATED_HOST", value)
+        assert routing._dedicated_host_enabled() is True, value
+
+
+def test_default_runs_host_in_a_subprocess(default_host_socket: str) -> None:
+    bus = gg.get_bus()
+    # The application is a CLIENT by default; the subprocess is the host.
+    assert not bus.is_host
+    proc = routing._dedicated_host_process()
+    assert proc is not None
+    assert proc.poll() is None, "host subprocess should be alive"
+
+
+def test_disabled_hosts_in_process(disabled_host_socket: str) -> None:
     bus = gg.get_bus()
     try:
-        assert bus.is_host, "without the env var the caller hosts in-process"
+        assert bus.is_host, "GOGGLES_DEDICATED_HOST=0 hosts in-process"
         assert routing._dedicated_host_process() is None
     finally:
         bus.shutdown(timeout=5.0)
         routing.reset_bus()
 
 
-def test_spawns_host_and_runs_handler_in_subprocess(
-    dedicated_socket: str, tmp_path: Path
+def test_runs_handler_in_subprocess_and_flushes_on_finish(
+    default_host_socket: str, tmp_path: Path
 ) -> None:
     storage_dir = tmp_path / "logs"
     gg.attach(LocalStorageHandler(path=storage_dir), scopes=["global"])
 
     bus = gg.get_bus()
-    # The application is a CLIENT; the dedicated subprocess is the host.
     assert not bus.is_host
     proc = routing._dedicated_host_process()
     assert proc is not None
-    assert proc.poll() is None, "host subprocess should be alive"
 
     for i in range(5):
         bus.emit(
@@ -127,7 +157,7 @@ def test_spawns_host_and_runs_handler_in_subprocess(
 
 
 def test_does_not_spawn_when_a_host_already_listens(
-    dedicated_socket: str,
+    default_host_socket: str,
 ) -> None:
     # A host is already bound to the socket (e.g. an externally managed one).
     existing = LocalTransport(socket_path=os.environ["GOGGLES_SOCKET"])
@@ -148,7 +178,7 @@ def test_does_not_spawn_when_a_host_already_listens(
 
 
 def test_falls_back_to_in_process_host_when_spawn_not_ready(
-    dedicated_socket: str, monkeypatch: pytest.MonkeyPatch
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     class _DummyProc:
         def __init__(self) -> None:
@@ -177,6 +207,41 @@ def test_falls_back_to_in_process_host_when_spawn_not_ready(
         assert bus.is_host
         assert routing._dedicated_host_process() is None
         assert not dummy._alive, "the unready child must be killed"
+    finally:
+        bus.shutdown(timeout=5.0)
+        routing.reset_bus()
+
+
+def test_configure_replaces_console_under_dedicated_host(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Under the dedicated host the local bus is a client (empty), so
+    # configure() must not read it to decide whether to replace the console
+    # handler -- it detaches the target scope unconditionally (over the wire)
+    # before re-attaching, so a second configure() actually wins.
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(gg, "detach", lambda n, s: calls.append((n, s)))
+    try:
+        gg.configure(enable_console=True, scopes=["global"])
+        assert (gg.ConsoleHandler.name, "global") in calls
+    finally:
+        gg.finish(timeout=10.0)
+
+
+def test_falls_back_to_in_process_host_when_spawn_raises(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _boom(*_a: object, **_k: object) -> object:
+        raise OSError("cannot spawn (restricted environment)")
+
+    monkeypatch.setattr(routing.subprocess, "Popen", _boom)
+
+    # A spawn failure must NOT crash the caller's first log; it falls back to
+    # an in-process host.
+    bus = gg.get_bus()
+    try:
+        assert bus.is_host
+        assert routing._dedicated_host_process() is None
     finally:
         bus.shutdown(timeout=5.0)
         routing.reset_bus()
