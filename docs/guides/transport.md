@@ -30,6 +30,35 @@ from goggles._core.transport import Transport, LocalTransport
 | [`_local.py`](../../goggles/_core/transport/_local.py) | `LocalTransport` itself, plus the private `_SendItem` / `_SENTINEL` used by its drain thread. |
 | [`__init__.py`](../../goggles/_core/transport/__init__.py) | Re-exports the flat `from goggles._core.transport import X` surface that tests and routing rely on. |
 
+## Dedicated host process
+
+By default the host is whichever process first binds `GOGGLES_SOCKET`, so
+the `EventBus` and every handler run in-process — usually the application,
+where a blocking handler (e.g. the W&B uploader) can starve latency-critical
+work. Setting `GOGGLES_DEDICATED_HOST=1` moves the host into a dedicated
+subprocess:
+
+- [`goggles/_core/routing.py`](../../goggles/_core/routing.py) — `get_bus()`
+  spawns the host subprocess (once per process, and only if no host already
+  listens) before constructing the transport, so the caller comes up as a
+  **client**. `gg.finish()` calls `_terminate_dedicated_host()` to drain and
+  reap it (an `atexit` backstop prevents orphans).
+- [`goggles/_core/host.py`](../../goggles/_core/host.py) — the entry point
+  (`python -m goggles._core.host`) the subprocess runs: it binds the socket
+  (becoming host), signals readiness, then idles until `SIGTERM`/`SIGINT`,
+  on which it shuts the transport down gracefully (drain queued events, close
+  handlers — finishing W&B runs). `GOGGLES_HOST_IMPORTS` lets it import
+  modules defining custom handlers.
+
+No new wire format is needed: handlers already cross to the host as
+serialized specs in an `ATTACH` frame (`Handler.to_dict` / `from_dict`), so
+`attach(WandBHandler(...))` in the application is reconstructed and run in the
+subprocess. `finish()` flushes this client, then drains the host (its readers
+consume any frames still buffered in the socket before teardown) and closes
+the handlers before reaping the subprocess — so events emitted before
+`finish()` are delivered within the shutdown timeout, the same guarantee as an
+in-process host.
+
 ## Why the flat re-exports
 
 Tests and `goggles._core.routing` import private symbols from

@@ -1132,6 +1132,17 @@ def finish(timeout: float | None = None) -> None:
         logging.getLogger(__name__).exception(
             "Error while shutting down transport"
         )
+    finally:
+        # Flush the local (client) transport first, then drain + reap the
+        # dedicated host subprocess if this process spawned one. Ordering
+        # matters: the host owns the handlers, so it must finish *after* the
+        # client has shipped its remaining events. No-op when not in
+        # dedicated-host mode.
+        from ._core.routing import (  # noqa: PLC0415
+            _terminate_dedicated_host,
+        )
+
+        _terminate_dedicated_host(timeout)
 
 
 def register_handler(handler_class: type) -> None:

@@ -7,6 +7,31 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **Dedicated host process (`GOGGLES_DEDICATED_HOST`).** Setting
+  `GOGGLES_DEDICATED_HOST=1` makes goggles spawn a dedicated subprocess to be
+  the transport host, so the `EventBus` and every handler (notably the
+  blocking W&B uploader) run there instead of on the application's
+  interpreter -- keeping logging back-pressure from starving the app's
+  latency-critical paths (RPC servers, control/sim loops). The application
+  and every other process connect as clients; handlers are unchanged
+  (`attach(...)` already ships them to the host over the wire). `gg.finish()`
+  drains and terminates the host (with an `atexit` backstop), and
+  `GOGGLES_HOST_IMPORTS` lets the host import modules that define custom
+  handlers. See `examples/08_dedicated_host.py` and
+  [docs/guides/transport.md](docs/guides/transport.md).
+
+### Fixed
+
+- **Transport host shutdown no longer drops buffered events.** On shutdown
+  the host now lets its reader threads drain frames already buffered on
+  client sockets (consuming up to EOF for cleanly-disconnected clients)
+  before force-waking any still-blocked reader, instead of discarding that
+  tail via `SHUT_RDWR`. This is the host-side analogue of the client-side
+  `BYE` flush fix and makes `finish()` deliver every event emitted before it
+  within the shutdown timeout -- including across the dedicated host process.
+
 ## [0.2.1] - 2026-05-24
 
 ### Added
