@@ -366,7 +366,13 @@ class LocalTransport:
                     self._endpoint.accept_address_hint(),
                 )
                 return
-            while self._running:
+            # Loop until the peer goes away (EOF / error), NOT until
+            # ``self._running`` flips. A graceful client sends its frames,
+            # then ``BYE``, then closes; the reader must drain all buffered
+            # frames and hit EOF so they reach the drain queue. Stopping early
+            # on ``_running`` would discard the tail still in the socket --
+            # shutdown wakes any reader still blocked here via ``SHUT_RDWR``.
+            while True:
                 header = _recvall(conn, _HEADER_SIZE)
                 if header is None:
                     return
@@ -682,7 +688,26 @@ class LocalTransport:
             self._server_sock = None
         self._endpoint.cleanup(self._socket_path)
 
-        # Wake up any reader threads blocked in recv().
+        # Stop accepting first so no new client races the drain below.
+        if self._accept_thread is not None:
+            self._accept_thread.join(timeout=timeout)
+
+        # Graceful drain: a client that disconnected cleanly (frames, then
+        # BYE, then close) makes its reader hit EOF once the buffered frames
+        # are consumed, and the reader then removes itself from
+        # ``_client_sockets``. Give readers a brief window to flush every
+        # frame into the drain queue that way before forcibly waking any
+        # still blocked (idle or crashed peers that never closed) -- without
+        # this, ``SHUT_RDWR`` below would discard frames still in the socket.
+        drain_grace = 0.5 if timeout is None else min(timeout, 0.5)
+        deadline = time.monotonic() + drain_grace
+        while time.monotonic() < deadline:
+            with self._client_sockets_lock:
+                if not self._client_sockets:
+                    break
+            time.sleep(0.005)
+
+        # Wake up any reader threads still blocked in recv().
         with self._client_sockets_lock:
             conns = list(self._client_sockets)
         for conn in conns:
@@ -690,9 +715,6 @@ class LocalTransport:
                 conn.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-
-        if self._accept_thread is not None:
-            self._accept_thread.join(timeout=timeout)
 
         for t in self._reader_threads:
             t.join(timeout=timeout)

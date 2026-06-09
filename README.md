@@ -193,6 +193,9 @@ uv run examples/05_wandb_multiple_runs.py
 # Advanced: Custom handler
 uv run examples/06_custom_handler.py
 
+# Run the host (and its handlers, e.g. W&B uploads) in a dedicated subprocess
+uv run examples/08_dedicated_host.py
+
 # Graceful shutdown utils
 uv run examples/100_interrupt.py
 

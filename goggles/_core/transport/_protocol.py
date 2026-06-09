@@ -27,6 +27,17 @@ class Transport(Protocol):
         """
         ...
 
+    @property
+    def is_host(self) -> bool:
+        """Whether this transport owns the EventBus (and runs handlers).
+
+        Returns:
+            True if this process bound the socket and hosts the bus; False
+            if it connects to another host as a client (e.g. when a
+            dedicated host process owns the bus).
+        """
+        ...
+
     def emit(self, event: Event) -> None:
         """Route an event asynchronously (fire-and-forget).
 
