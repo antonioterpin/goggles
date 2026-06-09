@@ -78,20 +78,33 @@ uploaded later with::
 from __future__ import annotations
 
 import datetime
+import json
 import multiprocessing as mp
 import os
 import sys
-import threading
+import tempfile
 import time
 from statistics import median, quantiles, stdev
-from typing import Any, ClassVar, cast
+from typing import Any, cast
 
 import hydra
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 
 import goggles as gg
-from goggles import Event, Kind
+
+# The delivery-counter handler lives in a sibling module so the goggles
+# dedicated host (a separate subprocess by default) can import it via
+# GOGGLES_HOST_IMPORTS and reconstruct it there; the host inherits PYTHONPATH.
+_EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
+if _EXAMPLES_DIR not in sys.path:
+    sys.path.insert(0, _EXAMPLES_DIR)
+os.environ["GOGGLES_HOST_IMPORTS"] = "_benchmark_handlers"
+os.environ["PYTHONPATH"] = (
+    _EXAMPLES_DIR + os.pathsep + os.environ.get("PYTHONPATH", "")
+)
+
+from _benchmark_handlers import DeliveryCounter  # noqa: E402
 
 # ``_logger`` is populated inside the per-preset subprocess (see
 # ``_run_benchmark``). Creating it at module import would make the parent
@@ -99,65 +112,6 @@ from goggles import Event, Kind
 # subprocesses would then connect to as clients -- defeating the isolation
 # that running each sweep point in its own process is meant to provide.
 _logger: gg.GogglesLogger = cast(Any, None)
-
-
-class _DeliveryCounter:
-    """Handler that just counts events delivered to the host.
-
-    Used to verify end-to-end reliability: the producer emits N events,
-    then ``finish()`` blocks until everything drains; this handler's
-    count must equal N. Prior to the shutdown fix, bulk video benchmarks
-    were losing >90 % of events here.
-
-    Attributes:
-        name: Handler identifier used by the bus's dedup logic.
-        capabilities: Event kinds this handler claims to handle.
-    """
-
-    name = "goggles.benchmark.counter"
-    capabilities: ClassVar[frozenset[Kind]] = frozenset(
-        {
-            "log",
-            "metric",
-            "image",
-            "video",
-            "artifact",
-            "histogram",
-            "vector",
-            "vector_field",
-        }
-    )
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._count_by_kind: dict[str, int] = {}
-
-    def can_handle(self, kind: Kind) -> bool:
-        del kind
-        return True
-
-    def handle(self, event: Event) -> None:
-        with self._lock:
-            self._count_by_kind[event.kind] = (
-                self._count_by_kind.get(event.kind, 0) + 1
-            )
-
-    def open(self) -> None: ...
-
-    def close(self) -> None: ...
-
-    @property
-    def totals(self) -> dict[str, int]:
-        with self._lock:
-            return dict(self._count_by_kind)
-
-    def to_dict(self) -> dict:
-        return {"cls": "_DeliveryCounter", "data": {}}
-
-    @classmethod
-    def from_dict(cls, serialized: dict) -> _DeliveryCounter:
-        del serialized
-        return cls()
 
 
 def _run_one(
@@ -516,6 +470,27 @@ def _summary(all_results: list[tuple[str, np.ndarray]]) -> None:
         )
 
 
+def _read_counter_totals(path: str) -> dict[str, int]:
+    """Read (and remove) the delivery counter's totals file.
+
+    Args:
+        path: File the counter wrote its per-kind totals to on ``close()``.
+
+    Returns:
+        The per-kind totals, or an empty mapping if the file is unreadable.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def _run_benchmark(cfg: DictConfig) -> None:
     """Execute the benchmark end-to-end for a single resolved config.
 
@@ -547,15 +522,14 @@ def _run_benchmark(cfg: DictConfig) -> None:
         scopes=["goggles.benchmark"],
     )
 
-    gg.register_handler(_DeliveryCounter)
-    gg.attach(_DeliveryCounter(), scopes=["goggles.benchmark"])
-    # ``gg.attach`` deserializes the handler via ``from_dict`` so the
-    # instance owned by the bus is not the one we constructed here; pull
-    # out the canonical copy the drain thread will actually dispatch to.
-    transport_any: Any = gg.get_bus()
-    counter = cast(
-        _DeliveryCounter,
-        transport_any._bus.handlers["goggles.benchmark.counter"],
+    # The counter handler runs in the host -- a separate process by default --
+    # so we cannot read its state in memory. It writes its per-kind totals to
+    # this file on close(); we read them back after gg.finish() drains.
+    counter_out = os.path.join(
+        tempfile.gettempdir(), f"gg-bench-count-{os.getpid()}.json"
+    )
+    gg.attach(
+        DeliveryCounter(out_path=counter_out), scopes=["goggles.benchmark"]
     )
 
     if cfg.wandb.enabled:
@@ -641,10 +615,11 @@ def _run_benchmark(cfg: DictConfig) -> None:
 
         # Delivery-count check: every enqueued event must have reached
         # a handler. Catches transport-level drops (e.g. shutdown races
-        # in the video path). Print directly to stderr because the
-        # transport is already shut down and any _logger.* call after
-        # finish() would be a silent no-op.
-        totals = counter.totals
+        # in the video path). The counter ran in the host and wrote its
+        # totals on close(); read them back now that finish() has drained.
+        # Print directly to stderr because the transport is already shut
+        # down and any _logger.* call after finish() is a silent no-op.
+        totals = _read_counter_totals(counter_out)
         payload_kind = _kind_for_log_type(cfg.log_type)
         expected = len(runs) * int(cfg.num_logs)
         actual = totals.get(payload_kind, 0)

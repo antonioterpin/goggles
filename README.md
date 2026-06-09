@@ -52,7 +52,7 @@ uv add "robo-goggles[jax]"
 For the development installation, see our [How to contribute](./CONTRIBUTING.md) page.
 
 > [!WARNING]
-> **Socket selection**: Goggles uses a Unix domain socket to route events to a single host process per machine. The first process to bind becomes the host; later processes connect as clients. Two unrelated projects sharing the same socket path will end up sharing a bus, which is not what you want. Pin a per-project path in your `.env` via `GOGGLES_SOCKET=/tmp/goggles-<project>.sock`.
+> **Socket selection**: Goggles routes events to a single host per machine over a Unix domain socket. By default the host is a dedicated subprocess goggles spawns on first use (set `GOGGLES_DEDICATED_HOST=0` to host in-process instead); whichever process spawns it owns its lifetime and tears it down on `finish()`/exit. Every process sharing a `GOGGLES_SOCKET` path converges on that one host — so two unrelated projects on the default path end up sharing a bus, and one finishing can tear the host out from under the other. Pin a per-project path in your `.env` via `GOGGLES_SOCKET=/tmp/goggles-<project>.sock`.
 
 
 ### Basic usage
@@ -193,7 +193,7 @@ uv run examples/05_wandb_multiple_runs.py
 # Advanced: Custom handler
 uv run examples/06_custom_handler.py
 
-# Run the host (and its handlers, e.g. W&B uploads) in a dedicated subprocess
+# Dedicated host subprocess for handlers (the default) — and how to opt out
 uv run examples/08_dedicated_host.py
 
 # Graceful shutdown utils
@@ -303,7 +303,7 @@ As in the WandB example, all the handlers work in the background. By default, th
 > This functionality still needs thorough tesing, as well as a better documentation. Help is appreciated! 🤗
 
 ### Multi-process logging (same machine)
-All processes that share the same `GOGGLES_SOCKET` path converge on a single `EventBus`. The first process to bind the socket becomes the host and runs the attached handlers; later processes connect as clients and forward events to it. Cross-machine logging is not supported in the built-in transport; if you need it, add a new implementation of `goggles._core.transport.Transport`.
+All processes that share the same `GOGGLES_SOCKET` path converge on a single `EventBus`. By default that host is a dedicated subprocess goggles spawns on first use, so every process — including the one that spawned it — connects as a client and forwards events to it; this keeps blocking handlers (e.g. the W&B uploader) off your application's interpreter. Set `GOGGLES_DEDICATED_HOST=0` to host in-process instead (the first process to bind the socket becomes the host). Cross-machine logging is not supported in the built-in transport; if you need it, add a new implementation of `goggles._core.transport.Transport`.
 
 ### Reducing GC jitter in hot loops
 At high logging frequency (≥1 kHz) Python's gen-2 garbage collector can cause millisecond-scale latency spikes. After you have attached handlers and finished setup, call `gg.freeze()` once before your hot loop:

@@ -32,11 +32,12 @@ from goggles._core.transport import Transport, LocalTransport
 
 ## Dedicated host process
 
-By default the host is whichever process first binds `GOGGLES_SOCKET`, so
-the `EventBus` and every handler run in-process — usually the application,
-where a blocking handler (e.g. the W&B uploader) can starve latency-critical
-work. Setting `GOGGLES_DEDICATED_HOST=1` moves the host into a dedicated
-subprocess:
+By **default** goggles runs the host in a dedicated subprocess, so the
+`EventBus` and every handler run *there* rather than in the application —
+where a blocking handler (e.g. the W&B uploader) would otherwise starve
+latency-critical work. Set `GOGGLES_DEDICATED_HOST=0` (or `false`/`no`/`off`)
+to opt out and host in-process (the first process to bind `GOGGLES_SOCKET`
+becomes the host, as before).
 
 - [`goggles/_core/routing.py`](../../goggles/_core/routing.py) — `get_bus()`
   spawns the host subprocess (once per process, and only if no host already
@@ -58,6 +59,23 @@ consume any frames still buffered in the socket before teardown) and closes
 the handlers before reaping the subprocess — so events emitted before
 `finish()` are delivered within the shutdown timeout, the same guarantee as an
 in-process host.
+
+### Caveats
+
+- **Cold start.** The host is spawned lazily on the first `get_bus()`, which
+  blocks that first call until the host binds (normally well under a second).
+  A failed spawn (no fork/exec, resource limits) is non-fatal — it logs and
+  falls back to an in-process host.
+- **Shared socket = shared host lifetime.** Every process on the same
+  `GOGGLES_SOCKET` shares one host, and the process that *spawned* it tears it
+  down on `finish()`/exit. With the default per-user socket, one program
+  finishing can therefore end logging for another still-running program of the
+  same user. Pin a per-project `GOGGLES_SOCKET` to isolate (the same guidance
+  that has always applied to the shared bus).
+- **Windows.** Graceful host shutdown is driven by `SIGTERM`; on Windows the
+  host is terminated via `TerminateProcess`, which does *not* run the host's
+  drain/handler-close path. Prefer `GOGGLES_DEDICATED_HOST=0` on Windows when
+  you need guaranteed handler finalization (e.g. finishing a W&B run).
 
 ## Why the flat re-exports
 
