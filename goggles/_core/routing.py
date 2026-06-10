@@ -33,7 +33,7 @@ import tempfile
 import threading
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 from goggles.types import Event  # re-export for compatibility
 
@@ -191,10 +191,20 @@ def _spawn_dedicated_host() -> None:
             # The child binds the socket directly; never let it recurse into
             # spawning another host.
             env.pop(_DEDICATED_HOST_ENV, None)
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "goggles._core.host"],
-                env=env,
-            )
+            # The host outlives the process that spawns it, so keep its output
+            # off that process's (eventually closed) terminal: discard it, or
+            # capture it via GOGGLES_HOST_LOG when debugging.
+            host_stdio = _open_host_log()
+            try:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "goggles._core.host"],
+                    env=env,
+                    stdout=host_stdio,
+                    stderr=subprocess.STDOUT,
+                )
+            finally:
+                if not isinstance(host_stdio, int):
+                    host_stdio.close()  # the child kept its own dup
         except Exception:
             # Spawning can fail in restricted environments (no fork/exec,
             # resource limits, ...). Never let that crash the caller's first
@@ -268,6 +278,29 @@ def _kill(proc: subprocess.Popen) -> None:
         pass
 
 
+def _open_host_log() -> IO[str] | int:
+    """stdout/stderr target for the spawned host (it outlives its spawner).
+
+    Returns an opened ``GOGGLES_HOST_LOG`` file when that env var is set -- so
+    the host's output is captured rather than written to the spawning
+    process's terminal after it exits -- otherwise ``subprocess.DEVNULL``.
+
+    Returns:
+        An appendable text file, or ``subprocess.DEVNULL``.
+    """
+    log_path = os.getenv("GOGGLES_HOST_LOG")
+    if log_path:
+        try:
+            return open(log_path, "a", encoding="utf-8")
+        except OSError:
+            _log.warning(
+                "goggles: could not open GOGGLES_HOST_LOG=%r; "
+                "discarding host output.",
+                log_path,
+            )
+    return subprocess.DEVNULL
+
+
 def _terminate_dedicated_host(timeout: float | None = None) -> None:
     """Stop and reap the dedicated host subprocess spawned by this process.
 
@@ -301,12 +334,14 @@ def _terminate_dedicated_host(timeout: float | None = None) -> None:
 
 
 def _atexit_terminate_host() -> None:
-    """``atexit`` backstop: flush the client, then reap the host (bounded).
+    """``atexit`` backstop: flush this process's transport on interpreter exit.
 
     Mirrors :func:`goggles.finish` so a program that exits without calling it
-    still ships its queued events to the host before the host is torn down.
-    No-op once ``finish()`` has run (the transport is already shut down and
-    the host already reaped). Bounded so interpreter shutdown never hangs.
+    still ships its queued events and, on a client, disconnects cleanly from
+    the dedicated host (so the host's client count is accurate). The shared
+    host is NOT reaped here -- it self-reaps once its last client disconnects,
+    so a sibling process still logging keeps its host. No-op once ``finish()``
+    has run. Bounded so interpreter shutdown never hangs.
     """
     transport = __singleton_transport
     if transport is not None and transport.is_running:
@@ -314,7 +349,6 @@ def _atexit_terminate_host() -> None:
             transport.shutdown(timeout=_HOST_ATEXIT_TIMEOUT_S)
         except Exception:  # best effort
             pass
-    _terminate_dedicated_host(timeout=_HOST_ATEXIT_TIMEOUT_S)
 
 
 def _dedicated_host_process() -> subprocess.Popen | None:

@@ -42,23 +42,24 @@ becomes the host, as before).
 - [`goggles/_core/routing.py`](../../goggles/_core/routing.py) — `get_bus()`
   spawns the host subprocess (once per process, and only if no host already
   listens) before constructing the transport, so the caller comes up as a
-  **client**. `gg.finish()` calls `_terminate_dedicated_host()` to drain and
-  reap it (an `atexit` backstop prevents orphans).
+  **client**. `gg.finish()`/exit shuts down only this process's client; it does
+  **not** reap the shared host (the host self-reaps — see below).
 - [`goggles/_core/host.py`](../../goggles/_core/host.py) — the entry point
   (`python -m goggles._core.host`) the subprocess runs: it binds the socket
-  (becoming host), signals readiness, then idles until `SIGTERM`/`SIGINT`,
-  on which it shuts the transport down gracefully (drain queued events, close
-  handlers — finishing W&B runs). `GOGGLES_HOST_IMPORTS` lets it import
-  modules defining custom handlers.
+  (becoming host), signals readiness, then idles until either `SIGTERM`/`SIGINT`
+  or its **last client disconnects** (`set_idle_callback`), on which it shuts
+  the transport down gracefully (drain queued events, close handlers —
+  finishing W&B runs). `GOGGLES_HOST_IMPORTS` lets it import modules defining
+  custom handlers.
 
 No new wire format is needed: handlers already cross to the host as
 serialized specs in an `ATTACH` frame (`Handler.to_dict` / `from_dict`), so
 `attach(WandBHandler(...))` in the application is reconstructed and run in the
-subprocess. `finish()` flushes this client, then drains the host (its readers
-consume any frames still buffered in the socket before teardown) and closes
-the handlers before reaping the subprocess — so events emitted before
-`finish()` are delivered within the shutdown timeout, the same guarantee as an
-in-process host.
+subprocess. `finish()` flushes this client and disconnects it from the host;
+the host (which owns the handlers) drains and closes them — finishing W&B runs
+— when it self-reaps after its last client leaves. So in a multi-process app
+the handlers are finalized once, after every process is done, rather than by
+whichever process finished first.
 
 ### Caveats
 
@@ -66,16 +67,22 @@ in-process host.
   blocks that first call until the host binds (normally well under a second).
   A failed spawn (no fork/exec, resource limits) is non-fatal — it logs and
   falls back to an in-process host.
-- **Shared socket = shared host lifetime.** Every process on the same
-  `GOGGLES_SOCKET` shares one host, and the process that *spawned* it tears it
-  down on `finish()`/exit. With the default per-user socket, one program
-  finishing can therefore end logging for another still-running program of the
-  same user. Pin a per-project `GOGGLES_SOCKET` to isolate (the same guidance
-  that has always applied to the shared bus).
-- **Windows.** Graceful host shutdown is driven by `SIGTERM`; on Windows the
-  host is terminated via `TerminateProcess`, which does *not* run the host's
-  drain/handler-close path. Prefer `GOGGLES_DEDICATED_HOST=0` on Windows when
-  you need guaranteed handler finalization (e.g. finishing a W&B run).
+- **Shared socket = shared host.** Every process on the same `GOGGLES_SOCKET`
+  shares one host, which **outlives any single process**: it self-reaps only
+  once its *last* client disconnects (after `GOGGLES_HOST_IDLE_TIMEOUT`, a grace
+  cancelled if a client reconnects), so one program finishing never ends logging
+  for another still-running program of the same user. Two programs you want kept
+  apart (separate W&B runs, independent lifetimes) should still pin distinct
+  `GOGGLES_SOCKET` paths — the same guidance that has always applied to the
+  shared bus. Note all processes that should share a host must agree on the
+  socket path: if some inherit `GOGGLES_SOCKET` (or `XDG_RUNTIME_DIR`) and
+  others don't, they resolve different paths and get separate hosts.
+- **Windows.** The self-reap path shuts the host down gracefully on every
+  platform. An *explicit* external reap still differs: graceful shutdown is
+  driven by `SIGTERM`, and on Windows a forced `TerminateProcess` does *not*
+  run the host's drain/handler-close path. Prefer `GOGGLES_DEDICATED_HOST=0` on
+  Windows when you need guaranteed handler finalization (e.g. finishing a W&B
+  run) without relying on the idle self-reap.
 
 ## Why the flat re-exports
 
