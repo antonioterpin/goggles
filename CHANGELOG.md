@@ -16,9 +16,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   cycled through many hosts -- each opening its own W&B runs, splitting a single
   scope's data across several runs (and leaving timing gaps during the churn).
   The host now **self-reaps only once its last client disconnects** (after
-  `GOGGLES_HOST_IDLE_TIMEOUT`, default 5s -- a grace cancelled if a client
-  reconnects, skipped entirely on a clean `finish()` so single-process runs
-  wind down immediately); `finish()`/atexit shut down only the local client,
+  `GOGGLES_HOST_IDLE_TIMEOUT`, default 5s -- a grace that bridges a transient
+  reconnect, shortened on a clean `finish()` so a single-process run winds the
+  host down promptly); `finish()`/atexit shut down only the local client,
   never a host other processes are using. One host = one set of handlers = one
   run per scope, for the whole app's lifetime. `finish()` still **waits for the
   host to finalize its handlers (drain + close, e.g. finishing a W&B run) when
