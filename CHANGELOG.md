@@ -35,6 +35,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   tail via `SHUT_RDWR`. This is the host-side analogue of the client-side
   `BYE` flush fix and makes `finish()` deliver every event emitted before it
   within the shutdown timeout -- including across the dedicated host process.
+- **Shared-memory transport no longer floods `resource_tracker` warnings.**
+  The process that creates a shared-memory block for a large payload now
+  detaches it from its multiprocessing resource tracker (the consumer unlinks
+  the block; a host-startup sweep handles crash leftovers), so logging large
+  images/videos no longer prints a "leaked shared_memory" / "No such file"
+  warning per payload at exit. Most visible now that handlers run in a
+  dedicated host by default, since single-process apps then take the shm path.
 
 ## [0.2.1] - 2026-05-24
 

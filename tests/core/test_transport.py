@@ -804,6 +804,57 @@ def test_shm_side_channel_for_large_payload(socket_path: str) -> None:
         host.shutdown(timeout=2.0)
 
 
+def test_shm_creator_leaves_no_resource_tracker_warnings(
+    socket_path: str, tmp_path: Path
+) -> None:
+    """A shm payload producer must not warn about leaked blocks at exit.
+
+    The consumer unlinks the block, so the producing process must detach it
+    from its multiprocessing ``resource_tracker``; otherwise the tracker warns
+    once per block ("leaked shared_memory" / "No such file") when the producer
+    exits. This regressed badly once handlers run in a dedicated host by
+    default (single-process apps then take the shm path).
+    """
+    host = LocalTransport(socket_path=socket_path, shm_threshold=1024)
+    try:
+        collector = _CollectingHandler()
+        _install_collector(host, collector)
+
+        client_script = tmp_path / "shm_client.py"
+        client_script.write_text(
+            "import os\n"
+            "import numpy as np\n"
+            "from goggles import Event\n"
+            "from goggles._core.transport import LocalTransport\n"
+            "c = LocalTransport(socket_path=os.environ['GOGGLES_SOCKET'],"
+            " shm_threshold=1024)\n"
+            "try:\n"
+            "    arr = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)\n"
+            "    c.emit(Event(kind='image', scope='global', payload=arr,"
+            " filepath='c.py', lineno=1))\n"
+            "finally:\n"
+            "    c.shutdown(timeout=30.0)\n"
+        )
+        env = os.environ.copy()
+        env["GOGGLES_SOCKET"] = socket_path
+        proc = subprocess.run(
+            [sys.executable, str(client_script)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert _wait_until(lambda: len(collector.events) == 1), (
+            "host should receive the large shm payload"
+        )
+        assert "resource_tracker" not in proc.stderr, proc.stderr
+        assert "leaked shared_memory" not in proc.stderr, proc.stderr
+    finally:
+        host.shutdown(timeout=2.0)
+
+
 def test_shm_threshold_zero_disables_side_channel(
     socket_path: str,
     monkeypatch: pytest.MonkeyPatch,
