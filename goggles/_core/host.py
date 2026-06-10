@@ -82,6 +82,11 @@ def run() -> int:  # pragma: no cover - entrypoint, run only in a subprocess
         except OSError:  # pragma: no cover - best effort
             pass
 
+    # Self-reap: wind down once the last client disconnects (and none
+    # reconnects within the idle grace), so the host's lifetime follows
+    # "any client connected" rather than whichever process spawned it.
+    transport.set_idle_callback(stop.set)
+
     stop.wait()
 
     transport.shutdown(timeout=_shutdown_timeout())

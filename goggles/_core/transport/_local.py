@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import errno
 import logging
+import os
 import pickle
 import queue
 import socket
 import struct
 import threading
 import time
+from collections.abc import Callable
 from multiprocessing import shared_memory
 from typing import TYPE_CHECKING, Any
 
@@ -63,6 +65,30 @@ _log = logging.getLogger(__name__)
 
 
 _SENTINEL = object()  # "stop draining / sending" marker
+
+_DEFAULT_HOST_IDLE_TIMEOUT_S = 5.0
+
+
+def _host_idle_timeout_s() -> float:
+    """Seconds a host with no clients waits before self-reaping.
+
+    A dedicated host stays alive while any client is connected; once the last
+    one leaves it winds down after this grace (cancelled if a client
+    reconnects first). Tunable via ``GOGGLES_HOST_IDLE_TIMEOUT``; a
+    non-positive or unparsable value falls back to the default.
+
+    Returns:
+        The idle grace in seconds.
+    """
+    try:
+        value = float(
+            os.getenv(
+                "GOGGLES_HOST_IDLE_TIMEOUT", str(_DEFAULT_HOST_IDLE_TIMEOUT_S)
+            )
+        )
+    except ValueError:
+        return _DEFAULT_HOST_IDLE_TIMEOUT_S
+    return value if value > 0 else _DEFAULT_HOST_IDLE_TIMEOUT_S
 
 
 class _SendItem:
@@ -157,6 +183,13 @@ class LocalTransport:
         self._reader_threads: list[threading.Thread] = []
         self._client_sockets: list[socket.socket] = []
         self._client_sockets_lock = threading.Lock()
+        # Self-reap: when set (by the dedicated host), the host winds down once
+        # its last client disconnects and none reconnects within the grace, so
+        # its lifetime is tied to "any client connected", not to whichever
+        # process happened to spawn it. Guarded by ``_client_sockets_lock``.
+        self._idle_callback: Callable[[], None] | None = None
+        self._idle_timer: threading.Timer | None = None
+        self._idle_timeout_s = _host_idle_timeout_s()
         self._drain_queue: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._drain_thread: threading.Thread | None = None
         # Set during a bounded shutdown after the drain join times out:
@@ -324,6 +357,50 @@ class LocalTransport:
         )
         self._send_thread.start()
 
+    # ----- host self-reap --------------------------------------------------
+
+    def set_idle_callback(self, callback: Callable[[], None]) -> None:
+        """Wind the host down when its last client disconnects (host only).
+
+        The dedicated host passes a callback that requests a graceful
+        shutdown. It fires once every client has disconnected and none
+        reconnects within ``GOGGLES_HOST_IDLE_TIMEOUT``. Arms the grace
+        immediately when no client is connected yet, so a host that nobody
+        ever connects to also winds down instead of lingering forever.
+
+        Args:
+            callback: Invoked (once) to request the host wind down.
+        """
+        with self._client_sockets_lock:
+            self._idle_callback = callback
+            if not self._client_sockets:
+                self._arm_idle_timer_locked()
+
+    def _arm_idle_timer_locked(self) -> None:
+        """Start (or restart) the idle grace timer. Caller holds the lock."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+        self._idle_timer = threading.Timer(
+            self._idle_timeout_s, self._reap_if_idle
+        )
+        self._idle_timer.daemon = True
+        self._idle_timer.start()
+
+    def _cancel_idle_timer_locked(self) -> None:
+        """Cancel any pending idle grace timer. Caller holds the lock."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _reap_if_idle(self) -> None:
+        """Fire the idle callback iff still no clients (grace elapsed)."""
+        with self._client_sockets_lock:
+            if self._client_sockets:
+                return  # a client reconnected within the grace
+            callback = self._idle_callback
+        if callback is not None:
+            callback()
+
     # ----- host loops ------------------------------------------------------
 
     def _accept_loop(self) -> None:
@@ -341,6 +418,7 @@ class LocalTransport:
                 return
             with self._client_sockets_lock:
                 self._client_sockets.append(conn)
+                self._cancel_idle_timer_locked()  # a client is connected
             reader = threading.Thread(
                 target=self._reader_loop,
                 args=(conn,),
@@ -396,6 +474,8 @@ class LocalTransport:
                     self._client_sockets.remove(conn)
                 except ValueError:
                     pass
+                if not self._client_sockets and self._idle_callback is not None:
+                    self._arm_idle_timer_locked()  # last client gone
 
     def _dispatch_incoming(self, kind: int, body: bytes) -> None:
         """Route an incoming framed message to the appropriate handler.
@@ -686,6 +766,8 @@ class LocalTransport:
         Args:
             timeout: Max seconds to wait for each background thread.
         """
+        with self._client_sockets_lock:
+            self._cancel_idle_timer_locked()
         if self._server_sock is not None:
             try:
                 self._server_sock.close()
