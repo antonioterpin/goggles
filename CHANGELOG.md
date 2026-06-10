@@ -7,6 +7,44 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-10
+
+### Added
+
+- **Dedicated host process for handlers (on by default).** goggles spawns a
+  dedicated subprocess to be the transport host (owning the `EventBus` and
+  running every handler, notably the blocking W&B uploader), so the
+  application and every other process connect as clients -- keeping logging
+  back-pressure from starving the app's latency-critical paths (RPC servers,
+  control/sim loops). Set `GOGGLES_DEDICATED_HOST=0` (or `false`/`no`/`off`)
+  to host in-process instead (the first process to bind the socket becomes the
+  host). Handlers are unchanged (`attach(...)` already ships them to the host
+  over the wire); `gg.finish()` drains and terminates the host (with an
+  `atexit` backstop). See `examples/08_dedicated_host.py` and
+  [docs/guides/transport.md](docs/guides/transport.md).
+- **`GOGGLES_HOST_IMPORTS`** -- comma/space-separated modules the dedicated
+  host imports at startup, so custom handlers registered via
+  `register_handler` can be reconstructed there.
+- **`is_host`** is now part of the `Transport` protocol, so callers can tell
+  whether they own the bus or connect to a (possibly dedicated) host.
+
+### Fixed
+
+- **Transport host shutdown no longer drops buffered events.** On shutdown
+  the host now lets its reader threads drain frames already buffered on
+  client sockets (consuming up to EOF for cleanly-disconnected clients)
+  before force-waking any still-blocked reader, instead of discarding that
+  tail via `SHUT_RDWR`. This is the host-side analogue of the client-side
+  `BYE` flush fix and makes `finish()` deliver every event emitted before it
+  within the shutdown timeout -- including across the dedicated host process.
+- **Shared-memory transport no longer floods `resource_tracker` warnings.**
+  The process that creates a shared-memory block for a large payload now
+  detaches it from its multiprocessing resource tracker (the consumer unlinks
+  the block; a host-startup sweep handles crash leftovers), so logging large
+  images/videos no longer prints a "leaked shared_memory" / "No such file"
+  warning per payload at exit. Most visible now that handlers run in a
+  dedicated host by default, since single-process apps then take the shm path.
+
 ## [0.2.1] - 2026-05-24
 
 ### Added

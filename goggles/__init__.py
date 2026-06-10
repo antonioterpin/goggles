@@ -1046,9 +1046,9 @@ def configure(
     initialization.
 
     Calling ``configure(enable_console=True, ...)`` while a console handler
-    is already attached will detach the existing handler from every scope
-    it is bound to and attach a fresh one with the new options, so the
-    second call wins instead of being silently deduped by name.
+    is already attached to the target ``scopes`` re-attaches a fresh handler
+    with the new options (the old one is detached first), so the second call
+    wins instead of being silently deduped by name.
 
     Args:
         enable_console: When True, attach a default ``ConsoleHandler``
@@ -1071,18 +1071,16 @@ def configure(
 
     # Replace any existing console handler so a second `configure(...)` call
     # with new options actually takes effect (`attach()` dedupes by name and
-    # would otherwise silently keep the first instance).
-    internal_bus = cast(Any, get_bus())._bus
-    existing_scopes = [
-        s
-        for s, names in list(internal_bus.scopes.items())
-        if ConsoleHandler.name in names
-    ]
-    for s in existing_scopes:
+    # would otherwise silently keep the first instance). Detach from the
+    # target scopes unconditionally rather than reading bus state: with a
+    # dedicated host the local bus is a client and never holds the handler
+    # registry (it lives in the host process), and detach is a no-op when the
+    # handler is not attached.
+    for s in scopes:
         try:
             detach(ConsoleHandler.name, s)
         except ValueError:
-            # Already detached by a concurrent caller; nothing to do.
+            # Not attached here (in-process bus); nothing to detach.
             pass
 
     handler = ConsoleHandler(
@@ -1132,6 +1130,17 @@ def finish(timeout: float | None = None) -> None:
         logging.getLogger(__name__).exception(
             "Error while shutting down transport"
         )
+    finally:
+        # Flush the local (client) transport first, then drain + reap the
+        # dedicated host subprocess if this process spawned one. Ordering
+        # matters: the host owns the handlers, so it must finish *after* the
+        # client has shipped its remaining events. No-op when not in
+        # dedicated-host mode.
+        from ._core.routing import (  # noqa: PLC0415
+            _terminate_dedicated_host,
+        )
+
+        _terminate_dedicated_host(timeout)
 
 
 def register_handler(handler_class: type) -> None:
