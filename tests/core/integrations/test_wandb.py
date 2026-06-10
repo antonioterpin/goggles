@@ -913,6 +913,88 @@ def test_close_flushes_pending_buffer(mock_wandb: MagicMock) -> None:
     run.finish.assert_called()
 
 
+def test_flatten_logs_promotes_nested_dicts_to_dotted_keys() -> None:
+    """Nested-mapping values are promoted to dotted scalar keys."""
+    flat = wandb_module._flatten_logs(
+        {
+            "loss": 0.5,
+            "custom_step": {"time": 1.5, "episode": 3},
+            "nested": {"a": {"b": 2}},
+        }
+    )
+    assert flat == {
+        "loss": 0.5,
+        "custom_step.time": 1.5,
+        "custom_step.episode": 3,
+        "nested.a.b": 2,
+    }
+
+
+def test_flatten_logs_leaves_non_mappings_untouched() -> None:
+    """Objects, scalars, arrays and list containers pass through by identity."""
+    sentinel = object()
+    arr = np.arange(3)
+    list_of_dicts = [{"a": 1}]
+    flat = wandb_module._flatten_logs(
+        {"obj": sentinel, "scalar": 7, "arr": arr, "lst": list_of_dicts}
+    )
+    assert flat["obj"] is sentinel
+    assert flat["scalar"] == 7
+    assert flat["arr"] is arr
+    assert flat["lst"] is list_of_dicts  # only Mapping values are descended
+
+
+def test_flatten_logs_drops_empty_nested_dict() -> None:
+    """An empty nested dict contributes no keys."""
+    assert wandb_module._flatten_logs({"a": {}, "b": 1}) == {"b": 1}
+
+
+def test_flatten_logs_collision_is_last_write_wins() -> None:
+    """A literal dotted key colliding with a flattened key: last wins."""
+    assert wandb_module._flatten_logs({"a.b": 1, "a": {"b": 2}}) == {"a.b": 2}
+    assert wandb_module._flatten_logs({"a": {"b": 2}, "a.b": 1}) == {"a.b": 1}
+
+
+def test_metric_nested_extra_logged_as_flat_axis(
+    mock_wandb: MagicMock,
+) -> None:
+    """A nested ``custom_step`` extra reaches ``run.log`` as a flat key."""
+    h = WandBHandler(project="p")
+    h.handle(
+        SimpleNamespace(
+            kind="metric",
+            scope="global",
+            payload={"loss": 0.5},
+            step=10,
+            extra={"custom_step": {"time": 1.5}},
+        )
+    )
+    h.close()
+    mock_wandb.init.return_value.log.assert_called_once_with(
+        {"loss": 0.5, "custom_step.time": 1.5}, step=10
+    )
+
+
+def test_media_nested_extra_logged_as_flat_axis(
+    mock_wandb: MagicMock,
+) -> None:
+    """Media events flatten nested extras too (no nested object key)."""
+    h = WandBHandler(project="p")
+    h.handle(
+        SimpleNamespace(
+            kind="image",
+            scope="global",
+            payload=np.zeros((4, 4, 3), dtype=np.uint8),
+            step=5,
+            extra={"name": "img", "custom_step": {"time": 2.0}},
+        )
+    )
+    h.close()
+    logged = mock_wandb.init.return_value.log.call_args.args[0]
+    assert logged["custom_step.time"] == 2.0
+    assert "custom_step" not in logged
+
+
 def test_step_none_bypasses_buffer_to_preserve_autoincrement(
     mock_wandb: MagicMock,
 ) -> None:

@@ -7,6 +7,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- **W&B: nested-dict metric metadata is flattened to dotted scalar keys.** Any
+  nested dict logged alongside a metric/media event (e.g.
+  `logger.scalar("loss", v, step=i, custom_step={"time": t})`) now reaches
+  `wandb.log` as flat keys (`custom_step.time`) instead of a nested *object*
+  W&B can't select as a chart axis -- so a custom step / physical-time x-axis
+  works. This applies to all such values, not only the axis case; charts or
+  queries referencing the old nested key must switch to the dotted key. See
+  `examples/09_custom_step_axis.py`.
+
 ## [0.2.2] - 2026-06-10
 
 ### Added

@@ -196,6 +196,9 @@ uv run examples/06_custom_handler.py
 # Dedicated host subprocess for handlers (the default) — and how to opt out
 uv run examples/08_dedicated_host.py
 
+# Custom W&B x-axis (e.g. physical time) instead of the step index
+uv run examples/09_custom_step_axis.py
+
 # Graceful shutdown utils
 uv run examples/100_interrupt.py
 
