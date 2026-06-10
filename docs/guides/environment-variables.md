@@ -12,8 +12,10 @@ construction); changing them at runtime has no effect.
 | `GOGGLES_SHM_THRESHOLD` | `262144` (256 KiB) | Payload byte threshold above which the transport switches from inline pickle frames to shared-memory side-channel transfer. Lower it to exercise the SHM path in tests; raise it to keep small payloads inline. Invalid values fall back to the default. |
 | `GOGGLES_CAPTURE_CALLER` | `1` | When `1`/`true`/`yes`, the logger walks the call stack on each emit (~5–15 µs per call) to record `filepath`/`lineno`. Set to `0`/`false`/`no` on hot loops above ~10 kHz; events will then carry `("<unknown>", 0)`, which only the console formatter uses. |
 | `GOGGLES_SHUTDOWN_TIMEOUT` | `5.0` | Seconds the `gg.finish()` shutdown path waits for the transport to drain pending events before forcibly tearing down. Also bounds a dedicated host's graceful shutdown. |
-| `GOGGLES_DEDICATED_HOST` | `1` (on) | By default goggles spawns a dedicated subprocess to be the transport host (owning the `EventBus` and running every handler), so this process and all others connect as clients — keeping blocking handler work (e.g. W&B uploads) off the application's interpreter. `gg.finish()` drains and terminates the host (with an `atexit` backstop). Set to `0`/`false`/`no`/`off` to opt out and host in-process (the first process to bind the socket becomes host). See [transport.md](transport.md). |
+| `GOGGLES_DEDICATED_HOST` | `1` (on) | By default goggles spawns a dedicated subprocess to be the transport host (owning the `EventBus` and running every handler), so this process and all others connect as clients — keeping blocking handler work (e.g. W&B uploads) off the application's interpreter. Each process's `gg.finish()`/exit shuts down only its own client; the shared host **self-reaps once its last client disconnects**, so it safely outlives the process that happened to spawn it (a multi-process app shares one host). Set to `0`/`false`/`no`/`off` to opt out and host in-process (the first process to bind the socket becomes host). See [transport.md](transport.md). |
 | `GOGGLES_HOST_IMPORTS` | unset | Comma/space-separated module names the dedicated host imports at startup, so custom handlers registered via `register_handler` can be reconstructed there. Only relevant while the dedicated host is enabled (built-in handlers need no import). |
+| `GOGGLES_HOST_IDLE_TIMEOUT` | `5.0` | Seconds the dedicated host stays alive after its **last** client disconnects before it self-reaps (a grace that is cancelled if a client reconnects). Raise it if processes in a multi-process app come and go with gaps longer than the default; lower it so a finished single-process run's host exits sooner. Non-positive/invalid falls back to the default. |
+| `GOGGLES_HOST_LOG` | unset | Path to capture the dedicated host's stdout/stderr to a file. By default the host inherits the spawning process's stdout/stderr, so its handlers (e.g. `ConsoleHandler`) print where the user expects; set this when the host outlives a process whose terminal is gone, or for debugging. |
 
 ## Where each one lives
 
@@ -21,7 +23,8 @@ construction); changing them at runtime has no effect.
 - `GOGGLES_SHUTDOWN_TIMEOUT` is read by `gg.finish()` in the same module (and by the host entry point for its own shutdown budget).
 - `GOGGLES_SOCKET` and `GOGGLES_SHM_THRESHOLD` are read by `LocalTransport` in [goggles/_core/transport.py](../../goggles/_core/transport.py).
 - `GOGGLES_CAPTURE_CALLER` is read by the core logger in [goggles/_core/logger.py](../../goggles/_core/logger.py).
-- `GOGGLES_DEDICATED_HOST` is read by `get_bus()` in [goggles/_core/routing.py](../../goggles/_core/routing.py), which spawns and terminates the host.
+- `GOGGLES_DEDICATED_HOST` is read by `get_bus()` in [goggles/_core/routing.py](../../goggles/_core/routing.py), which spawns the host; `GOGGLES_HOST_LOG` is read there too when spawning it.
+- `GOGGLES_HOST_IDLE_TIMEOUT` is read by `LocalTransport` in [goggles/_core/transport.py](../../goggles/_core/transport.py); the host arms the self-reap via `set_idle_callback` in [goggles/_core/host.py](../../goggles/_core/host.py).
 - `GOGGLES_HOST_IMPORTS` is read by the host entry point in [goggles/_core/host.py](../../goggles/_core/host.py).
 
 If you add a new knob, add a row here and link the read site so future

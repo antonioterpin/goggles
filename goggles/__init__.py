@@ -1124,23 +1124,25 @@ def finish(timeout: float | None = None) -> None:
         timeout = float(os.getenv("GOGGLES_SHUTDOWN_TIMEOUT", "0"))
     if timeout <= 0:
         timeout = None
+    # Shut down this process's transport: flush queued events and, on a
+    # client, disconnect from the dedicated host. The shared host is NOT
+    # reaped here -- it owns the handlers (e.g. W&B runs) for every process,
+    # so it winds down on its own once its last client disconnects. Reaping
+    # it from whichever process calls finish() first is exactly what
+    # fragments a multi-process app's runs.
     try:
         bus.shutdown(timeout=timeout)
     except Exception:
         logging.getLogger(__name__).exception(
             "Error while shutting down transport"
         )
-    finally:
-        # Flush the local (client) transport first, then drain + reap the
-        # dedicated host subprocess if this process spawned one. Ordering
-        # matters: the host owns the handlers, so it must finish *after* the
-        # client has shipped its remaining events. No-op when not in
-        # dedicated-host mode.
-        from ._core.routing import (  # noqa: PLC0415
-            _terminate_dedicated_host,
-        )
+    # If we spawned the host and were its last client, it is now finalizing its
+    # handlers (e.g. finishing W&B runs); wait so the usual "everything is
+    # delivered + finalized once finish() returns" guarantee still holds. No-op
+    # when other processes keep the host alive.
+    from ._core.routing import _await_host_finalize  # noqa: PLC0415
 
-        _terminate_dedicated_host(timeout)
+    _await_host_finalize(timeout)
 
 
 def register_handler(handler_class: type) -> None:

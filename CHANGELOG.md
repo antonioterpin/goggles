@@ -7,6 +7,29 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-10
+
+### Fixed
+
+- **Dedicated host: multi-process apps no longer fragment into duplicate runs.**
+  The shared host was reaped (SIGTERM) by whichever process called `finish()`
+  or exited first, even while other processes were still connected and logging.
+  Each surviving client then respawned its own host, so one multi-process run
+  cycled through many hosts -- each opening its own W&B runs, splitting a single
+  scope's data across several runs (and leaving timing gaps during the churn).
+  The host now **self-reaps only once its last client disconnects** (after
+  `GOGGLES_HOST_IDLE_TIMEOUT`, default 5s -- a grace that bridges a transient
+  reconnect, shortened on a clean `finish()` so a single-process run winds the
+  host down promptly); `finish()`/atexit shut down only the local client,
+  never a host other processes are using. One host = one set of handlers = one
+  run per scope, for the whole app's lifetime. `finish()` still **waits for the
+  host to finalize its handlers (drain + close, e.g. finishing a W&B run) when
+  this process was the host's last client**, so the "everything is delivered and
+  finalized once `finish()` returns" guarantee is preserved -- without blocking
+  one process on its siblings. The host still inherits the spawning process's
+  stdout/stderr (so `ConsoleHandler` output appears as before); set the new
+  `GOGGLES_HOST_LOG` to capture it to a file instead.
+
 ## [0.2.3] - 2026-06-10
 
 ### Changed

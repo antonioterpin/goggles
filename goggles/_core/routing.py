@@ -33,7 +33,7 @@ import tempfile
 import threading
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 from goggles.types import Event  # re-export for compatibility
 
@@ -60,6 +60,10 @@ _HOST_SPAWN_TIMEOUT_S = 10.0
 # Bounded wait used by the atexit backstop so interpreter shutdown never hangs
 # on a wedged host (an explicit ``finish()`` may pass a different budget).
 _HOST_ATEXIT_TIMEOUT_S = 30.0
+# How long ``finish()`` waits to observe whether the host is reaping (we were
+# its last client) before giving up and returning -- bounds the cost when other
+# clients keep the host alive, so one process never blocks on its siblings.
+_HOST_FINALIZE_PROBE_S = 1.0
 
 _log = logging.getLogger(__name__)
 
@@ -191,10 +195,24 @@ def _spawn_dedicated_host() -> None:
             # The child binds the socket directly; never let it recurse into
             # spawning another host.
             env.pop(_DEDICATED_HOST_ENV, None)
-            proc = subprocess.Popen(
-                [sys.executable, "-m", "goggles._core.host"],
-                env=env,
+            # By default the host inherits this process's stdout/stderr so its
+            # handlers (e.g. ConsoleHandler) print where the user expects; set
+            # GOGGLES_HOST_LOG to capture them to a file instead.
+            host_log = _open_host_log()
+            stdio = (
+                {}
+                if host_log is None
+                else {"stdout": host_log, "stderr": subprocess.STDOUT}
             )
+            try:
+                proc = subprocess.Popen(
+                    [sys.executable, "-m", "goggles._core.host"],
+                    env=env,
+                    **stdio,
+                )
+            finally:
+                if host_log is not None:
+                    host_log.close()  # the child kept its own dup
         except Exception:
             # Spawning can fail in restricted environments (no fork/exec,
             # resource limits, ...). Never let that crash the caller's first
@@ -268,6 +286,30 @@ def _kill(proc: subprocess.Popen) -> None:
         pass
 
 
+def _open_host_log() -> IO[str] | None:
+    """stdout/stderr target for the spawned host.
+
+    Returns an opened ``GOGGLES_HOST_LOG`` file when that env var is set (handy
+    when the host outlives a process whose terminal is gone, or for debugging);
+    otherwise ``None`` so the host inherits this process's stdout/stderr and its
+    handlers (e.g. ``ConsoleHandler``) print where the user expects.
+
+    Returns:
+        An appendable text file, or ``None`` to inherit stdout/stderr.
+    """
+    log_path = os.getenv("GOGGLES_HOST_LOG")
+    if log_path:
+        try:
+            return open(log_path, "a", encoding="utf-8")
+        except OSError:
+            _log.warning(
+                "goggles: could not open GOGGLES_HOST_LOG=%r; "
+                "the host will inherit stdout/stderr.",
+                log_path,
+            )
+    return None
+
+
 def _terminate_dedicated_host(timeout: float | None = None) -> None:
     """Stop and reap the dedicated host subprocess spawned by this process.
 
@@ -300,13 +342,65 @@ def _terminate_dedicated_host(timeout: float | None = None) -> None:
             pass
 
 
+def _await_host_finalize(timeout: float | None) -> None:
+    """Wait for the host to finalize handlers if we were its last client.
+
+    ``finish()``/atexit shut down only the local client; the shared host
+    self-reaps once its last client disconnects. When THIS process spawned the
+    host and was its last client, the host reaps promptly -- it unlinks its
+    socket, then drains the queue and closes handlers (finishing W&B runs,
+    flushing handler outputs). Detect that (the socket path disappears) and wait
+    for the host process to exit, so callers keep the "everything is finalized
+    after ``finish()``" guarantee. If the socket is still present after a short
+    probe, other clients are keeping the host alive, so return promptly rather
+    than blocking on their continued logging.
+
+    The wait is for the host's own drain + close (bounded on the host side by
+    ``GOGGLES_SHUTDOWN_TIMEOUT``), never for siblings to keep running. In a rare
+    shutdown race -- a *sibling* is the one that frees the host during this
+    process's probe window -- this process will wait out that (sibling-
+    triggered) finalization too; that is a bounded delay, not a deadlock.
+
+    Args:
+        timeout: Seconds to wait for the host to finish draining + closing once
+            it is observed reaping. ``None`` waits as long as the host's own
+            shutdown (bound it with ``GOGGLES_SHUTDOWN_TIMEOUT`` on the host, or
+            an explicit ``finish(timeout=...)``).
+    """
+    with __host_lock:
+        proc = __host_proc  # snapshot under the lock, like the other accessors
+    if proc is None or proc.poll() is not None:
+        return
+    socket_path = _resolve_socket_path()
+    deadline = time.monotonic() + _HOST_FINALIZE_PROBE_S
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return  # host already exited -> nothing left to wait for
+        if not os.path.exists(socket_path):
+            break  # host unlinked its socket -> it is winding down
+        time.sleep(0.02)
+    else:
+        return  # socket still present -> other clients keep the host alive
+    # Wait for the host to finish draining + closing. ``timeout`` is the
+    # caller's finish() budget (``None`` waits as long as the host's own
+    # shutdown does, i.e. until GOGGLES_SHUTDOWN_TIMEOUT on the host side) --
+    # the same wait the pre-self-reap finish() already performed after SIGTERM,
+    # which a large drain (e.g. thousands of images) genuinely needs.
+    try:
+        proc.wait(timeout)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _atexit_terminate_host() -> None:
-    """``atexit`` backstop: flush the client, then reap the host (bounded).
+    """``atexit`` backstop: flush this process's transport on interpreter exit.
 
     Mirrors :func:`goggles.finish` so a program that exits without calling it
-    still ships its queued events to the host before the host is torn down.
-    No-op once ``finish()`` has run (the transport is already shut down and
-    the host already reaped). Bounded so interpreter shutdown never hangs.
+    still ships its queued events and, on a client, disconnects cleanly from
+    the dedicated host (so the host's client count is accurate). The shared
+    host is NOT reaped here -- it self-reaps once its last client disconnects,
+    so a sibling process still logging keeps its host. No-op once ``finish()``
+    has run. Bounded so interpreter shutdown never hangs.
     """
     transport = __singleton_transport
     if transport is not None and transport.is_running:
@@ -314,7 +408,10 @@ def _atexit_terminate_host() -> None:
             transport.shutdown(timeout=_HOST_ATEXIT_TIMEOUT_S)
         except Exception:  # best effort
             pass
-    _terminate_dedicated_host(timeout=_HOST_ATEXIT_TIMEOUT_S)
+    # As in finish(): if we spawned the host and were its last client, wait for
+    # it to finalize its handlers so an unfinished W&B run isn't left behind on
+    # interpreter exit. No-op when other processes keep the host alive.
+    _await_host_finalize(_HOST_ATEXIT_TIMEOUT_S)
 
 
 def _dedicated_host_process() -> subprocess.Popen | None:

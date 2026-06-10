@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -30,6 +31,7 @@ from goggles._core import host as host_mod
 from goggles._core import routing
 from goggles._core.transport import LocalTransport
 from goggles._core.transport._frames import _IS_WINDOWS
+from goggles._core.transport._local import _host_idle_timeout_s
 
 
 def _unique_socket() -> str:
@@ -57,6 +59,9 @@ def default_host_socket(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     monkeypatch.setenv("GOGGLES_SOCKET", path)
     # Bound the host's graceful-shutdown budget so tests never hang.
     monkeypatch.setenv("GOGGLES_SHUTDOWN_TIMEOUT", "10")
+    # Long idle grace by default so the host never self-reaps mid-test; tests
+    # that exercise the self-reap path override this to a small value.
+    monkeypatch.setenv("GOGGLES_HOST_IDLE_TIMEOUT", "60")
     routing.reset_bus()
     try:
         yield path
@@ -121,9 +126,13 @@ def test_disabled_hosts_in_process(disabled_host_socket: str) -> None:
         routing.reset_bus()
 
 
-def test_runs_handler_in_subprocess_and_flushes_on_finish(
-    default_host_socket: str, tmp_path: Path
+def test_finish_finalizes_host_for_last_client(
+    default_host_socket: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Capture the host's output to a file (exercises the GOGGLES_HOST_LOG path).
+    monkeypatch.setenv("GOGGLES_HOST_LOG", str(tmp_path / "host.log"))
     storage_dir = tmp_path / "logs"
     gg.attach(LocalStorageHandler(path=storage_dir), scopes=["global"])
 
@@ -143,17 +152,95 @@ def test_runs_handler_in_subprocess_and_flushes_on_finish(
             )
         )
 
-    # finish() flushes this client AND drains the host before reaping it, so
-    # every event lands in the jsonl even though we emit + finish immediately.
-    # The LocalStorageHandler was reconstructed and runs INSIDE the host
-    # subprocess (we are a client), so this also proves the handler ran there.
+    # We are the host's only/last client: finish() ships our events, the host
+    # reaps promptly on our clean disconnect, and finish() WAITS for it to drain
+    # and close the handler (which flushes the jsonl), so everything is
+    # finalized by the time finish() returns -- the guarantee benchmarks need.
     gg.finish(timeout=10.0)
 
-    assert proc.poll() is not None, "host subprocess should be reaped"
+    assert proc.poll() is not None, (
+        "finish() should finalize (reap) the host when we were its last client"
+    )
     log_file = storage_dir / "log.jsonl"
     assert log_file.exists() and len(log_file.read_text().splitlines()) == 5, (
-        "finish() should flush every event through the host before reaping"
+        "finish() should flush every event through the host before returning"
     )
+
+
+# A second, independent client process: connects to the host, signals it is
+# up, then stays connected until a stop file appears. It builds the transport
+# directly so it is unambiguously a CLIENT (never spawns/owns a host).
+_CLIENT_B_SRC = """
+import os, time
+from goggles._core.transport import LocalTransport
+
+t = LocalTransport(socket_path=os.environ["GG_SOCKET"])
+if t.is_host:
+    raise SystemExit("client B unexpectedly became the host")
+open(os.environ["GG_READY"], "w").close()
+stop = os.environ["GG_STOP"]
+while not os.path.exists(stop):
+    time.sleep(0.02)
+t.shutdown(timeout=5.0)
+"""
+
+
+def test_host_survives_spawner_finish_until_last_client(
+    default_host_socket: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The host the spawner reaped on ``finish()`` is exactly what fragmented
+    multi-process runs; it must now outlive the spawner while any client is
+    connected, never respawn, and self-reap only after the last client leaves.
+    """
+    monkeypatch.setenv("GOGGLES_HOST_IDLE_TIMEOUT", "1")
+    socket_path = os.environ["GOGGLES_SOCKET"]
+
+    # This process spawns and "owns" the host.
+    bus = gg.get_bus()
+    assert not bus.is_host
+    proc = routing._dedicated_host_process()
+    assert proc is not None
+
+    # A second, independent client connects and stays connected.
+    ready = tmp_path / "b_ready"
+    stop = tmp_path / "b_stop"
+    script = tmp_path / "client_b.py"
+    script.write_text(_CLIENT_B_SRC)
+    env = dict(
+        os.environ,
+        GG_SOCKET=socket_path,
+        GG_READY=str(ready),
+        GG_STOP=str(stop),
+    )
+    client_b = subprocess.Popen([sys.executable, str(script)], env=env)
+    try:
+        assert _wait_until(ready.exists, timeout=10.0), (
+            "client B never connected"
+        )
+
+        # The spawner finishes. The host must NOT die -- B is still connected.
+        gg.finish(timeout=10.0)
+
+        # Past the idle grace, the host is still the same live process: B kept
+        # it alive, finish() did not reap it, and nobody respawned a second one.
+        time.sleep(2.0)  # > GOGGLES_HOST_IDLE_TIMEOUT
+        assert proc.poll() is None, "host must stay alive while a client is on"
+        assert routing._host_is_listening(socket_path)
+        assert routing._dedicated_host_process() is proc, "no respawn"
+
+        # Release B: the host's last client is gone -> it self-reaps.
+        stop.touch()
+        assert _wait_until(lambda: proc.poll() is not None, timeout=10.0), (
+            "host should self-reap once its last client disconnects"
+        )
+    finally:
+        stop.touch()  # ensure B exits even if an assertion failed
+        try:
+            client_b.wait(timeout=10.0)
+        except subprocess.TimeoutExpired:
+            client_b.kill()
 
 
 def test_does_not_spawn_when_a_host_already_listens(
@@ -245,6 +332,140 @@ def test_falls_back_to_in_process_host_when_spawn_raises(
     finally:
         bus.shutdown(timeout=5.0)
         routing.reset_bus()
+
+
+# --- self-reap internals -----------------------------------------------------
+# The real dedicated host runs the self-reap inside a subprocess coverage can't
+# see, so exercise the LocalTransport machinery against an in-process host here.
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(None, 5.0), ("2.5", 2.5), ("bad", 5.0), ("0", 5.0), ("-1", 5.0)],
+)
+def test_host_idle_timeout_parsing(
+    monkeypatch: pytest.MonkeyPatch, value: str | None, expected: float
+) -> None:
+    if value is None:
+        monkeypatch.delenv("GOGGLES_HOST_IDLE_TIMEOUT", raising=False)
+    else:
+        monkeypatch.setenv("GOGGLES_HOST_IDLE_TIMEOUT", value)
+    assert _host_idle_timeout_s() == expected
+
+
+@pytest.fixture
+def inproc_host(monkeypatch: pytest.MonkeyPatch) -> Iterator[LocalTransport]:
+    """An in-process host bound to a unique socket (no subprocess)."""
+    monkeypatch.setenv("GOGGLES_DEDICATED_HOST", "0")
+    path = _unique_socket()
+    monkeypatch.setenv("GOGGLES_SOCKET", path)
+    host = LocalTransport(socket_path=path)
+    assert host.is_host
+    try:
+        yield host
+    finally:
+        host.shutdown(timeout=5.0)
+        for suffix in ("", ".lock"):
+            try:
+                os.unlink(path + suffix)
+            except OSError:
+                pass
+
+
+def test_idle_callback_fires_when_no_clients(
+    inproc_host: LocalTransport,
+) -> None:
+    inproc_host._idle_timeout_s = 0.1
+    fired = threading.Event()
+    inproc_host.set_idle_callback(lambda: None)  # arms a timer
+    inproc_host.set_idle_callback(fired.set)  # re-arms (cancels the first)
+    assert fired.wait(timeout=2.0)
+
+
+def test_idle_timer_rearms_on_last_client_disconnect(
+    inproc_host: LocalTransport,
+) -> None:
+    client = LocalTransport(socket_path=inproc_host._socket_path)
+    try:
+        assert not client.is_host
+        assert _wait_until(
+            lambda: len(inproc_host._client_sockets) == 1, timeout=3.0
+        )
+        inproc_host._idle_timeout_s = 0.2
+        fired = threading.Event()
+        inproc_host.set_idle_callback(fired.set)  # client present -> no arm
+        assert not fired.wait(timeout=0.5)
+    finally:
+        client.shutdown(timeout=3.0)  # last client gone -> re-arms -> fires
+    assert fired.wait(timeout=3.0)
+
+
+def test_idle_timer_cancelled_by_new_client(
+    inproc_host: LocalTransport,
+) -> None:
+    inproc_host._idle_timeout_s = 1.0
+    fired = threading.Event()
+    inproc_host.set_idle_callback(fired.set)  # no clients -> arms
+    client = LocalTransport(socket_path=inproc_host._socket_path)
+    try:
+        # The accept loop cancels the armed timer, so it never fires.
+        assert not fired.wait(timeout=1.5)
+    finally:
+        client.shutdown(timeout=3.0)
+
+
+def test_reap_if_idle_is_safe_without_a_callback(
+    inproc_host: LocalTransport,
+) -> None:
+    # No callback installed and no clients -> the defensive None branch.
+    inproc_host._reap_if_idle()
+
+
+def test_reap_if_idle_is_noop_while_a_client_is_connected(
+    inproc_host: LocalTransport,
+) -> None:
+    client = LocalTransport(socket_path=inproc_host._socket_path)
+    try:
+        assert _wait_until(
+            lambda: len(inproc_host._client_sockets) == 1, timeout=3.0
+        )
+        fired = threading.Event()
+        inproc_host._idle_callback = fired.set
+        inproc_host._reap_if_idle()  # a client is connected -> no-op
+        assert not fired.is_set()
+    finally:
+        client.shutdown(timeout=3.0)
+
+
+def test_open_host_log_defaults_to_inheriting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Unset -> None so the host inherits stdout/stderr (ConsoleHandler shows).
+    monkeypatch.delenv("GOGGLES_HOST_LOG", raising=False)
+    assert routing._open_host_log() is None
+
+
+def test_open_host_log_opens_the_configured_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log_path = tmp_path / "host.log"
+    monkeypatch.setenv("GOGGLES_HOST_LOG", str(log_path))
+    target = routing._open_host_log()
+    assert target is not None  # a real file to capture host output
+    try:
+        target.write("hi\n")
+    finally:
+        target.close()
+    assert log_path.exists()
+
+
+def test_open_host_log_falls_back_when_path_unopenable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(
+        "GOGGLES_HOST_LOG", str(tmp_path / "no" / "such" / "dir.log")
+    )
+    assert routing._open_host_log() is None  # falls back to inheriting
 
 
 def test_terminate_dedicated_host_is_idempotent() -> None:
