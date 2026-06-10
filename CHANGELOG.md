@@ -7,6 +7,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-10
+
 ### Added
 
 - **Dedicated host process for handlers (on by default).** goggles spawns a
