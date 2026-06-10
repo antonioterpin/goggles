@@ -195,20 +195,24 @@ def _spawn_dedicated_host() -> None:
             # The child binds the socket directly; never let it recurse into
             # spawning another host.
             env.pop(_DEDICATED_HOST_ENV, None)
-            # The host outlives the process that spawns it, so keep its output
-            # off that process's (eventually closed) terminal: discard it, or
-            # capture it via GOGGLES_HOST_LOG when debugging.
-            host_stdio = _open_host_log()
+            # By default the host inherits this process's stdout/stderr so its
+            # handlers (e.g. ConsoleHandler) print where the user expects; set
+            # GOGGLES_HOST_LOG to capture them to a file instead.
+            host_log = _open_host_log()
+            stdio = (
+                {}
+                if host_log is None
+                else {"stdout": host_log, "stderr": subprocess.STDOUT}
+            )
             try:
                 proc = subprocess.Popen(
                     [sys.executable, "-m", "goggles._core.host"],
                     env=env,
-                    stdout=host_stdio,
-                    stderr=subprocess.STDOUT,
+                    **stdio,
                 )
             finally:
-                if not isinstance(host_stdio, int):
-                    host_stdio.close()  # the child kept its own dup
+                if host_log is not None:
+                    host_log.close()  # the child kept its own dup
         except Exception:
             # Spawning can fail in restricted environments (no fork/exec,
             # resource limits, ...). Never let that crash the caller's first
@@ -282,15 +286,16 @@ def _kill(proc: subprocess.Popen) -> None:
         pass
 
 
-def _open_host_log() -> IO[str] | int:
-    """stdout/stderr target for the spawned host (it outlives its spawner).
+def _open_host_log() -> IO[str] | None:
+    """stdout/stderr target for the spawned host.
 
-    Returns an opened ``GOGGLES_HOST_LOG`` file when that env var is set -- so
-    the host's output is captured rather than written to the spawning
-    process's terminal after it exits -- otherwise ``subprocess.DEVNULL``.
+    Returns an opened ``GOGGLES_HOST_LOG`` file when that env var is set (handy
+    when the host outlives a process whose terminal is gone, or for debugging);
+    otherwise ``None`` so the host inherits this process's stdout/stderr and its
+    handlers (e.g. ``ConsoleHandler``) print where the user expects.
 
     Returns:
-        An appendable text file, or ``subprocess.DEVNULL``.
+        An appendable text file, or ``None`` to inherit stdout/stderr.
     """
     log_path = os.getenv("GOGGLES_HOST_LOG")
     if log_path:
@@ -299,10 +304,10 @@ def _open_host_log() -> IO[str] | int:
         except OSError:
             _log.warning(
                 "goggles: could not open GOGGLES_HOST_LOG=%r; "
-                "discarding host output.",
+                "the host will inherit stdout/stderr.",
                 log_path,
             )
-    return subprocess.DEVNULL
+    return None
 
 
 def _terminate_dedicated_host(timeout: float | None = None) -> None:
