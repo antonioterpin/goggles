@@ -437,11 +437,12 @@ def test_reap_if_idle_is_noop_while_a_client_is_connected(
         client.shutdown(timeout=3.0)
 
 
-def test_open_host_log_defaults_to_devnull(
+def test_open_host_log_defaults_to_inheriting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Unset -> None so the host inherits stdout/stderr (ConsoleHandler shows).
     monkeypatch.delenv("GOGGLES_HOST_LOG", raising=False)
-    assert routing._open_host_log() is subprocess.DEVNULL
+    assert routing._open_host_log() is None
 
 
 def test_open_host_log_opens_the_configured_path(
@@ -450,7 +451,7 @@ def test_open_host_log_opens_the_configured_path(
     log_path = tmp_path / "host.log"
     monkeypatch.setenv("GOGGLES_HOST_LOG", str(log_path))
     target = routing._open_host_log()
-    assert not isinstance(target, int)  # a real file, not DEVNULL
+    assert target is not None  # a real file to capture host output
     try:
         target.write("hi\n")
     finally:
@@ -464,7 +465,7 @@ def test_open_host_log_falls_back_when_path_unopenable(
     monkeypatch.setenv(
         "GOGGLES_HOST_LOG", str(tmp_path / "no" / "such" / "dir.log")
     )
-    assert routing._open_host_log() is subprocess.DEVNULL
+    assert routing._open_host_log() is None  # falls back to inheriting
 
 
 def test_terminate_dedicated_host_is_idempotent() -> None:

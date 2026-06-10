@@ -24,8 +24,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   host to finalize its handlers (drain + close, e.g. finishing a W&B run) when
   this process was the host's last client**, so the "everything is delivered and
   finalized once `finish()` returns" guarantee is preserved -- without blocking
-  one process on its siblings. The host's stdout/stderr now go to
-  `GOGGLES_HOST_LOG` (or are discarded) since it now outlives its spawner.
+  one process on its siblings. The host still inherits the spawning process's
+  stdout/stderr (so `ConsoleHandler` output appears as before); set the new
+  `GOGGLES_HOST_LOG` to capture it to a file instead.
 
 ## [0.2.3] - 2026-06-10
 
