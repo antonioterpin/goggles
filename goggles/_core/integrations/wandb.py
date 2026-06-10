@@ -173,6 +173,36 @@ Reinit: TypeAlias = Literal[
 ]
 
 
+def _flatten_logs(
+    logs: Mapping[str, Any], _parent: str = "", _sep: str = "."
+) -> dict[str, Any]:
+    """Promote nested-dict values to flat dotted keys for W&B.
+
+    ``{"custom_step": {"time": t}}`` becomes ``{"custom_step.time": t}``. W&B
+    stores a nested dict as a multi-level object that can't be selected as a
+    chart axis; a flat scalar key can. Only ``Mapping`` values are descended
+    into -- media/other objects, scalars, and arrays pass through. On a key
+    collision (a literal dotted key and a flattened nested key) the last value
+    wins.
+
+    Args:
+        logs: Log keys to values; values may be nested mappings.
+        _parent: Internal -- dotted prefix accumulated during recursion.
+        _sep: Internal -- separator between nesting levels.
+
+    Returns:
+        A flat dict with nested-mapping values promoted to dotted keys.
+    """
+    flat: dict[str, Any] = {}
+    for key, value in logs.items():
+        full = f"{_parent}{_sep}{key}" if _parent else str(key)
+        if isinstance(value, Mapping):
+            flat.update(_flatten_logs(value, full, _sep))
+        else:
+            flat[full] = value
+    return flat
+
+
 class WandBHandler:
     """Forward Goggles events to W&B runs (supports concurrent scopes).
 
@@ -777,6 +807,7 @@ class WandBHandler:
             step: User-supplied step, or None for auto-increment.
             logs: Mapping of keys to values to merge into the commit.
         """
+        logs = _flatten_logs(logs)
         if step is None:
             self._flush_pending(scope)
             run.log(dict(logs))
