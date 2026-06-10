@@ -7,6 +7,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-06-10
+
 ### Changed
 
 - **W&B: nested-dict metric metadata is flattened to dotted scalar keys.** Any
