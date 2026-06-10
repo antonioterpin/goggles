@@ -316,9 +316,7 @@ try:
                 np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8),
                 name="Random image with custom step",
                 step=i,  # Global step
-                custom_step={
-                    "custom_step": i // 10 - 10
-                },  # Extra field to be used as x-axis
+                custom_step=i // 10 - 10,  # extra field usable as a W&B x-axis
             )
 
     # Log a static histogram (that does not change over time)
