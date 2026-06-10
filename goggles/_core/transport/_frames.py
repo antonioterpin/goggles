@@ -18,7 +18,7 @@ import struct
 import sys
 import tempfile
 import time
-from multiprocessing import shared_memory
+from multiprocessing import resource_tracker, shared_memory
 from typing import Any
 
 import numpy as np
@@ -340,6 +340,30 @@ def _reap_orphan_shm(max_age_s: float = _SHM_REAP_AGE_S) -> int:
         except OSError:
             pass
     return reaped
+
+
+def _untrack_shm(shm: shared_memory.SharedMemory) -> None:
+    """Detach ``shm`` from this process's multiprocessing resource tracker.
+
+    goggles owns the shm lifetime explicitly: the consumer unlinks the block
+    after reading and :func:`_reap_orphan_shm` sweeps crash leftovers. The
+    *creating* process only ``close()``s its mapping (it never unlinks -- the
+    consumer does), so without this its ``resource_tracker`` would treat every
+    block as leaked and, at interpreter exit, warn once per block while trying
+    to unlink segments the consumer already removed. Best-effort and
+    idempotent; safe to call even if the tracker never registered the block.
+
+    Args:
+        shm: The freshly created shared-memory block to stop tracking.
+    """
+    try:
+        # The tracker keys POSIX shm by the slash-prefixed internal name
+        # (``shm._name``); ``shm.name`` strips the leading slash and would not
+        # match. Fall back to the public name where ``_name`` is absent.
+        name = getattr(shm, "_name", None) or shm.name
+        resource_tracker.unregister(name, "shared_memory")
+    except Exception:
+        pass
 
 
 def _try_unlink_shm(name: str) -> None:

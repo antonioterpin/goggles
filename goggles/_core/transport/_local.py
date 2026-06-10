@@ -53,6 +53,7 @@ from ._frames import (
     _try_unlink_shm,
     _unpack_large,
     _unpack_small,
+    _untrack_shm,
 )
 
 if TYPE_CHECKING:
@@ -544,6 +545,11 @@ class LocalTransport:
             shm = shared_memory.SharedMemory(
                 create=True, name=shm_name, size=max(1, payload.nbytes)
             )
+            # goggles unlinks the block from the consumer side (and sweeps
+            # crash leftovers at host startup), so detach it from this
+            # process's resource tracker; otherwise the tracker reports every
+            # block as leaked and warns once per payload at exit.
+            _untrack_shm(shm)
             with self._pending_shm_lock:
                 self._pending_shm.add(shm_name)
             try:
