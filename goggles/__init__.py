@@ -1136,6 +1136,13 @@ def finish(timeout: float | None = None) -> None:
         logging.getLogger(__name__).exception(
             "Error while shutting down transport"
         )
+    # If we spawned the host and were its last client, it is now finalizing its
+    # handlers (e.g. finishing W&B runs); wait so the usual "everything is
+    # delivered + finalized once finish() returns" guarantee still holds. No-op
+    # when other processes keep the host alive.
+    from ._core.routing import _await_host_finalize  # noqa: PLC0415
+
+    _await_host_finalize(timeout)
 
 
 def register_handler(handler_class: type) -> None:

@@ -126,13 +126,11 @@ def test_disabled_hosts_in_process(disabled_host_socket: str) -> None:
         routing.reset_bus()
 
 
-def test_host_self_reaps_and_flushes_after_last_client(
+def test_finish_finalizes_host_for_last_client(
     default_host_socket: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Short idle grace so the host self-reaps promptly once its client leaves.
-    monkeypatch.setenv("GOGGLES_HOST_IDLE_TIMEOUT", "1")
     # Capture the host's output to a file (exercises the GOGGLES_HOST_LOG path).
     monkeypatch.setenv("GOGGLES_HOST_LOG", str(tmp_path / "host.log"))
     storage_dir = tmp_path / "logs"
@@ -154,19 +152,18 @@ def test_host_self_reaps_and_flushes_after_last_client(
             )
         )
 
-    # finish() ships this client's events to the host and disconnects; it does
-    # NOT reap the shared host. With its last client gone, the host self-reaps
-    # after the idle grace -- draining the queue and closing the handler (where
-    # the jsonl is flushed), proving the reconstructed handler ran in the
-    # subprocess.
+    # We are the host's only/last client: finish() ships our events, the host
+    # reaps promptly on our clean disconnect, and finish() WAITS for it to drain
+    # and close the handler (which flushes the jsonl), so everything is
+    # finalized by the time finish() returns -- the guarantee benchmarks need.
     gg.finish(timeout=10.0)
 
-    assert _wait_until(lambda: proc.poll() is not None, timeout=10.0), (
-        "host should self-reap after its last client disconnects"
+    assert proc.poll() is not None, (
+        "finish() should finalize (reap) the host when we were its last client"
     )
     log_file = storage_dir / "log.jsonl"
     assert log_file.exists() and len(log_file.read_text().splitlines()) == 5, (
-        "the host should flush every event when it self-reaps"
+        "finish() should flush every event through the host before returning"
     )
 
 

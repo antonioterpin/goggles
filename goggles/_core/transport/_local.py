@@ -376,13 +376,19 @@ class LocalTransport:
             if not self._client_sockets:
                 self._arm_idle_timer_locked()
 
-    def _arm_idle_timer_locked(self) -> None:
-        """Start (or restart) the idle grace timer. Caller holds the lock."""
+    def _arm_idle_timer_locked(self, delay: float | None = None) -> None:
+        """Start (or restart) the idle reap timer. Caller holds the lock.
+
+        Args:
+            delay: Seconds before reaping; defaults to the idle grace. A clean
+                last-client disconnect passes ``0.0`` to reap promptly (so a
+                caller's ``finish()`` can finalize handlers), while an unclean
+                EOF keeps the grace to avoid churn if a client reconnects.
+        """
         if self._idle_timer is not None:
             self._idle_timer.cancel()
-        self._idle_timer = threading.Timer(
-            self._idle_timeout_s, self._reap_if_idle
-        )
+        when = self._idle_timeout_s if delay is None else delay
+        self._idle_timer = threading.Timer(when, self._reap_if_idle)
         self._idle_timer.daemon = True
         self._idle_timer.start()
 
@@ -438,6 +444,7 @@ class LocalTransport:
         Args:
             conn: Connected client socket.
         """
+        clean = False  # set once the client sends BYE (graceful disconnect)
         try:
             if not self._endpoint.authorize(conn, self._endpoint_secret):
                 _log.warning(
@@ -459,6 +466,8 @@ class LocalTransport:
                 body = _recvall(conn, length) if length else b""
                 if body is None:
                     return
+                if kind == _MSG_BYE:
+                    clean = True  # the client is leaving gracefully
                 self._dispatch_incoming(kind, body)
         finally:
             try:
@@ -475,7 +484,10 @@ class LocalTransport:
                 except ValueError:
                     pass
                 if not self._client_sockets and self._idle_callback is not None:
-                    self._arm_idle_timer_locked()  # last client gone
+                    # Last client gone: reap promptly on a clean BYE (so its
+                    # finish() can finalize handlers), else keep the grace in
+                    # case an unclean drop is a reconnecting client.
+                    self._arm_idle_timer_locked(0.0 if clean else None)
 
     def _dispatch_incoming(self, kind: int, body: bytes) -> None:
         """Route an incoming framed message to the appropriate handler.

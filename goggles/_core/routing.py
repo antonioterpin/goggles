@@ -60,6 +60,10 @@ _HOST_SPAWN_TIMEOUT_S = 10.0
 # Bounded wait used by the atexit backstop so interpreter shutdown never hangs
 # on a wedged host (an explicit ``finish()`` may pass a different budget).
 _HOST_ATEXIT_TIMEOUT_S = 30.0
+# How long ``finish()`` waits to observe whether the host is reaping (we were
+# its last client) before giving up and returning -- bounds the cost when other
+# clients keep the host alive, so one process never blocks on its siblings.
+_HOST_FINALIZE_PROBE_S = 1.0
 
 _log = logging.getLogger(__name__)
 
@@ -333,6 +337,50 @@ def _terminate_dedicated_host(timeout: float | None = None) -> None:
             pass
 
 
+def _await_host_finalize(timeout: float | None) -> None:
+    """Wait for the host to finalize handlers if we were its last client.
+
+    ``finish()``/atexit shut down only the local client; the shared host
+    self-reaps once its last client disconnects. When THIS process spawned the
+    host and was its last client, the host reaps promptly -- it unlinks its
+    socket, then drains the queue and closes handlers (finishing W&B runs,
+    flushing handler outputs). Detect that (the socket path disappears) and wait
+    for the host process to exit, so callers keep the "everything is finalized
+    after ``finish()``" guarantee. If the socket is still present after a short
+    probe, other clients are keeping the host alive, so return promptly rather
+    than blocking on their continued logging.
+
+    The wait is for the host's own drain + close (bounded on the host side by
+    ``GOGGLES_SHUTDOWN_TIMEOUT``), never for siblings to keep running. In a rare
+    shutdown race -- a *sibling* is the one that frees the host during this
+    process's probe window -- this process will wait out that (sibling-
+    triggered) finalization too; that is a bounded delay, not a deadlock.
+
+    Args:
+        timeout: Seconds to wait for the host to finish draining + closing once
+            it is observed reaping, or ``None`` to wait indefinitely (callers
+            that need a hard cap pass an explicit ``timeout``).
+    """
+    with __host_lock:
+        proc = __host_proc  # snapshot under the lock, like the other accessors
+    if proc is None or proc.poll() is not None:
+        return
+    socket_path = _resolve_socket_path()
+    deadline = time.monotonic() + _HOST_FINALIZE_PROBE_S
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return  # host already exited -> nothing left to wait for
+        if not os.path.exists(socket_path):
+            break  # host unlinked its socket -> it is winding down
+        time.sleep(0.02)
+    else:
+        return  # socket still present -> other clients keep the host alive
+    try:
+        proc.wait(timeout)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _atexit_terminate_host() -> None:
     """``atexit`` backstop: flush this process's transport on interpreter exit.
 
@@ -349,6 +397,10 @@ def _atexit_terminate_host() -> None:
             transport.shutdown(timeout=_HOST_ATEXIT_TIMEOUT_S)
         except Exception:  # best effort
             pass
+    # As in finish(): if we spawned the host and were its last client, wait for
+    # it to finalize its handlers so an unfinished W&B run isn't left behind on
+    # interpreter exit. No-op when other processes keep the host alive.
+    _await_host_finalize(_HOST_ATEXIT_TIMEOUT_S)
 
 
 def _dedicated_host_process() -> subprocess.Popen | None:
