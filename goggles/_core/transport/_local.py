@@ -67,6 +67,11 @@ _log = logging.getLogger(__name__)
 _SENTINEL = object()  # "stop draining / sending" marker
 
 _DEFAULT_HOST_IDLE_TIMEOUT_S = 5.0
+# Small delay before reaping after a clean last-client disconnect: long enough
+# that the accept loop registers (and so cancels the reap for) a client that
+# connects in the same instant the last one leaves, short enough that a
+# single-process ``finish()`` still winds the host down promptly.
+_HOST_CLEAN_REAP_DELAY_S = 0.2
 
 
 def _host_idle_timeout_s() -> float:
@@ -484,10 +489,12 @@ class LocalTransport:
                 except ValueError:
                     pass
                 if not self._client_sockets and self._idle_callback is not None:
-                    # Last client gone: reap promptly on a clean BYE (so its
-                    # finish() can finalize handlers), else keep the grace in
-                    # case an unclean drop is a reconnecting client.
-                    self._arm_idle_timer_locked(0.0 if clean else None)
+                    # Last client gone: reap quickly on a clean BYE (so its
+                    # finish() can finalize handlers), else keep the full grace
+                    # in case an unclean drop is a reconnecting client.
+                    self._arm_idle_timer_locked(
+                        _HOST_CLEAN_REAP_DELAY_S if clean else None
+                    )
 
     def _dispatch_incoming(self, kind: int, body: bytes) -> None:
         """Route an incoming framed message to the appropriate handler.

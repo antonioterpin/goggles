@@ -358,8 +358,9 @@ def _await_host_finalize(timeout: float | None) -> None:
 
     Args:
         timeout: Seconds to wait for the host to finish draining + closing once
-            it is observed reaping, or ``None`` to wait indefinitely (callers
-            that need a hard cap pass an explicit ``timeout``).
+            it is observed reaping. ``None`` waits as long as the host's own
+            shutdown (bound it with ``GOGGLES_SHUTDOWN_TIMEOUT`` on the host, or
+            an explicit ``finish(timeout=...)``).
     """
     with __host_lock:
         proc = __host_proc  # snapshot under the lock, like the other accessors
@@ -375,6 +376,11 @@ def _await_host_finalize(timeout: float | None) -> None:
         time.sleep(0.02)
     else:
         return  # socket still present -> other clients keep the host alive
+    # Wait for the host to finish draining + closing. ``timeout`` is the
+    # caller's finish() budget (``None`` waits as long as the host's own
+    # shutdown does, i.e. until GOGGLES_SHUTDOWN_TIMEOUT on the host side) --
+    # the same wait the pre-self-reap finish() already performed after SIGTERM,
+    # which a large drain (e.g. thousands of images) genuinely needs.
     try:
         proc.wait(timeout)
     except subprocess.TimeoutExpired:
