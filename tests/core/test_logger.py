@@ -1,3 +1,4 @@
+import gc
 import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -5,6 +6,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+import goggles._core.logger as logger_mod
 from goggles._core.logger import CoreGogglesLogger, CoreTextLogger
 
 
@@ -529,4 +531,77 @@ def test_get_logger_level_kwarg(patch_bus: MagicMock) -> None:
     assert patch_bus.emit.call_count == 1, (
         f"get_logger(level=WARNING) should drop INFO and keep WARNING, "
         f"got {patch_bus.emit.call_count} emit(s)"
+    )
+
+
+# -------------------------------------------------------------------------
+# GC / reference-cycle regression tests
+# -------------------------------------------------------------------------
+
+
+def _cycles_created(work, n: int) -> int:
+    """Run ``work`` ``n`` times with automatic GC off and return how many
+    cyclic objects ``gc.collect`` then has to reclaim.
+
+    Args:
+        work: Zero-arg callable exercised in the loop.
+        n: Number of iterations.
+
+    Returns:
+        Count of uncollectable cyclic objects created by the loop.
+    """
+    gc.collect()
+    gc.disable()
+    try:
+        for _ in range(n):
+            work()
+        return gc.collect()
+    finally:
+        gc.enable()
+
+
+def test_caller_id_does_not_leak_frame_cycles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_caller_id`` must not leave its own frame in an uncollectable cycle.
+
+    ``inspect.currentframe()`` held in a local makes the frame reference
+    itself, so refcounting can never free it; under high-rate logging that
+    leaked roughly one call-stack of frames per log call.
+
+    Args:
+        monkeypatch: Forces caller capture on regardless of the env var.
+    """
+    monkeypatch.setattr(logger_mod, "_CAPTURE_CALLER", True)
+    logger_mod._caller_id()  # warm any one-time allocation
+    leaked = _cycles_created(logger_mod._caller_id, 1000)
+    assert leaked == 0, (
+        f"_caller_id created {leaked} uncollectable cyclic objects "
+        "(its own frame, held in a local, self-references the frame)"
+    )
+
+
+def test_high_rate_logging_does_not_accumulate_cycles(
+    goggles_logger: CoreGogglesLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scalar logging must not accumulate gc cycles as call volume grows.
+
+    A frame cycle per call scales linearly with call count; the cyclic count
+    must instead stay flat regardless of volume.
+
+    Args:
+        goggles_logger: Metrics logger bound to a mock bus.
+        monkeypatch: Forces caller capture on regardless of the env var.
+    """
+    monkeypatch.setattr(logger_mod, "_CAPTURE_CALLER", True)
+
+    def _log() -> None:
+        goggles_logger.scalar("metric", 1.0)
+
+    few = _cycles_created(_log, 200)
+    many = _cycles_created(_log, 2000)
+    assert many <= few + 100, (
+        f"logging leaks cycles that scale with volume: {few} -> {many} "
+        "cyclic objects for 200 -> 2000 calls"
     )
