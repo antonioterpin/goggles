@@ -896,7 +896,13 @@ def _caller_id() -> tuple[str, int]:
     if not _CAPTURE_CALLER:
         return _UNKNOWN_CALLER
     frame = inspect.currentframe()
-    if frame is None or frame.f_back is None or frame.f_back.f_back is None:
-        return _UNKNOWN_CALLER
-    caller_frame = frame.f_back.f_back
-    return (caller_frame.f_code.co_filename, caller_frame.f_lineno)
+    try:
+        if frame is None or frame.f_back is None or frame.f_back.f_back is None:
+            return _UNKNOWN_CALLER
+        caller_frame = frame.f_back.f_back
+        return (caller_frame.f_code.co_filename, caller_frame.f_lineno)
+    finally:
+        # currentframe() returns this frame; holding it in a local makes the
+        # frame reference itself -- a cycle refcounting cannot reclaim, which
+        # pins the whole f_back stack until gc runs. Drop it on every path.
+        del frame
