@@ -605,3 +605,21 @@ def test_high_rate_logging_does_not_accumulate_cycles(
         f"logging leaks cycles that scale with volume: {few} -> {many} "
         "cyclic objects for 200 -> 2000 calls"
     )
+
+
+def test_caller_id_returns_sentinel_on_shallow_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_caller_id`` returns the unknown-caller sentinel when the stack is too
+    shallow to walk -- and still drops its frame on that path.
+
+    Args:
+        monkeypatch: Forces caller capture on and stubs a shallow frame.
+    """
+    monkeypatch.setattr(logger_mod, "_CAPTURE_CALLER", True)
+    monkeypatch.setattr(
+        logger_mod.inspect,
+        "currentframe",
+        lambda: SimpleNamespace(f_back=None),
+    )
+    assert logger_mod._caller_id() == logger_mod._UNKNOWN_CALLER
