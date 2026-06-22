@@ -117,11 +117,8 @@ Each handler implements the `Handler` protocol (see
 - **WandBHandler** (`wandb` extra): Weights & Biases integration with
   multi-run grouping.
 - **MLflowHandler** (`mlflow` extra): MLflow integration with one run
-  per scope, logging through `MlflowClient`. Point `tracking_uri` at a
-  remote MLflow server to stream metrics off-box (the handler is just an
-  MLflow client, so this works without a cross-machine Goggles
-  transport); media and checkpoints are reused from the base
-  `goggles.media` renderers.
+  per scope; point `tracking_uri` at a remote MLflow server to stream
+  metrics off-box.
 
 Adding a new handler: subclass an existing handler or implement the
 `Handler` protocol directly, then register it with

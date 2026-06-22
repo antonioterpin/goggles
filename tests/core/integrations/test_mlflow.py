@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 from mlflow.tracking import MlflowClient
 
+import goggles as gg
+import goggles._core.integrations as integ
 import goggles._core.integrations.mlflow as mlflow_module
 from goggles._core.integrations.mlflow import (
     MLflowHandler,
@@ -60,21 +62,10 @@ def make_event(
     )
 
 
-def test_can_handle_supported_kinds():
-    h = MLflowHandler()
-    for kind in [
-        "metric",
-        "image",
-        "video",
-        "artifact",
-        "vector_field",
-        "trajectories",
-        "histogram",
-    ]:
-        assert h.can_handle(kind), f"MLflowHandler should handle '{kind}'"
-    assert not h.can_handle("log"), (
-        "MLflowHandler should not handle 'log' events by default"
-    )
+# Capabilities, the monotonic-step guard, serialization round-tripping and
+# event.extra non-mutation are the shared Handler contract -- exercised for
+# both trackers in test_handler_contract.py. The tests below cover behaviour
+# specific to how MLflowHandler forwards events to MlflowClient.
 
 
 def test_open_resolves_existing_experiment(mock_client):
@@ -541,23 +532,6 @@ def test_close_terminates_runs(mock_client):
     assert h._runs == {}
 
 
-def test_does_not_mutate_event_extra(mock_client):
-    h = MLflowHandler()
-    extra = {"name": "img", "custom_step": 3}
-    snapshot = dict(extra)
-    h.handle(
-        SimpleNamespace(
-            kind="image",
-            scope="global",
-            payload=np.zeros((4, 4, 3), dtype=np.uint8),
-            step=0,
-            extra=extra,
-            time=None,
-        )
-    )
-    assert extra == snapshot, "handler must not mutate the shared event.extra"
-
-
 def test_to_dict_from_dict_roundtrip(mock_client):
     h = MLflowHandler(
         experiment="exp",
@@ -579,6 +553,119 @@ def test_to_dict_from_dict_roundtrip(mock_client):
     assert restored._params == {"lr": 0.1}
     assert restored._tags == {"team": "rl"}
     assert restored.name == "mlflow-custom"
+
+
+# -------------------------------------------------------------------------
+# Lazy export wiring (goggles.MLflowHandler resolves without eager import)
+# -------------------------------------------------------------------------
+
+
+def test_lazy_export_resolves_to_handler():
+    assert gg.MLflowHandler is MLflowHandler
+    assert "MLflowHandler" in gg.__all__
+
+
+def test_get_handler_class_resolves_mlflow_lazily():
+    # Deserialization path used by the bus/host.
+    assert gg._get_handler_class("MLflowHandler") is MLflowHandler
+
+
+def test_module_getattr_unknown_attr_raises():
+    with pytest.raises(AttributeError):
+        gg.__getattr__("DefinitelyNotAHandler")
+
+
+def test_integrations_getattr_resolves_and_rejects_unknown():
+    assert integ.MLflowHandler is MLflowHandler
+    with pytest.raises(AttributeError):
+        integ.__getattr__("Nope")
+
+
+# -------------------------------------------------------------------------
+# Video format branches
+# -------------------------------------------------------------------------
+
+
+def test_handle_video_mp4_uses_mp4_encoder(mock_client, monkeypatch):
+    mp4_mock = MagicMock()
+    monkeypatch.setattr(mlflow_module, "save_numpy_mp4", mp4_mock)
+    h = MLflowHandler()
+    h.handle(
+        SimpleNamespace(
+            kind="video",
+            scope="global",
+            payload=np.zeros((4, 8, 8, 3), dtype=np.uint8),
+            step=1,
+            extra={"name": "clip", "format": "mp4"},
+            time=None,
+        )
+    )
+    mp4_mock.assert_called_once()
+    mock_client.log_artifact.assert_called_once()
+
+
+def test_handle_video_unknown_format_warns_and_defaults_to_gif(
+    mock_client, monkeypatch
+):
+    gif_mock = MagicMock()
+    monkeypatch.setattr(mlflow_module, "save_numpy_gif", gif_mock)
+    h = MLflowHandler()
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(
+            SimpleNamespace(
+                kind="video",
+                scope="global",
+                payload=np.zeros((4, 8, 8, 3), dtype=np.uint8),
+                step=1,
+                extra={"name": "clip", "format": "avi"},
+                time=None,
+            )
+        )
+    finally:
+        h._logger.removeHandler(collector)
+    assert any("unsupported video format" in m.lower() for m in messages)
+    gif_mock.assert_called_once()  # fell back to gif
+
+
+def test_handle_video_none_payload_warns(mock_client):
+    h = MLflowHandler()
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(
+            SimpleNamespace(
+                kind="video",
+                scope="global",
+                payload=None,
+                step=1,
+                extra={"name": "clip"},
+                time=None,
+            )
+        )
+    finally:
+        h._logger.removeHandler(collector)
+    assert any("none payload" in m.lower() for m in messages)
+    mock_client.log_artifact.assert_not_called()
+
+
+def test_handle_image_none_payload_warns(mock_client):
+    h = MLflowHandler()
+    messages, collector = _capture_logger_messages(h._logger)
+    try:
+        h.handle(
+            SimpleNamespace(
+                kind="image",
+                scope="global",
+                payload={"cam": None},
+                step=1,
+                extra={},
+                time=None,
+            )
+        )
+    finally:
+        h._logger.removeHandler(collector)
+    assert any("none payload" in m.lower() for m in messages)
+    mock_client.log_image.assert_not_called()
 
 
 # -------------------------------------------------------------------------

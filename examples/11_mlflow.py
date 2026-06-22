@@ -9,31 +9,18 @@ import goggles as gg
 # Install the optional extra first:
 #   uv add "robo-goggles[mlflow]"
 #
-# Two ways to view the data via a URL:
+# View the data in your browser two ways:
 #
-# 1. LOCAL store (this example). We log to a local sqlite database and a
-#    local artifact directory, then browse it with the MLflow UI:
+# 1. Local store (used here): log to a sqlite database, then serve it with
+#    `mlflow ui` and open http://localhost:5000 -- see the command printed
+#    when this script runs.
 #
-#        mlflow ui \
-#            --backend-store-uri sqlite:///examples/logs/mlflow/mlflow.db \
-#            --port 5000
-#        # open http://localhost:5000
-#
-#    Running training on a remote box? Start the UI there with
-#    `--host 0.0.0.0` and reach it over an SSH tunnel
-#    (`ssh -L 5000:localhost:5000 <remote>`), then open
-#    http://localhost:5000.
-#
-# 2. REMOTE tracking server. Point the handler at a running server and it
-#    streams there over HTTP; anyone can watch live at the same URL:
-#
-#        handler = gg.MLflowHandler(
+# 2. Remote tracking server: point the handler at a running MLflow server
+#    and the metrics stream there live, viewable by anyone at that URL:
+#        gg.MLflowHandler(
 #            experiment="goggles-example",
 #            tracking_uri="http://<server>:5000",
 #        )
-#
-# NOTE: as of MLflow 3 the bare `./mlruns` file store is in maintenance
-# mode and rejected by default, so we use a sqlite backend here.
 
 store_dir = Path("examples/logs/mlflow")
 store_dir.mkdir(parents=True, exist_ok=True)
@@ -53,10 +40,6 @@ gg.attach(
     ),
     scopes=["training"],
 )
-gg.attach(
-    gg.ConsoleHandler(name="examples.mlflow.console", level=gg.INFO),
-    scopes=["training"],
-)
 
 print("=== Goggles MLflow Handler Example ===")
 print(f"Tracking store: {tracking_uri}")
@@ -66,8 +49,6 @@ print(
     f"sqlite:///{store_dir / 'mlflow.db'} --port 5000"
 )
 print()
-
-logger.info("MLflow example started")
 
 # Scalar metrics -> MLflow metrics (plottable, with a step slider).
 rng = np.random.default_rng(0)
