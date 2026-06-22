@@ -76,6 +76,9 @@ wandb = [
     "wandb[media]",
     "plotly>=5.20.0",
 ]
+mlflow = [
+    "mlflow>=2.9",
+]
 
 # Pytest configuration
 [tool.pytest.ini_options]

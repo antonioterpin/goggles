@@ -33,7 +33,8 @@ goggles/
     `-- integrations/
         |-- console.py        # ConsoleHandler
         |-- storage.py        # LocalStorageHandler
-        `-- wandb.py          # WandBHandler (W&B extra)
+        |-- wandb.py          # WandBHandler (W&B extra)
+        `-- mlflow.py         # MLflowHandler (mlflow extra)
 ```
 
 ### Public vs internal
@@ -45,7 +46,8 @@ public surface is (see [goggles/__init__.py](../../goggles/__init__.py)):
 - Loggers: `get_logger`, `TextLogger`, `GogglesLogger`
 - Event model: `Event`, `Kind`, `Metrics`, `Image`, `Video`,
   `Vector`, `VectorField`
-- Handlers: `ConsoleHandler`, `LocalStorageHandler`, `WandBHandler`
+- Handlers: `ConsoleHandler`, `LocalStorageHandler`, `WandBHandler`,
+  `MLflowHandler`
 - Bus management: `attach`, `detach`, `register_handler`
 - Decorators: `timeit`, `trace_on_error`
 - Config: `PrettyConfig`, `load_configuration`, `save_configuration`
@@ -114,6 +116,12 @@ Each handler implements the `Handler` protocol (see
 - **LocalStorageHandler**: JSON-Lines on disk.
 - **WandBHandler** (`wandb` extra): Weights & Biases integration with
   multi-run grouping.
+- **MLflowHandler** (`mlflow` extra): MLflow integration with one run
+  per scope, logging through `MlflowClient`. Point `tracking_uri` at a
+  remote MLflow server to stream metrics off-box (the handler is just an
+  MLflow client, so this works without a cross-machine Goggles
+  transport); media and checkpoints are reused from the base
+  `goggles.media` renderers.
 
 Adding a new handler: subclass an existing handler or implement the
 `Handler` protocol directly, then register it with

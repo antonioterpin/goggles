@@ -539,25 +539,37 @@ def test_get_logger_level_kwarg(patch_bus: MagicMock) -> None:
 # -------------------------------------------------------------------------
 
 
-def _cycles_created(work, n: int) -> int:
-    """Run ``work`` ``n`` times with automatic GC off and return how many
-    cyclic objects ``gc.collect`` then has to reclaim.
+def _cycles_created(work, n: int, *, trials: int = 5) -> int:
+    """Return the fewest cyclic objects ``work`` leaves across ``trials``.
+
+    ``gc.collect`` reports the process-global cyclic-garbage count, so a
+    single measurement can be inflated by a concurrent allocator that has
+    nothing to do with ``work`` -- a background thread, or the coverage
+    tracer creating short-lived frame cycles during the window. A genuine
+    per-call leak in ``work`` is deterministic and therefore present in
+    *every* trial, so taking the minimum across a few trials cancels that
+    transient noise while still surfacing a real leak.
 
     Args:
         work: Zero-arg callable exercised in the loop.
-        n: Number of iterations.
+        n: Number of iterations per trial.
+        trials: Number of independent measurements to take the min over.
 
     Returns:
-        Count of uncollectable cyclic objects created by the loop.
+        Minimum count of uncollectable cyclic objects created by the loop
+        across ``trials`` runs.
     """
-    gc.collect()
-    gc.disable()
-    try:
-        for _ in range(n):
-            work()
-        return gc.collect()
-    finally:
-        gc.enable()
+    counts: list[int] = []
+    for _ in range(trials):
+        gc.collect()
+        gc.disable()
+        try:
+            for _ in range(n):
+                work()
+            counts.append(gc.collect())
+        finally:
+            gc.enable()
+    return min(counts)
 
 
 def test_caller_id_does_not_leak_frame_cycles(

@@ -32,9 +32,11 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import sys
 import threading
 from collections import defaultdict
 from collections.abc import Callable
+from importlib.util import find_spec
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -54,6 +56,10 @@ from typing_extensions import Self
 
 if TYPE_CHECKING:
     from goggles._core.transport import Transport
+
+    # MLflowHandler is resolved lazily at runtime (see module __getattr__);
+    # import it here so type checkers and `__all__` still see the symbol.
+    from ._core.integrations.mlflow import MLflowHandler
 
 from . import filters
 from ._core.decorators import timeit as _timeit
@@ -1183,6 +1189,13 @@ def _get_handler_class(class_name: str) -> type:
     if class_name in globals():
         return globals()[class_name]
 
+    # Trigger the module __getattr__ (PEP 562) so lazily-exported handlers
+    # such as MLflowHandler can be deserialized by the bus/host without the
+    # heavy optional backend being imported at `import goggles` time.
+    lazy = getattr(sys.modules[__name__], class_name, None)
+    if isinstance(lazy, type):
+        return lazy
+
     available_handlers = list(_HANDLER_REGISTRY.keys()) + [
         k for k in globals().keys() if k.endswith("Handler")
     ]
@@ -1207,6 +1220,38 @@ try:
 except Exception:
     WandBHandler = None
 
+
+def __getattr__(name: str) -> Any:
+    """Lazily resolve heavy optional handlers on first access (PEP 562).
+
+    ``MLflowHandler`` pulls in the full mlflow stack (Flask, SQLAlchemy,
+    pydantic, ...). Importing that eagerly at ``import goggles`` time would
+    slow every import and bloat the loaded-module set for users who never
+    touch MLflow, so the symbol is resolved here on first access instead.
+    Resolved values are cached into ``globals()`` so repeat lookups and bus
+    deserialization (:func:`_get_handler_class`) find them without re-import.
+
+    Args:
+        name: The attribute being accessed on the ``goggles`` module.
+
+    Returns:
+        The resolved handler class, or None when its optional extra is not
+        installed.
+
+    Raises:
+        AttributeError: If ``name`` is not a lazily-exported symbol.
+    """
+    if name == "MLflowHandler":
+        value: type | None = None
+        if find_spec("mlflow") is not None:
+            from ._core.integrations import mlflow as _mlflow  # noqa: PLC0415
+
+            value = _mlflow.MLflowHandler
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "CRITICAL",
     "DEBUG",
@@ -1221,6 +1266,7 @@ __all__ = [
     "Image",
     "Kind",
     "LocalStorageHandler",
+    "MLflowHandler",
     "Metrics",
     "PrettyConfig",
     "TextLogger",

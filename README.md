@@ -16,7 +16,7 @@ A lightweight, flexible Python observability framework designed for robotics res
 
 - 🤖 **Multi-process logging on a single machine** - Synchronize logs across spawned processes via a Unix-domain-socket transport; large numpy payloads travel through shared memory when they cross the threshold.
 - 🎯 **Multi-output support** - Log to console, files, and remote services simultaneously.
-- 📊 **Experiment tracking** - Native integration with Weights & Biases for metrics, images, and videos.
+- 📊 **Experiment tracking** - Native integration with Weights & Biases and MLflow for metrics, images, and videos.
 - 🕒 **Performance profiling** - `@goggles.timeit` decorator for automatic runtime measurement.
 - 🐞 **Error tracing** - `@goggles.trace_on_error` auto-logs full stack traces on exceptions.
 - 🧠 **Device-resident histories** - JAX-based GPU memory management for efficient, long-running experiments metrics.
@@ -44,6 +44,9 @@ uv add robo-goggles # or pip install robo-goggles
 
 # With Weights & Biases support
 uv add "robo-goggles[wandb]"
+
+# With MLflow support
+uv add "robo-goggles[mlflow]"
 
 # With JAX device-resident histories
 uv add "robo-goggles[jax]"
@@ -118,6 +121,48 @@ logger.video(video, name="sample_video", fps=10, step=100)
 gg.finish()
 ```
 
+### Experiment tracking with MLflow
+
+The `MLflowHandler` mirrors the W&B handler — one MLflow run per scope —
+but logs through the MLflow tracking API, so the data is viewable over a
+URL in the MLflow UI. Point it at a remote tracking server to stream
+metrics off-box as they are logged (no Goggles cross-machine transport
+needed — the handler is just an MLflow client):
+
+```python
+import goggles as gg
+import numpy as np
+
+logger = gg.get_logger("experiment", with_metrics=True)
+gg.attach(
+    gg.MLflowHandler(
+        experiment="my_project",
+        # Local: a sqlite store you can browse with `mlflow ui`.
+        # Remote: tracking_uri="http://<server>:5000" streams there live.
+        tracking_uri="sqlite:///mlflow.db",
+        run_name="run_1",
+        params={"lr": 3e-4},
+        tags={"stage": "demo"},
+    ),
+)
+
+for step in range(100):
+    logger.scalar("loss", np.random.random(), step=step)
+logger.image(
+    np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8),
+    name="sample_image",
+    step=100,
+)
+
+gg.finish()
+# Browse: mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
+```
+
+> [!NOTE]
+> As of MLflow 3 the bare `./mlruns` file store is in maintenance mode and
+> rejected by default; use a database backend such as `sqlite:///mlflow.db`
+> (or a remote tracking server) as shown above.
+
 ### Performance profiling and error tracking
 
 ```python
@@ -162,11 +207,11 @@ goggles.save_configuration(config, "output.yaml")
 
 ### Supported Platforms 💻
 
-| Platform | Basic | W&B | JAX/GPU | Development |
-|----------|-------|-----|---------|-------------|
-| Linux    | ✅    | ✅   | ✅      | ✅          |
-| macOS    | ✅    | ✅   | ✅      | ✅          |
-| Windows  | ✅    | ✅   | ❌      | ✅          |
+| Platform | Basic | W&B | MLflow | JAX/GPU | Development |
+|----------|-------|-----|--------|---------|-------------|
+| Linux    | ✅    | ✅   | ✅      | ✅      | ✅          |
+| macOS    | ✅    | ✅   | ✅      | ✅      | ✅          |
+| Windows  | ✅    | ✅   | ✅      | ❌      | ✅          |
 
 *GPU support requires CUDA-compatible hardware and drivers*
 
@@ -189,6 +234,9 @@ uv run examples/04_wandb.py
 
 # Advanced: Weights & Biases multi-run setup
 uv run examples/05_wandb_multiple_runs.py
+
+# MLflow integration (local sqlite store + `mlflow ui`, or a remote server)
+uv run examples/11_mlflow.py
 
 # Advanced: Custom handler
 uv run examples/06_custom_handler.py

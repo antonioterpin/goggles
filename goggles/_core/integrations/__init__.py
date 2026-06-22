@@ -19,8 +19,9 @@ from .storage import LocalStorageHandler
 
 if TYPE_CHECKING:
     # Static analyzers can't see the runtime __getattr__ + find_spec dance,
-    # so import the symbol unconditionally for type checking. At runtime,
-    # the import is gated on the wandb extra being installed.
+    # so import the symbols unconditionally for type checking. At runtime,
+    # each import is gated on its optional extra being installed.
+    from .mlflow import MLflowHandler  # noqa: F401
     from .wandb import WandBHandler  # noqa: F401
 
 __all__: list[str] = [
@@ -31,9 +32,15 @@ __all__: list[str] = [
 if find_spec("wandb") is not None:
     __all__.append("WandBHandler")
 
+if find_spec("mlflow") is not None:
+    __all__.append("MLflowHandler")
+
 
 def __getattr__(name: str) -> Any:
     if name == "WandBHandler":
         module = import_module(".wandb", __name__)
         return module.WandBHandler
+    if name == "MLflowHandler":
+        module = import_module(".mlflow", __name__)
+        return module.MLflowHandler
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
