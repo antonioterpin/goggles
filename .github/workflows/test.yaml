@@ -30,7 +30,7 @@ jobs:
             # Step 4: Install dependencies (+ JAX cpu version)
             - name: Install dependencies
               run: |
-                uv sync --extra dev --extra jax --extra wandb
+                uv sync --extra dev --extra jax --extra wandb --extra mlflow
                 uv pip install -e .
 
             # Step 5: Run tests
