@@ -15,12 +15,23 @@ import goggles as gg
 #    `mlflow ui` and open http://localhost:5000 -- see the command printed
 #    when this script runs.
 #
-# 2. Remote tracking server: point the handler at a running MLflow server
-#    and the metrics stream there live, viewable by anyone at that URL:
+# 2. Remote tracking server: run a server on the remote machine and point
+#    the handler at it; metrics stream there live, viewable at that URL:
+#        # On the remote machine. MLFLOW_SERVER_ALLOWED_HOSTS="*" is
+#        # required to reach the UI from another machine (over an SSH
+#        # tunnel or by IP): MLflow 3 otherwise rejects off-host requests
+#        # with "Invalid Host header - possible DNS rebinding attack".
+#        MLFLOW_SERVER_ALLOWED_HOSTS="*" mlflow server \
+#            --backend-store-uri sqlite:///mlflow.db \
+#            --host 0.0.0.0 --port 5000
+#        # In your training code:
 #        gg.MLflowHandler(
 #            experiment="goggles-example",
 #            tracking_uri="http://<server>:5000",
 #        )
+#        # View from your laptop, either:
+#        #   ssh -L 5000:localhost:5000 <user>@<server>  # then localhost:5000
+#        #   or open http://<server-ip>:5000 directly
 
 store_dir = Path("examples/logs/mlflow")
 store_dir.mkdir(parents=True, exist_ok=True)
