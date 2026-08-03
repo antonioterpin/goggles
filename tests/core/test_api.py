@@ -255,6 +255,69 @@ def test_configure_replaces_existing_console_handler() -> None:
         gg.finish()
 
 
+def test_configure_is_exported_from_package_root() -> None:
+    """configure() belongs to the documented public surface."""
+    assert "configure" in gg.__all__, (
+        "configure must be listed in goggles.__all__ to be public"
+    )
+    assert callable(getattr(gg, "configure", None)), (
+        "configure must be importable from the goggles package root"
+    )
+
+
+def test_configure_uses_custom_handler_name() -> None:
+    """configure(name=...) registers the console under that name."""
+    gg.finish()
+    try:
+        gg.configure(enable_console=True, name="app.console")
+        handlers = _bus_handlers()
+        assert "app.console" in handlers, (
+            "configure(name='app.console') must register the console "
+            f"handler under that name; saw {sorted(handlers)}"
+        )
+        assert gg.ConsoleHandler.name not in handlers, (
+            "A custom name must replace the class default, not be "
+            f"registered alongside '{gg.ConsoleHandler.name}'"
+        )
+    finally:
+        gg.finish()
+
+
+def test_configure_replaces_console_handler_with_custom_name() -> None:
+    """A second configure(name=...) call swaps that named handler."""
+    gg.finish()
+    try:
+        gg.configure(
+            enable_console=True,
+            name="app.console",
+            console_level=logging.INFO,
+        )
+        first = _bus_handlers()["app.console"]
+        gg.configure(
+            enable_console=True,
+            name="app.console",
+            console_level=logging.WARNING,
+        )
+        consoles = [
+            h
+            for h in _bus_handlers().values()
+            if isinstance(h, gg.ConsoleHandler)
+        ]
+        assert len(consoles) == 1, (
+            f"Reconfigure under a custom name must keep exactly one "
+            f"console handler; saw {len(consoles)}"
+        )
+        assert consoles[0] is not first, (
+            "Reconfigure must install a new ConsoleHandler instance "
+            "under the custom name"
+        )
+        assert consoles[0].level == logging.WARNING, (
+            f"The last configure() call must win (saw {consoles[0].level})"
+        )
+    finally:
+        gg.finish()
+
+
 def test_class_level_logger_does_not_hang_on_first_info() -> None:
     """Logger captured at class-body scope must not hang on first .info().
 

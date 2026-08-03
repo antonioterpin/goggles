@@ -82,6 +82,26 @@ See also [Example 1](./examples/01_basic_run.py), which you can run after clonin
 uv run examples/01_basic_run.py
 ```
 
+### Idempotent console setup
+
+`gg.configure()` is a one-call shortcut for the console-only setup above, and the only handler-setup path where the **last call wins**: it detaches the console handler already attached to each target scope before attaching a fresh one, so the most recent options take effect. `gg.attach()` instead dedupes by handler name and silently keeps the first handler registered.
+
+```python
+import goggles as gg
+import logging
+
+# Attaches a ConsoleHandler on the "global" scope.
+gg.configure(enable_console=True, console_level=logging.INFO)
+
+# A later call wins: the handler above is replaced, not deduped.
+gg.configure(enable_console=True, console_level=logging.WARNING)
+
+# Namespace the handler when your application owns its own console.
+gg.configure(enable_console=True, name="myapp.console", scopes=["global"])
+```
+
+Prefer `configure()` over `attach()` when several call sites — or several processes sharing one host, see [Multi-process logging](#multi-process-logging-same-machine) — may set up the console and must converge on a single configuration regardless of arrival order; use `attach()` with explicit handler instances for everything else. Calling `gg.configure()` with no arguments is a no-op, so it is safe to invoke unconditionally during initialization.
+
 ### Experiment tracking with W&B
 
 ```python

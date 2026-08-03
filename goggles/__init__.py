@@ -1029,6 +1029,7 @@ def configure(
     console_path_style: Literal["absolute", "relative"] = "relative",
     project_root: str | os.PathLike[str] | None = None,
     scopes: list[str] | None = None,
+    name: str | None = None,
 ) -> None:
     """One-call shortcut for the common "I just want a console logger" setup.
 
@@ -1047,8 +1048,12 @@ def configure(
 
     Calling ``configure(enable_console=True, ...)`` while a console handler
     is already attached to the target ``scopes`` re-attaches a fresh handler
-    with the new options (the old one is detached first), so the second call
-    wins instead of being silently deduped by name.
+    with the new options (the old one is detached first), so the **last call
+    wins** instead of being silently deduped by name. This makes it the
+    setup path of choice for multi-process applications, where several
+    processes race to configure the shared bus and must converge on one
+    console configuration regardless of arrival order -- unlike ``attach``,
+    which keeps the first handler registered under a given name.
 
     Args:
         enable_console: When True, attach a default ``ConsoleHandler``
@@ -1063,11 +1068,17 @@ def configure(
             to the current working directory.
         scopes: Scopes under which to attach the console handler.
             Defaults to ``["global"]``.
+        name: Identifier of the console handler to replace and attach,
+            for applications that namespace their handlers (e.g.
+            ``"myapp.console"``). Defaults to the ``ConsoleHandler``
+            class default.
     """
     if not enable_console:
         return
     if scopes is None:
         scopes = ["global"]
+    if name is None:
+        name = ConsoleHandler.name
 
     # Replace any existing console handler so a second `configure(...)` call
     # with new options actually takes effect (`attach()` dedupes by name and
@@ -1078,12 +1089,13 @@ def configure(
     # handler is not attached.
     for s in scopes:
         try:
-            detach(ConsoleHandler.name, s)
+            detach(name, s)
         except ValueError:
             # Not attached here (in-process bus); nothing to detach.
             pass
 
     handler = ConsoleHandler(
+        name=name,
         level=console_level,
         path_style=console_path_style,
         project_root=Path(project_root) if project_root is not None else None,
@@ -1230,6 +1242,7 @@ __all__ = [
     "Video",
     "WandBHandler",
     "attach",
+    "configure",
     "detach",
     "filters",
     "finish",
