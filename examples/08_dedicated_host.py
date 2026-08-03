@@ -20,6 +20,8 @@ from pathlib import Path
 
 import goggles as gg
 
+STORAGE_HANDLER_NAME = "examples.dedicated_host.storage"
+
 
 def main() -> None:
     """Log a few events; the handler runs in the dedicated host subprocess."""
@@ -31,7 +33,7 @@ def main() -> None:
 
     gg.attach(
         gg.LocalStorageHandler(
-            path=Path("examples/logs/dedicated"), name="local"
+            path=Path("examples/logs/dedicated"), name=STORAGE_HANDLER_NAME
         ),
         scopes=["global"],
     )

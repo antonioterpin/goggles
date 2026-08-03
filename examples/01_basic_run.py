@@ -1,9 +1,14 @@
 import goggles as gg
 
+# A handler name is the bus-wide identity of a destination, so define it
+# once here rather than retyping the string at every attach call site.
+CONSOLE_HANDLER_NAME = "examples.basic.console"
+DEBUG_CONSOLE_HANDLER_NAME = "examples.basic.debug_console"
+
 # In this basic example, we set up a logger that outputs to the console.
 logger = gg.get_logger("examples.basic")
 gg.attach(
-    gg.ConsoleHandler(name="examples.basic.console", level=gg.INFO),
+    gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO),
     scopes=["global"],
 )
 
@@ -18,7 +23,7 @@ logger.critical("This is critical!")
 
 # Lowering handler log level makes debug messages visible.
 gg.attach(
-    gg.ConsoleHandler(name="examples.basic.debug_console", level=gg.DEBUG),
+    gg.ConsoleHandler(name=DEBUG_CONSOLE_HANDLER_NAME, level=gg.DEBUG),
     scopes=["global"],
 )
 

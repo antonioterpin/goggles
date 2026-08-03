@@ -120,6 +120,17 @@ Adding a new handler: subclass an existing handler or implement the
 `register_handler()` so it can be serialized for transport across the
 bus.
 
+#### Handler names are the bus-wide dedup key
+
+`EventBus.attach` keys its handler registry by `handler.name`, and there
+is one bus per socket shared by every process on it (§4). A name is
+therefore global application state, not a local label: the first
+registration under a name wins, later ones are dropped silently and only
+their scopes merge onto the incumbent. Use one name per output
+destination and define it once as a module-level constant shared across
+entry points. See [Handler naming](../../README.md#handler-naming) in
+the README for the user-facing guidance.
+
 ### 4. Transport (`_core/transport/`)
 
 See [transport.md](transport.md) for the package layout (frames,
