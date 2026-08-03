@@ -24,6 +24,22 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   construction. The name defaults to `"wandb"` and now round-trips through
   `to_dict()`/`from_dict()`; serialized payloads without it (older clients
   attaching to a newer host) still rebuild with the default.
+- **`attach()` now warns when a handler-name conflict silently drops a
+  configuration.** Handlers are keyed by `handler.name` and the first writer
+  wins, so attaching a second handler under a name that is already registered
+  discarded the newcomer -- its level, project, path and every other setting --
+  while still merging its scopes onto the *first* instance. That happened
+  silently, so a mistyped (or copy-pasted) name looked like it worked and then
+  logged with somebody else's configuration. The bus now emits a warning that
+  names the handler, lists only the config keys that actually differ (or
+  reports that the handler *class* differs), and states that the first
+  registration is kept. Re-attaching an identical configuration remains the
+  intended idempotent case and stays completely silent. The warning goes to
+  the host's stderr -- the same stream `ConsoleHandler` output and the other
+  host diagnostics already use -- so it is visible by default in the
+  dedicated-host setup (and follows `GOGGLES_HOST_LOG` when that is set).
+  Behavior is otherwise unchanged: the first handler still wins, scopes are
+  still merged, and no exception is raised.
 
 ## [0.3.0] - 2026-06-10
 

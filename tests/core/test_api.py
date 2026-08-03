@@ -408,6 +408,149 @@ def test_eventbus_emit_ignores_unknown_scope():
 
 
 # ---------------------------------------------------------------------
+# attach() handler-name conflicts
+# ---------------------------------------------------------------------
+
+
+class ConflictHandler:
+    """Handler whose serialized config the test controls key by key."""
+
+    name: str = "conflict"
+    capabilities: ClassVar[frozenset[gg.Kind]] = frozenset({"log"})
+
+    def __init__(self, name="conflict", level=logging.INFO, path="logs"):
+        self.name = name
+        self.level = level
+        self.path = path
+
+    def can_handle(self, kind):
+        return True
+
+    def handle(self, event):
+        pass
+
+    def open(self):
+        pass
+
+    def close(self):
+        pass
+
+    def to_dict(self):
+        return {
+            "cls": type(self).__name__,
+            "data": {
+                "name": self.name,
+                "level": self.level,
+                "path": self.path,
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, serialized):
+        return cls(**serialized)
+
+
+class OtherConflictHandler(ConflictHandler):
+    """A second handler class serializing under the same config keys."""
+
+
+def _stderr_lines(capsys) -> list[str]:
+    """Non-empty stderr lines captured so far."""
+    return [line for line in capsys.readouterr().err.splitlines() if line]
+
+
+def test_attach_identical_config_twice_is_silent(capsys) -> None:
+    """Re-attaching the very same config is the idempotent case."""
+    gg.register_handler(ConflictHandler)
+    bus = gg.EventBus()
+    handler = ConflictHandler(name="dup", level=logging.INFO)
+
+    bus.attach([handler.to_dict()], scopes=["a"])
+    bus.attach([handler.to_dict()], scopes=["a"])
+
+    assert _stderr_lines(capsys) == [], (
+        "Re-attaching an identical handler config must stay silent"
+    )
+    assert list(bus.handlers) == ["dup"], (
+        "An identical re-attach must not register a second handler"
+    )
+
+
+def test_attach_conflicting_level_warns_and_keeps_first(capsys) -> None:
+    """A differing config under a known name warns and changes nothing."""
+    gg.register_handler(ConflictHandler)
+    bus = gg.EventBus()
+    first = ConflictHandler(name="dup", level=logging.INFO)
+    second = ConflictHandler(name="dup", level=logging.DEBUG)
+
+    bus.attach([first.to_dict()], scopes=["a"])
+    bus.attach([second.to_dict()], scopes=["b"])
+
+    warnings = _stderr_lines(capsys)
+    assert len(warnings) == 1, (
+        f"Expected exactly one conflict warning, got {warnings}"
+    )
+    assert "dup" in warnings[0], "The warning must name the handler"
+    assert "level" in warnings[0], (
+        "The warning must list the config key that differs"
+    )
+    assert "path" not in warnings[0], (
+        "The warning must not list config keys that are identical"
+    )
+    assert "first" in warnings[0], (
+        "The warning must say the first registration is kept"
+    )
+    assert cast(Any, bus.handlers["dup"]).level == logging.INFO, (
+        "The first registration must stay in effect"
+    )
+    assert bus.scopes["b"] == {"dup"}, (
+        "The second attach's scopes must still be merged"
+    )
+
+
+def test_attach_different_names_same_scope_does_not_warn(capsys) -> None:
+    """Distinct names sharing a scope are not a conflict."""
+    gg.register_handler(ConflictHandler)
+    bus = gg.EventBus()
+    first = ConflictHandler(name="one", level=logging.INFO)
+    second = ConflictHandler(name="two", level=logging.DEBUG)
+
+    bus.attach([first.to_dict(), second.to_dict()], scopes=["a"])
+
+    assert _stderr_lines(capsys) == [], "Different handler names must not warn"
+    assert set(bus.handlers) == {"one", "two"}, (
+        "Both handlers should be registered under their own names"
+    )
+    assert bus.scopes["a"] == {"one", "two"}, (
+        "Both handlers should be routed under the shared scope"
+    )
+
+
+def test_attach_conflicting_class_reports_the_class(capsys) -> None:
+    """A same-named handler of another class reports the class itself."""
+    gg.register_handler(ConflictHandler)
+    gg.register_handler(OtherConflictHandler)
+    bus = gg.EventBus()
+    first = ConflictHandler(name="dup")
+    second = OtherConflictHandler(name="dup")
+
+    bus.attach([first.to_dict()], scopes=["a"])
+    bus.attach([second.to_dict()], scopes=["a"])
+
+    warnings = _stderr_lines(capsys)
+    assert len(warnings) == 1, (
+        f"Expected exactly one conflict warning, got {warnings}"
+    )
+    assert "dup" in warnings[0], "The warning must name the handler"
+    assert "class" in warnings[0], (
+        "A differing handler class must be reported as such"
+    )
+    assert type(bus.handlers["dup"]) is ConflictHandler, (
+        "The first registration must stay in effect"
+    )
+
+
+# ---------------------------------------------------------------------
 # LocalStorageHandler I/O
 # ---------------------------------------------------------------------
 
