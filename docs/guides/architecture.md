@@ -46,7 +46,7 @@ public surface is (see [goggles/__init__.py](../../goggles/__init__.py)):
 - Event model: `Event`, `Kind`, `Metrics`, `Image`, `Video`,
   `Vector`, `VectorField`
 - Handlers: `ConsoleHandler`, `LocalStorageHandler`, `WandBHandler`
-- Bus management: `attach`, `detach`, `register_handler`
+- Bus management: `attach`, `configure`, `detach`, `register_handler`
 - Decorators: `timeit`, `trace_on_error`
 - Config: `PrettyConfig`, `load_configuration`, `save_configuration`
 - Shutdown: `GracefulShutdown`

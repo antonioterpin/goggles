@@ -9,6 +9,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- **`gg.configure()` is public and can target a custom handler name.** The
+  idempotent console setup was reachable but absent from `goggles.__all__`
+  and undocumented; it is now part of the public surface and covered in the
+  README. Its new `name=` argument selects which console handler to replace
+  and attach (defaulting to the `ConsoleHandler` class default, so existing
+  callers are unaffected), so applications that namespace their handlers
+  (e.g. `"myapp.console"`) also get the last-call-wins semantics. (#224)
 - **`WandBHandler` accepts a custom handler name.** The event bus keys handlers
   by name (one host bus per socket, shared across processes), so two
   `WandBHandler`s could never coexist: the second one -- project and all -- was

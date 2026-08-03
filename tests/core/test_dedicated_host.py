@@ -315,6 +315,22 @@ def test_configure_replaces_console_under_dedicated_host(
         gg.finish(timeout=10.0)
 
 
+def test_configure_detaches_custom_console_name_under_dedicated_host(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The detach that makes the last configure() win must target the
+    # caller's handler name, not the class default -- otherwise an app that
+    # namespaces its console handler never replaces anything.
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(gg, "detach", lambda n, s: calls.append((n, s)))
+    try:
+        gg.configure(enable_console=True, name="app.console", scopes=["global"])
+        assert ("app.console", "global") in calls
+        assert (gg.ConsoleHandler.name, "global") not in calls
+    finally:
+        gg.finish(timeout=10.0)
+
+
 def test_falls_back_to_in_process_host_when_spawn_raises(
     default_host_socket: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
