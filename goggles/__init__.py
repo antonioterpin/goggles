@@ -32,6 +32,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import sys
 import threading
 from collections import defaultdict
 from collections.abc import Callable
@@ -810,6 +811,108 @@ class Handler(Protocol):
 # ---------------------------------------------------------------------------
 # EventBus and run management
 # ---------------------------------------------------------------------------
+
+# Longest config value inlined in a conflict warning; longer ones are elided.
+_MAX_REPORTED_VALUE_CHARS = 40
+
+_UNSET = object()
+
+
+def _short_repr(value: object) -> str:
+    """Render a handler config value compactly.
+
+    Args:
+        value: The value to render.
+
+    Returns:
+        The value's repr, or a placeholder when the key is absent from the
+        config or its repr is too long to inline in a warning.
+
+    """
+    if value is _UNSET:
+        text = "<unset>"
+    else:
+        text = repr(value)
+        if len(text) > _MAX_REPORTED_VALUE_CHARS:
+            text = "<omitted>"
+    return text
+
+
+def _differing_config_keys(kept: dict, ignored: dict) -> list[str]:
+    """List the keys whose values differ between two handler configs.
+
+    Args:
+        kept: Config data of the handler that stays registered.
+        ignored: Config data of the handler that is dropped.
+
+    Returns:
+        One short description per differing key.
+
+    """
+    differences = []
+    for key in sorted(set(kept) | set(ignored)):
+        old = kept.get(key, _UNSET)
+        new = ignored.get(key, _UNSET)
+        if old != new:
+            differences.append(
+                f"{key} (kept {_short_repr(old)}, ignored {_short_repr(new)})"
+            )
+    return differences
+
+
+def _describe_handler_conflict(kept: dict, ignored: dict) -> str | None:
+    """Describe how a dropped handler differs from the registered one.
+
+    Args:
+        kept: Serialized form of the already-registered handler.
+        ignored: Serialized handler that is about to be dropped.
+
+    Returns:
+        A short description of the difference, or None when the two
+        serialized handlers are identical.
+
+    """
+    description = None
+    if kept.get("cls") != ignored.get("cls"):
+        description = (
+            f"handler class differs (kept {kept.get('cls')!r}, "
+            f"ignored {ignored.get('cls')!r})"
+        )
+    else:
+        keys = _differing_config_keys(
+            kept.get("data") or {}, ignored.get("data") or {}
+        )
+        if keys:
+            description = "config differs in " + "; ".join(keys)
+    return description
+
+
+def _warn_handler_conflict(registered: Handler, incoming: dict) -> None:
+    """Warn on stderr that a differing same-named handler was dropped.
+
+    Stays silent when the incoming handler serializes exactly like the
+    registered one, which is the intended idempotent re-attach.
+
+    The bus usually runs in the dedicated host process, which inherits the
+    application's stderr (or ``GOGGLES_HOST_LOG``), so stderr is where the
+    host's other diagnostics already surface.
+
+    Args:
+        registered: The handler already registered under this name.
+        incoming: Serialized handler that ``attach`` is dropping.
+
+    """
+    difference = _describe_handler_conflict(registered.to_dict(), incoming)
+    if difference is not None:
+        print(
+            f"goggles: attach() name conflict for handler "
+            f"'{registered.name}': {difference}. Keeping the first "
+            f"registration; the new configuration is ignored.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 class EventBus:
     """Process-wide event router.
 
@@ -884,6 +987,11 @@ class EventBus:
     def attach(self, handlers: list[dict], scopes: list[str]) -> None:
         """Attach handler(s) under the given scopes.
 
+        Handlers are keyed by name, first writer wins: attaching a differing
+        configuration under an already-registered name keeps the first
+        handler and warns on stderr, while still merging the given scopes.
+        Re-attaching an identical configuration is silent.
+
         Args:
             handlers:
                 The serialized handlers to attach to the scopes.
@@ -894,17 +1002,19 @@ class EventBus:
             handler_class = _get_handler_class(handler_dict["cls"])
             handler = handler_class.from_dict(handler_dict["data"])
             with self._lock:
-                newly_added = handler.name not in self.handlers
-                if newly_added:
+                registered = self.handlers.get(handler.name)
+                if registered is None:
                     self.handlers[handler.name] = handler
                 for scope in scopes:
                     if scope not in self.scopes:
                         self.scopes[scope] = set()
                     self.scopes[scope].add(handler.name)
-            if newly_added:
+            if registered is None:
                 # Call handler.open() outside the lock: it may do I/O
                 # (e.g. open a wandb run) and must not block readers.
                 handler.open()
+            else:
+                _warn_handler_conflict(registered, handler_dict)
 
     def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
