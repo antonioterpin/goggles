@@ -82,6 +82,31 @@ See also [Example 1](./examples/01_basic_run.py), which you can run after clonin
 uv run examples/01_basic_run.py
 ```
 
+### Handler naming
+
+Every handler carries a `name`, and the event bus identifies it by that name alone. There is a single bus per `GOGGLES_SOCKET`, shared by every process that connects to it, so **handler names are global to your whole application** — not per module, not per process. Give each output destination exactly one name, and define those names once as module-level constants that every entry point imports, rather than retyping a string at each `attach` call site.
+
+```python
+# myapp/logging_setup.py -- one definition, imported everywhere
+CONSOLE_HANDLER_NAME = "myapp.console"
+STORAGE_HANDLER_NAME = "myapp.storage"
+```
+
+```python
+# any entry point: trainer, evaluator, dataloader worker, ...
+from myapp.logging_setup import CONSOLE_HANDLER_NAME
+
+gg.attach(
+    gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO),
+    scopes=["global"],
+)
+```
+
+> [!WARNING]
+> **On a name conflict the first registration wins, silently.** Attaching a handler under a name the bus already knows neither replaces it nor raises: the later instance — with its own level, path, project, ... — is ignored, and only its `scopes` are merged onto the handler already registered under that name. So two names for one destination duplicate that destination's output, while one name for two different configurations keeps whichever process attached first.
+
+Names and scopes are independent: the name decides *which handler instance* the bus keeps, the scopes decide *which events reach it*. Re-attaching the same name under new scopes is therefore the supported way to widen an existing handler's routing.
+
 ### Idempotent console setup
 
 `gg.configure()` is a one-call shortcut for the console-only setup above, and the only handler-setup path where the **last call wins**: it detaches the console handler already attached to each target scope before attaching a fresh one, so the most recent options take effect. `gg.attach()` instead dedupes by handler name and silently keeps the first handler registered.
@@ -251,18 +276,24 @@ Within the same run, we may have logs that belong to different scopes. An exampl
 #### Usage
 
 ```python
-# In this example, we set up a handlers associated
-# to different scopes.
-handler1 = gg.ConsoleHandler(name="examples.basic.console.1", level=logging.INFO)
+# In this example, we set up a handlers associated to different scopes.
+# Handler names are bus-wide identities, so we define them once
+# (see "Handler naming" above).
+HANDLER1_NAME = "examples.multi_scope.console.1"
+HANDLER2_NAME = "examples.multi_scope.console.2"
+
+handler1 = gg.ConsoleHandler(name=HANDLER1_NAME, level=logging.INFO)
 gg.attach(handler1, scopes=["global", "scope1"])
 
-handler2 = gg.ConsoleHandler(name="examples.basic.console.2", level=logging.INFO)
+handler2 = gg.ConsoleHandler(name=HANDLER2_NAME, level=logging.INFO)
 gg.attach(handler2, scopes=["global", "scope2"])
 
 # We need to get separate loggers for each scope
 logger_scope1 = gg.get_logger("examples.basic.scope1", scope="scope1")
 logger_scope2 = gg.get_logger("examples.basic.scope2")
-logger_scope2.bind(scope="scope2")  # You can also bind the scope after creation
+# `bind` returns a new logger, it does not mutate the receiver: the
+# result has to be assigned for the new scope to take effect.
+logger_scope2 = logger_scope2.bind(scope="scope2")
 logger_global = gg.get_logger("examples.basic.global", scope="global")
 
 # Now we can log messages to different scopes, so that only the interested
@@ -271,9 +302,11 @@ logger_scope1.info(f"This will be logged only by {handler1.name}")
 logger_scope2.info(f"This will be logged only by {handler2.name}")
 logger_global.info("This will be logged by both handlers.")
 
-# The same result can be achieved using namespaces,
-# which are indicated by dot notation.
-logger_namespace = gg.get_logger("examples.basic.namespace", scope="namespace")
+# Scopes are hierarchical, with the levels indicated by dot notation, so a
+# child scope also reaches the handlers attached to its parent.
+logger_namespace = gg.get_logger(
+    "examples.basic.namespace", scope="global.namespace"
+)
 logger_namespace.info("This will be logged by both handlers.")
 
 gg.finish()

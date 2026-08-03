@@ -2,11 +2,13 @@ import logging
 
 import goggles as gg
 
+CONSOLE_HANDLER_NAME = "examples.levels.console"
+
 # A console handler that lets DEBUG and above through. Per-logger level
 # filtering happens *before* the handler, so the handler stays permissive
 # and each logger decides what it emits.
 gg.attach(
-    gg.ConsoleHandler(name="examples.levels.console", level=gg.DEBUG),
+    gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.DEBUG),
     scopes=["global"],
 )
 

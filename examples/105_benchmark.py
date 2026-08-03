@@ -106,6 +106,8 @@ os.environ["PYTHONPATH"] = (
 
 from _benchmark_handlers import DeliveryCounter  # noqa: E402
 
+CONSOLE_HANDLER_NAME = "examples.benchmark.console"
+
 # ``_logger`` is populated inside the per-preset subprocess (see
 # ``_run_benchmark``). Creating it at module import would make the parent
 # Hydra process bind the goggles socket, which subsequently spawned
@@ -516,7 +518,7 @@ def _run_benchmark(cfg: DictConfig) -> None:
 
     gg.attach(
         gg.ConsoleHandler(
-            name="goggles.benchmark.console",
+            name=CONSOLE_HANDLER_NAME,
             level=gg.INFO,
         ),
         scopes=["goggles.benchmark"],

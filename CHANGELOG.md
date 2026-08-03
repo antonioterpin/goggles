@@ -24,6 +24,31 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   construction. The name defaults to `"wandb"` and now round-trips through
   `to_dict()`/`from_dict()`; serialized payloads without it (older clients
   attaching to a newer host) still rebuild with the default.
+- **Handler naming is documented as the bus-wide dedup key.** A new
+  "Handler naming" section in the README (cross-referenced from
+  [docs/guides/architecture.md](docs/guides/architecture.md) §3) spells out
+  what was previously only implicit: `attach` keys handlers by `name` on the
+  single bus shared by every process on a socket, so a name is global
+  application state -- one name per output destination, defined once as a
+  module-level constant and shared across entry points. On a conflict the
+  first registration wins silently and only the later handler's scopes are
+  merged onto it.
+
+### Fixed
+
+- **README multi-scope example routed to the wrong handlers.** The snippet
+  called `logger_scope2.bind(scope="scope2")` without assigning the result --
+  `bind` returns a new logger and does not mutate the receiver -- so the
+  logger kept its original scope and its "logged only by handler2" line
+  reached *both* handlers. The neighbouring namespace line, emitted on a
+  scope with no attached handler, reached *none*. Both now do what the
+  surrounding text claims.
+- **Examples no longer share handler names across files.**
+  `examples/01_basic_run.py` and `examples/102_decorators.py` both attached
+  `"examples.basic.console"` but at different levels, so running both in one
+  session silently kept whichever attached first. Every example now declares
+  its handler names as module-level constants under a single
+  `examples.<topic>.<destination>` scheme.
 
 ## [0.3.0] - 2026-06-10
 

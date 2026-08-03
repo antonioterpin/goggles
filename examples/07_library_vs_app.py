@@ -38,6 +38,12 @@ def library_work():
 
 
 # ------------------ Application code (what an app would do) ------------------
+# The app owns the handler names: one per output destination, declared once
+# here so every entry point attaches under the very same identity.
+CONSOLE_HANDLER_NAME = "examples.app.console"
+STORAGE_HANDLER_NAME = "examples.app.storage"
+
+
 def setup_logging(project_root: Path | str = "examples/logs") -> None:
     """Set up handlers for the application.
 
@@ -56,12 +62,15 @@ def setup_logging(project_root: Path | str = "examples/logs") -> None:
     project_root = Path(project_root)
     # Console for general messages (global)
     gg.attach(
-        gg.ConsoleHandler(name="app.console", level=gg.INFO), scopes=["global"]
+        gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO),
+        scopes=["global"],
     )
 
     # Local storage for library events (stored under examples/logs/library)
     gg.attach(
-        gg.LocalStorageHandler(path=project_root / "library", name="app.local"),
+        gg.LocalStorageHandler(
+            path=project_root / "library", name=STORAGE_HANDLER_NAME
+        ),
         scopes=[LIBRARY_SCOPE],
     )
 

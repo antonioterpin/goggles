@@ -4,6 +4,10 @@ import numpy as np
 
 import goggles as gg
 
+# One name per output destination, defined once for the whole example.
+STORAGE_HANDLER_NAME = "examples.jsonl.storage"
+CONSOLE_HANDLER_NAME = "examples.jsonl.console"
+
 # In this example, we set up a logger that stores events
 # in a structured directory:
 # - examples/logs/log.jsonl: Main JSONL log file with all events
@@ -20,11 +24,11 @@ logger = gg.get_logger("examples.jsonl", with_metrics=True)
 gg.attach(
     gg.LocalStorageHandler(
         path=Path("examples/logs"),
-        name="examples.jsonl",
+        name=STORAGE_HANDLER_NAME,
     )
 )
 gg.attach(
-    gg.ConsoleHandler(name="examples.jsonl.console", level=gg.INFO),
+    gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO),
 )
 
 print("=== Goggles Local Storage Handler Example ===")
