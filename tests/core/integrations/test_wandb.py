@@ -13,6 +13,7 @@ import wandb as _real_wandb
 from wandb.proto import wandb_internal_pb2 as pb
 from wandb.sdk.internal.datastore import DataStore
 
+import goggles as gg
 import goggles._core.integrations.wandb as wandb_module
 from goggles._core.integrations.wandb import WandBHandler
 
@@ -281,6 +282,95 @@ def test_wandb_init_kwargs_roundtrip_serialization(mock_wandb):
         reinit="create_new",
         save_code=True,
         settings={"code_dir": "."},
+    )
+
+
+def test_default_handler_name(mock_wandb):
+    """The handler keeps the default name when none is supplied.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="proj")
+
+    assert h.name == "wandb", (
+        "Omitting 'name' must preserve the default handler name"
+    )
+
+
+def test_custom_handler_name(mock_wandb):
+    """The constructor stores a caller-provided handler name.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="proj", name="wandb.eval")
+
+    assert h.name == "wandb.eval", (
+        "Constructor must store the custom handler name"
+    )
+
+
+def test_name_roundtrips_through_to_dict(mock_wandb):
+    """A custom name survives to_dict/from_dict serialization.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    h = WandBHandler(project="proj", name="wandb.eval")
+
+    serialized = h.to_dict()
+    restored = WandBHandler.from_dict(serialized)
+
+    assert serialized["data"]["name"] == "wandb.eval", (
+        "to_dict() must serialize the handler name"
+    )
+    assert restored.name == "wandb.eval", (
+        "from_dict() must restore the serialized handler name"
+    )
+
+
+def test_from_dict_without_name_uses_default(mock_wandb):
+    """Payloads predating the ``name`` field rebuild with the default.
+
+    Older clients attaching to a newer host ship no ``name`` key.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    restored = WandBHandler.from_dict({"project": "proj"})
+
+    assert restored.name == "wandb", (
+        "from_dict() must fall back to the default name when absent"
+    )
+
+
+def test_distinct_names_coexist_on_bus(mock_wandb):
+    """Two W&B handlers with distinct names both register on a bus.
+
+    The bus dedups handlers by name, so identically named handlers
+    would collapse into a single registration.
+
+    Args:
+        mock_wandb: Patched ``wandb`` module fixture.
+    """
+    bus = gg.EventBus()
+    train = WandBHandler(project="train", name="wandb.train")
+    evaluation = WandBHandler(project="eval", name="wandb.eval")
+
+    bus.attach([train.to_dict(), evaluation.to_dict()], scopes=["global"])
+
+    assert set(bus.handlers) == {"wandb.train", "wandb.eval"}, (
+        "Both distinctly named handlers must register on the bus"
+    )
+    assert bus.scopes["global"] == {"wandb.train", "wandb.eval"}, (
+        "Both handlers must be routed under the attached scope"
+    )
+    assert bus.handlers["wandb.train"]._project == "train", (
+        "Each registered handler must keep its own configuration"
+    )
+    assert bus.handlers["wandb.eval"]._project == "eval", (
+        "Each registered handler must keep its own configuration"
     )
 
 

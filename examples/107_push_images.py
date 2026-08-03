@@ -11,12 +11,15 @@ import goggles as gg
 # channel axis in {1, 3, 4}.
 
 LOG_DIR = Path("examples/logs/107_push")
+STORAGE_HANDLER_NAME = "examples.push.storage"
+CONSOLE_HANDLER_NAME = "examples.push.console"
+
 logger = gg.get_logger("examples.push", with_metrics=True)
 gg.attach(
-    gg.LocalStorageHandler(path=LOG_DIR, name="examples.push"),
+    gg.LocalStorageHandler(path=LOG_DIR, name=STORAGE_HANDLER_NAME),
 )
 gg.attach(
-    gg.ConsoleHandler(name="examples.push.console", level=gg.INFO),
+    gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO),
 )
 
 print(f"=== writing logs to {LOG_DIR} ===\n")

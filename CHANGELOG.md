@@ -7,6 +7,78 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-03
+
+### Added
+
+- **`gg.configure()` is public and can target a custom handler name.** The
+  idempotent console setup was reachable but absent from `goggles.__all__`
+  and undocumented; it is now part of the public surface and covered in the
+  README. Its new `name=` argument selects which console handler to replace
+  and attach (defaulting to the `ConsoleHandler` class default, so existing
+  callers are unaffected), so applications that namespace their handlers
+  (e.g. `"myapp.console"`) also get the last-call-wins semantics. (#224)
+- **`WandBHandler` accepts a custom handler name.** The event bus keys handlers
+  by name (one host bus per socket, shared across processes), so two
+  `WandBHandler`s could never coexist: the second one -- project and all -- was
+  silently dropped. Pass `WandBHandler(..., name="wandb.eval")` to attach
+  several W&B handlers side by side instead of mutating `handler.name` after
+  construction. The name defaults to `"wandb"` and now round-trips through
+  `to_dict()`/`from_dict()`; serialized payloads without it (older clients
+  attaching to a newer host) still rebuild with the default.
+- **Handler naming is documented as the bus-wide dedup key.** A new
+  "Handler naming" section in the README (cross-referenced from
+  [docs/guides/architecture.md](docs/guides/architecture.md) §3) spells out
+  what was previously only implicit: `attach` keys handlers by `name` on the
+  single bus shared by every process on a socket, so a name is global
+  application state -- one name per output destination, defined once as a
+  module-level constant and shared across entry points. On a conflict the
+  first registration wins and only the later handler's scopes are merged
+  onto it.
+
+### Fixed
+
+- **README multi-scope example routed to the wrong handlers.** The snippet
+  called `logger_scope2.bind(scope="scope2")` without assigning the result --
+  `bind` returns a new logger and does not mutate the receiver -- so the
+  logger kept its original scope and its "logged only by handler2" line
+  reached *both* handlers. The neighbouring namespace line, emitted on a
+  scope with no attached handler, reached *none*. Both now do what the
+  surrounding text claims.
+- **Examples no longer share handler names across files.**
+  `examples/01_basic_run.py` and `examples/102_decorators.py` both attached
+  `"examples.basic.console"` but at different levels, so running both in one
+  session silently kept whichever attached first. Every example now declares
+  its handler names as module-level constants under a single
+  `examples.<topic>.<destination>` scheme.
+- **`attach()` now warns when a handler-name conflict silently drops a
+  configuration.** Handlers are keyed by `handler.name` and the first writer
+  wins, so attaching a second handler under a name that is already registered
+  discarded the newcomer -- its level, project, path and every other setting --
+  while still merging its scopes onto the *first* instance. That happened
+  silently, so a mistyped (or copy-pasted) name looked like it worked and then
+  logged with somebody else's configuration. The bus now emits a warning that
+  names the handler, lists only the config keys that actually differ (or
+  reports that the handler *class* differs), and states that the first
+  registration is kept. Re-attaching an identical configuration remains the
+  intended idempotent case and stays completely silent. The warning goes to
+  the host's stderr -- the same stream `ConsoleHandler` output and the other
+  host diagnostics already use -- so it is visible by default in the
+  dedicated-host setup (and follows `GOGGLES_HOST_LOG` when that is set).
+  Behavior is otherwise unchanged: the first handler still wins, scopes are
+  still merged, and no exception is raised.
+
+## [0.3.1] - 2026-06-11
+
+### Fixed
+
+- **Caller capture no longer pins frame stacks until the collector runs.**
+  `_caller_id()` held the frame returned by `inspect.currentframe()` in a
+  local, so the frame referenced itself -- a cycle refcounting cannot
+  reclaim, keeping the whole `f_back` chain (and everything its locals
+  reference) alive until a `gc` pass. The frame is now dropped on every
+  path. Only relevant when caller capture is on (`GOGGLES_CAPTURE_CALLER`).
+
 ## [0.3.0] - 2026-06-10
 
 ### Fixed

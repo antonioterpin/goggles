@@ -33,9 +33,11 @@ from goggles.filters import (
     create_concat_filter,
 )
 
+CONSOLE_HANDLER_NAME = "examples.filters.console"
+
 # Set up logging
 gg.attach(
-    gg.ConsoleHandler(name="examples.filters.console", level=gg.INFO),
+    gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO),
     scopes=["global"],
 )
 logger = gg.get_logger("examples.filters")

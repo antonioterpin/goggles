@@ -18,6 +18,8 @@ from typing import ClassVar
 import goggles as gg
 from goggles import Event, Kind
 
+COUNTER_HANDLER_NAME = "examples.benchmark.counter"
+
 
 class DeliveryCounter:
     """Counts events delivered to the host, persisting totals to a file.
@@ -32,7 +34,7 @@ class DeliveryCounter:
         capabilities: Event kinds this handler claims to handle.
     """
 
-    name = "goggles.benchmark.counter"
+    name = COUNTER_HANDLER_NAME
     capabilities: ClassVar[frozenset[Kind]] = frozenset(
         {
             "log",

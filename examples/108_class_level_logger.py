@@ -16,6 +16,8 @@ handlers the application installs later. No re-bind is needed.
 
 import goggles as gg
 
+CONSOLE_HANDLER_NAME = "examples.class_level.console"
+
 
 class Worker:
     """A class that holds its logger as a class attribute.
@@ -60,7 +62,7 @@ w2 = Worker("beta")
 # Application setup happens *after* Worker has been imported and its
 # class-level logger has already been built.
 gg.attach(
-    gg.ConsoleHandler(name="examples.class_level.console", level=gg.INFO),
+    gg.ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO),
     scopes=["global"],
 )
 

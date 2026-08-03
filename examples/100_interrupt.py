@@ -7,12 +7,12 @@ from types import FrameType
 import goggles as gg
 from goggles._core.integrations import ConsoleHandler
 
+CONSOLE_HANDLER_NAME = "examples.interrupt.console"
+
 # Instantiate a TextLogger (No metrics)
 logger = gg.get_logger("examples.interrupt")
 
-gg.attach(
-    ConsoleHandler(name="examples.interrupt.info", level=gg.INFO), ["global"]
-)
+gg.attach(ConsoleHandler(name=CONSOLE_HANDLER_NAME, level=gg.INFO), ["global"])
 
 _prev_sigint_handler = signal.getsignal(signal.SIGINT)
 

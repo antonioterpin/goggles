@@ -252,6 +252,7 @@ class WandBHandler:
         tags: Sequence[str] | None = None,
         reinit: Reinit = "create_new",
         wandb_init_kwargs: Mapping[str, Any] | None = None,
+        name: str = "wandb",
     ) -> None:
         """Initialize the W&B handler.
 
@@ -272,12 +273,16 @@ class WandBHandler:
                 {"finish_previous", "return_previous", "create_new", "default"}.
             wandb_init_kwargs: Additional keyword arguments forwarded to
                 ``wandb.init``.
+            name: Stable handler identifier. The event bus keys handlers
+                by it, so give each concurrently attached W&B handler a
+                distinct name.
 
         Raises:
             ValueError: If `reinit` is not a valid option, or if
                 `wandb_init_kwargs` contains invalid or handler-owned keys.
             TypeError: If `tags` is a `str` or contains non-string items.
         """
+        self.name = name
         self._logger = logging.getLogger(self.name)
         # Ensure that Goggles logs are not propagated to the root logger
         # to avoid duplicates
@@ -754,6 +759,7 @@ class WandBHandler:
         return {
             "cls": self.__class__.__name__,
             "data": {
+                "name": self.name,
                 "project": self._project,
                 "entity": self._entity,
                 "run_name": self._base_run_name,
@@ -769,6 +775,9 @@ class WandBHandler:
     def from_dict(cls, serialized: dict) -> Self:
         """De-serialize the handler from its dictionary representation.
 
+        Payloads serialized before the handler carried a name rebuild
+        with the class default.
+
         Args:
             serialized: The dictionary representation of the handler.
 
@@ -777,6 +786,7 @@ class WandBHandler:
         """
         data = serialized.get("data", serialized)
         return cls(
+            name=data.get("name", cls.name),
             project=data.get("project"),
             entity=data.get("entity"),
             run_name=data.get("run_name"),

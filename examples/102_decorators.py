@@ -6,9 +6,14 @@ untyped. You can safely ignore these warnings with # type: ignore[misc].
 
 import goggles as gg
 
+# Handler names are bus-wide, so this example owns its own name instead of
+# reusing the one from `01_basic_run.py` (which attaches at INFO: sharing a
+# name would silently keep whichever of the two attached first).
+CONSOLE_HANDLER_NAME = "examples.decorators.console"
+
 gg.attach(
     gg.ConsoleHandler(
-        name="examples.basic.console", level=gg.DEBUG
+        name=CONSOLE_HANDLER_NAME, level=gg.DEBUG
     ),  # Changed to DEBUG to see timeit output
     scopes=["global"],
 )

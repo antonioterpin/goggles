@@ -1,11 +1,16 @@
 import goggles as gg
 
+# Each console handler needs its own bus-wide name; define them once here.
+HANDLER1_NAME = "examples.multi_scope.console.1"
+HANDLER2_NAME = "examples.multi_scope.console.2"
+HANDLER3_NAME = "examples.multi_scope.console.3"
+
 # In this example, we set up a handlers associated
 # to different scopes.
-handler1 = gg.ConsoleHandler(name="examples.basic.console.1", level=gg.INFO)
+handler1 = gg.ConsoleHandler(name=HANDLER1_NAME, level=gg.INFO)
 gg.attach(handler1, scopes=["global", "namespace.scope1"])
 
-handler2 = gg.ConsoleHandler(name="examples.basic.console.2", level=gg.INFO)
+handler2 = gg.ConsoleHandler(name=HANDLER2_NAME, level=gg.INFO)
 gg.attach(handler2, scopes=["global", "namespace.scope2"])
 
 # We need to get separate loggers for each scope
@@ -24,7 +29,7 @@ logger_global.info("This will be logged by both handlers.")
 
 # The same result can be achieved using namespaces,
 # which are indicated by dot notation.
-handler3 = gg.ConsoleHandler(name="examples.basic.console.3", level=gg.INFO)
+handler3 = gg.ConsoleHandler(name=HANDLER3_NAME, level=gg.INFO)
 gg.attach(handler3, scopes=["namespace"])
 logger_scope1.info(
     f"This will be logged by {handler1.name} and {handler3.name}"
