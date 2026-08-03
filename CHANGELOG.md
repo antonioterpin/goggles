@@ -7,6 +7,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-03
+
 ### Added
 
 - **`gg.configure()` is public and can target a custom handler name.** The
@@ -31,8 +33,8 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   single bus shared by every process on a socket, so a name is global
   application state -- one name per output destination, defined once as a
   module-level constant and shared across entry points. On a conflict the
-  first registration wins silently and only the later handler's scopes are
-  merged onto it.
+  first registration wins and only the later handler's scopes are merged
+  onto it.
 
 ### Fixed
 
@@ -65,6 +67,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   dedicated-host setup (and follows `GOGGLES_HOST_LOG` when that is set).
   Behavior is otherwise unchanged: the first handler still wins, scopes are
   still merged, and no exception is raised.
+
+## [0.3.1] - 2026-06-11
+
+### Fixed
+
+- **Caller capture no longer pins frame stacks until the collector runs.**
+  `_caller_id()` held the frame returned by `inspect.currentframe()` in a
+  local, so the frame referenced itself -- a cycle refcounting cannot
+  reclaim, keeping the whole `f_back` chain (and everything its locals
+  reference) alive until a `gc` pass. The frame is now dropped on every
+  path. Only relevant when caller capture is on (`GOGGLES_CAPTURE_CALLER`).
 
 ## [0.3.0] - 2026-06-10
 

@@ -103,13 +103,13 @@ gg.attach(
 ```
 
 > [!WARNING]
-> **On a name conflict the first registration wins, silently.** Attaching a handler under a name the bus already knows neither replaces it nor raises: the later instance — with its own level, path, project, ... — is ignored, and only its `scopes` are merged onto the handler already registered under that name. So two names for one destination duplicate that destination's output, while one name for two different configurations keeps whichever process attached first.
+> **On a name conflict the first registration wins.** Attaching a handler under a name the bus already knows neither replaces it nor raises: the later instance — with its own level, path, project, ... — is ignored, and only its `scopes` are merged onto the handler already registered under that name. When the ignored handler's configuration differs from the registered one, a warning naming the handler and the differing options goes to the host's stderr; re-attaching an identical configuration is the idempotent case and stays silent. So two names for one destination duplicate that destination's output, while one name for two different configurations keeps whichever process attached first.
 
 Names and scopes are independent: the name decides *which handler instance* the bus keeps, the scopes decide *which events reach it*. Re-attaching the same name under new scopes is therefore the supported way to widen an existing handler's routing.
 
 ### Idempotent console setup
 
-`gg.configure()` is a one-call shortcut for the console-only setup above, and the only handler-setup path where the **last call wins**: it detaches the console handler already attached to each target scope before attaching a fresh one, so the most recent options take effect. `gg.attach()` instead dedupes by handler name and silently keeps the first handler registered.
+`gg.configure()` is a one-call shortcut for the console-only setup above, and the only handler-setup path where the **last call wins**: it detaches the console handler already attached to each target scope before attaching a fresh one, so the most recent options take effect. `gg.attach()` instead dedupes by handler name and keeps the first handler registered, warning on stderr when a later attach's options differ.
 
 ```python
 import goggles as gg
