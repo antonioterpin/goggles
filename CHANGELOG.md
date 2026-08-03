@@ -7,6 +7,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- **`WandBHandler` accepts a custom handler name.** The event bus keys handlers
+  by name (one host bus per socket, shared across processes), so two
+  `WandBHandler`s could never coexist: the second one -- project and all -- was
+  silently dropped. Pass `WandBHandler(..., name="wandb.eval")` to attach
+  several W&B handlers side by side instead of mutating `handler.name` after
+  construction. The name defaults to `"wandb"` and now round-trips through
+  `to_dict()`/`from_dict()`; serialized payloads without it (older clients
+  attaching to a newer host) still rebuild with the default.
+
 ## [0.3.0] - 2026-06-10
 
 ### Fixed
