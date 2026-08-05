@@ -3,6 +3,8 @@
 import importlib
 import logging
 import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -172,6 +174,28 @@ def _bus_handlers() -> dict:
     return dict(transport._bus.handlers)
 
 
+def _settle(cond: Callable[[], bool], timeout: float = 2.0) -> bool:
+    """Poll ``cond`` until true or ``timeout`` elapses.
+
+    Attach/detach ride the transport's drain queue so they stay ordered
+    with the event stream; bus state reflects them once the queue turns,
+    not synchronously on return.
+
+    Args:
+        cond: Callable returning True once the awaited state is visible.
+        timeout: Total seconds to wait.
+
+    Returns:
+        The final value of ``cond()``.
+    """
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.01)
+    return cond()
+
+
 def test_configure_is_noop_by_default() -> None:
     """configure() with no args attaches nothing — purely a shortcut."""
     gg.finish()  # clean slate
@@ -190,7 +214,7 @@ def test_configure_enable_console_attaches_console_handler() -> None:
     gg.finish()
     try:
         gg.configure(enable_console=True, console_level=logging.WARNING)
-        assert "global" in _scoped_handlers(), (
+        assert _settle(lambda: "global" in _scoped_handlers()), (
             "configure(enable_console=True) should attach to 'global' by "
             "default"
         )
@@ -214,6 +238,9 @@ def test_configure_respects_scopes_argument() -> None:
     gg.finish()
     try:
         gg.configure(enable_console=True, scopes=["train", "eval"])
+        assert _settle(lambda: {"train", "eval"} <= set(_scoped_handlers())), (
+            "configure() should attach the console under both scopes"
+        )
         scopes = _scoped_handlers()
         for s in ("train", "eval"):
             assert s in scopes, (
@@ -228,12 +255,32 @@ def test_configure_replaces_existing_console_handler() -> None:
     gg.finish()
     try:
         gg.configure(enable_console=True, console_level=logging.INFO)
+        assert _settle(
+            lambda: any(
+                isinstance(h, gg.ConsoleHandler)
+                for h in _bus_handlers().values()
+            )
+        ), "First configure() should attach a console handler"
         first = next(
             h
             for h in _bus_handlers().values()
             if isinstance(h, gg.ConsoleHandler)
         )
         gg.configure(enable_console=True, console_level=logging.WARNING)
+        assert _settle(
+            lambda: any(
+                h is not first and isinstance(h, gg.ConsoleHandler)
+                for h in _bus_handlers().values()
+            )
+            and len(
+                [
+                    h
+                    for h in _bus_handlers().values()
+                    if isinstance(h, gg.ConsoleHandler)
+                ]
+            )
+            == 1
+        ), "Reconfigure should swap in a new console handler"
         consoles = [
             h
             for h in _bus_handlers().values()
@@ -270,6 +317,9 @@ def test_configure_uses_custom_handler_name() -> None:
     gg.finish()
     try:
         gg.configure(enable_console=True, name="app.console")
+        assert _settle(lambda: "app.console" in _bus_handlers()), (
+            "configure(name=...) should attach under the custom name"
+        )
         handlers = _bus_handlers()
         assert "app.console" in handlers, (
             "configure(name='app.console') must register the console "
@@ -292,12 +342,21 @@ def test_configure_replaces_console_handler_with_custom_name() -> None:
             name="app.console",
             console_level=logging.INFO,
         )
+        assert _settle(lambda: "app.console" in _bus_handlers()), (
+            "First configure(name=...) should attach under the custom name"
+        )
         first = _bus_handlers()["app.console"]
         gg.configure(
             enable_console=True,
             name="app.console",
             console_level=logging.WARNING,
         )
+        assert _settle(
+            lambda: (
+                (h := _bus_handlers().get("app.console")) is not None
+                and h is not first
+            )
+        ), "Reconfigure should swap the handler under the custom name"
         consoles = [
             h
             for h in _bus_handlers().values()
