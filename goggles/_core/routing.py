@@ -51,6 +51,11 @@ __host_proc: subprocess.Popen | None = None
 __host_lock = threading.Lock()
 __atexit_registered = False
 
+# Set by :func:`goggles.finish` once it has flushed the transport and waited
+# for the host within the caller's own timeout; the atexit backstop then has
+# nothing left to guarantee and must not wait again.
+__finish_completed = False
+
 _DEDICATED_HOST_ENV = "GOGGLES_DEDICATED_HOST"
 # How long to wait for a freshly spawned host to bind + signal readiness
 # before falling back to an in-process host. Binding is normally well under a
@@ -86,7 +91,7 @@ def get_bus() -> Transport:
     Returns:
         The singleton transport.
     """
-    global __singleton_transport  # noqa: PLW0603
+    global __singleton_transport, __finish_completed  # noqa: PLW0603
     current = __singleton_transport
     if current is None or not current.is_running:
         from goggles._core.transport import LocalTransport  # noqa: PLC0415
@@ -94,6 +99,9 @@ def get_bus() -> Transport:
         _spawn_dedicated_host()
         current = LocalTransport()
         __singleton_transport = current
+        # New transport, new activity: the atexit backstop is armed again
+        # until the next explicit finish().
+        __finish_completed = False
     return current
 
 
@@ -103,8 +111,9 @@ def reset_bus() -> None:
     Intended for tests and long-running processes that need to rebuild
     the transport after :meth:`Transport.shutdown` has been called.
     """
-    global __singleton_transport  # noqa: PLW0603
+    global __singleton_transport, __finish_completed  # noqa: PLW0603
     __singleton_transport = None
+    __finish_completed = False
 
 
 # ----- dedicated host process ---------------------------------------------
@@ -392,6 +401,18 @@ def _await_host_finalize(timeout: float | None) -> None:
         pass
 
 
+def _mark_finished() -> None:
+    """Record that an explicit ``finish()`` completed.
+
+    The atexit backstop exists for programs that exit without calling
+    ``finish()``; once ``finish()`` has run, it already flushed the
+    transport and waited for the host within the caller's chosen
+    timeout, so the backstop must not wait again on interpreter exit.
+    """
+    global __finish_completed  # noqa: PLW0603
+    __finish_completed = True
+
+
 def _atexit_terminate_host() -> None:
     """``atexit`` backstop: flush this process's transport on interpreter exit.
 
@@ -402,6 +423,8 @@ def _atexit_terminate_host() -> None:
     so a sibling process still logging keeps its host. No-op once ``finish()``
     has run. Bounded so interpreter shutdown never hangs.
     """
+    if __finish_completed:
+        return
     transport = __singleton_transport
     if transport is not None and transport.is_running:
         try:
