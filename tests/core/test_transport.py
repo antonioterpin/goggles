@@ -328,6 +328,11 @@ def test_host_mode_emit_dispatches_to_handler(socket_path: str) -> None:
         transport.attach(
             handlers=[_CollectingHandler().to_dict()], scopes=["global"]
         )
+        # Attach rides the drain queue so it stays ordered with events
+        # emitted before it; the bus reflects it once the queue turns.
+        assert _wait_until(
+            lambda: "collector" in transport._bus.handlers  # type: ignore[attr-defined]
+        ), "host-mode attach should install the handler via the drain queue"
         collector = cast(
             _CollectingHandler,
             transport._bus.handlers["collector"],  # type: ignore[attr-defined]
@@ -975,6 +980,82 @@ def test_client_attach_and_detach_control_frames(socket_path: str) -> None:
             client.shutdown(timeout=2.0)
     finally:
         host.shutdown(timeout=2.0)
+
+
+class _SlowCollectingHandler(_CollectingHandler):
+    """Collector whose ``handle`` stalls, backing up the host drain queue."""
+
+    name = "slow-collector"
+
+    def handle(self, event: Event) -> None:
+        time.sleep(0.05)
+        super().handle(event)
+
+    def to_dict(self) -> dict:
+        return {"cls": "_SlowCollectingHandler", "data": {}}
+
+
+def test_detach_applies_after_previously_emitted_events(
+    socket_path: str,
+) -> None:
+    """A detach never overtakes events the same client emitted before it.
+
+    Regresses silent event loss at shutdown: DETACH used to be applied
+    inline on the reader thread while data events queued behind a slow
+    handler, so the handler was removed before those events were
+    dispatched and they vanished without a warning -- in production,
+    everything a run logged in its last seconds before detaching its
+    W&B handler.
+
+    Args:
+        socket_path: Endpoint path (via fixture).
+    """
+    gg.register_handler(_SlowCollectingHandler)
+    host = LocalTransport(socket_path=socket_path)
+    try:
+        client = LocalTransport(socket_path=socket_path)
+        try:
+            bus = host._bus  # type: ignore[attr-defined]
+            client.attach(
+                handlers=[_SlowCollectingHandler().to_dict()],
+                scopes=["global"],
+            )
+            assert _wait_until(lambda: "slow-collector" in bus.handlers), (
+                "client ATTACH should install the slow handler on host"
+            )
+            collector = cast(
+                _SlowCollectingHandler, bus.handlers["slow-collector"]
+            )
+
+            n_events = 20
+            for i in range(n_events):
+                client.emit(
+                    Event(
+                        kind="log",
+                        scope="global",
+                        payload=f"event-{i}",
+                        filepath="t.py",
+                        lineno=i,
+                    )
+                )
+            # The slow handler guarantees most events are still queued on
+            # the host when the detach frame arrives right behind them.
+            client.detach("slow-collector", "global")
+
+            assert _wait_until(
+                lambda: "slow-collector" not in bus.handlers,
+                timeout=n_events * 0.05 + 5.0,
+            ), "client DETACH should eventually remove the slow handler"
+            with collector.lock:
+                got = [e.payload for e in collector.events]
+            assert got == [f"event-{i}" for i in range(n_events)], (
+                f"Every event emitted before the detach must be handled "
+                f"before it applies; got {len(got)} of {n_events}: {got}"
+            )
+        finally:
+            client.shutdown(timeout=5.0)
+    finally:
+        host.shutdown(timeout=5.0)
 
 
 def test_shutdown_flushes_pending_events(socket_path: str) -> None:
