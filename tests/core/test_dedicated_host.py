@@ -672,3 +672,42 @@ def test_get_bus_does_not_resurrect_during_interpreter_finalization(
     assert waits == [], (
         f"The backstop must stay disarmed after finish(), got {waits}"
     )
+
+
+def test_get_bus_does_not_rebuild_once_exit_phase_begins(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stray atexit-time emit must not rebuild the transport.
+
+    Atexit handlers run before ``sys.is_finalizing()`` turns true, so an
+    emit from another module's shutdown hook (a node logging in its
+    atexit-registered shutdown) reaches ``get_bus()`` on the dead
+    singleton in a window indistinguishable from normal runtime.
+    ``finish()`` therefore registers an exit-phase marker that, thanks to
+    atexit's LIFO order, runs ahead of hooks registered earlier in the
+    program's life; from then on the dead transport is returned (its
+    ``emit`` no-ops) instead of reconnecting to the winding-down host and
+    re-arming the backstop. Regresses a measured ~23 s interpreter-exit
+    stall in ``_atexit_terminate_host``.
+    """
+    bus = gg.get_bus()
+    gg.finish(wait_for_host=False)
+    routing._enter_exit_phase()
+
+    resurrected = gg.get_bus()
+
+    assert resurrected is bus, (
+        "get_bus() in the exit phase must return the dead singleton, not "
+        "build a new transport"
+    )
+    assert not resurrected.is_running, (
+        "The returned transport must stay shut down so emits no-op"
+    )
+    waits: list[float | None] = []
+    monkeypatch.setattr(
+        routing, "_await_host_finalize", lambda timeout: waits.append(timeout)
+    )
+    routing._atexit_terminate_host()
+    assert waits == [], (
+        f"The backstop must stay disarmed after finish(), got {waits}"
+    )
