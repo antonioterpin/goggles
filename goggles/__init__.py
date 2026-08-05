@@ -1225,7 +1225,7 @@ def detach(handler_name: str, scope: str) -> None:
     bus.detach(handler_name, scope)
 
 
-def finish(timeout: float | None = None) -> None:
+def finish(timeout: float | None = None, *, wait_for_host: bool = True) -> None:
     """Shutdown the global transport and close all handlers.
 
     Default behavior is to wait indefinitely so no queued events are
@@ -1240,6 +1240,14 @@ def finish(timeout: float | None = None) -> None:
             If ``None``, falls back to the ``GOGGLES_SHUTDOWN_TIMEOUT``
             env var; an unset env var or a non-positive value means no
             deadline.
+        wait_for_host: If True, additionally wait for a dedicated host
+            this process spawned to finalize its handlers once it reaps
+            (the "everything is delivered and finalized once finish()
+            returns" guarantee). If False, return as soon as this
+            process's own queue has fully drained to the host — an exact,
+            naturally terminating handoff — and leave the host to
+            dispatch and finalize on its own schedule; it outlives this
+            process and completes the same work either way.
     """
     bus = get_bus()
     if timeout is None:
@@ -1267,9 +1275,11 @@ def finish(timeout: float | None = None) -> None:
         _mark_finished,
     )
 
-    _await_host_finalize(timeout)
+    if wait_for_host:
+        _await_host_finalize(timeout)
     # The atexit backstop has nothing left to guarantee: the transport is
-    # flushed and the host wait above ran with the caller's own timeout.
+    # flushed, and the host wait either ran with the caller's own timeout
+    # or was explicitly declined.
     _mark_finished()
 
 
