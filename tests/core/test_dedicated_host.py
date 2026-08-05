@@ -535,3 +535,58 @@ def test_kill_reaps_a_live_process() -> None:
     assert proc.poll() is not None
     # Calling again on an already-dead process is a safe no-op.
     routing._kill(proc)
+
+
+def test_atexit_backstop_is_a_noop_after_finish(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After an explicit ``finish()``, interpreter exit must not wait again.
+
+    ``finish()`` flushes the transport and waits for the host within the
+    caller's own timeout. The atexit backstop used to run its bounded
+    ``_await_host_finalize`` afterwards anyway, serializing up to
+    ``_HOST_ATEXIT_TIMEOUT_S`` of the host's background drain into every
+    process exit that had already finished cleanly.
+    """
+    gg.get_bus()
+    gg.finish(timeout=10.0)
+
+    waits: list[float | None] = []
+    monkeypatch.setattr(
+        routing, "_await_host_finalize", lambda timeout: waits.append(timeout)
+    )
+    routing._atexit_terminate_host()
+
+    assert waits == [], (
+        "The atexit backstop must not wait for the host again after an "
+        f"explicit finish(); waited with timeouts {waits}"
+    )
+
+
+def test_atexit_backstop_arms_again_after_a_new_transport(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transport built after ``finish()`` re-arms the atexit backstop.
+
+    A program that finishes and then resumes logging gets a fresh
+    transport; exiting without a second ``finish()`` must again flush and
+    wait, or the resumed activity could be dropped on interpreter exit.
+    """
+    gg.get_bus()
+    gg.finish(timeout=10.0)
+    bus = gg.get_bus()
+    try:
+        waits: list[float | None] = []
+        monkeypatch.setattr(
+            routing,
+            "_await_host_finalize",
+            lambda timeout: waits.append(timeout),
+        )
+        routing._atexit_terminate_host()
+
+        assert waits == [routing._HOST_ATEXIT_TIMEOUT_S], (
+            "A fresh transport after finish() must re-arm the backstop, "
+            f"got waits {waits}"
+        )
+    finally:
+        bus.shutdown(timeout=10.0)

@@ -1262,9 +1262,15 @@ def finish(timeout: float | None = None) -> None:
     # handlers (e.g. finishing W&B runs); wait so the usual "everything is
     # delivered + finalized once finish() returns" guarantee still holds. No-op
     # when other processes keep the host alive.
-    from ._core.routing import _await_host_finalize  # noqa: PLC0415
+    from ._core.routing import (  # noqa: PLC0415
+        _await_host_finalize,
+        _mark_finished,
+    )
 
     _await_host_finalize(timeout)
+    # The atexit backstop has nothing left to guarantee: the transport is
+    # flushed and the host wait above ran with the caller's own timeout.
+    _mark_finished()
 
 
 def register_handler(handler_class: type) -> None:
