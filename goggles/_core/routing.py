@@ -94,6 +94,13 @@ def get_bus() -> Transport:
     global __singleton_transport, __finish_completed  # noqa: PLW0603
     current = __singleton_transport
     if current is None or not current.is_running:
+        # No resurrection while the interpreter is shutting down: stray
+        # emits from other modules' atexit handlers (their emit() no-ops on
+        # a dead transport) must not rebuild the transport, reconnect to a
+        # winding-down host, and re-arm the backstop a completed finish()
+        # disarmed.
+        if current is not None and sys.is_finalizing():
+            return current
         from goggles._core.transport import LocalTransport  # noqa: PLC0415
 
         _spawn_dedicated_host()

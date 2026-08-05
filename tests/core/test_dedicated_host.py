@@ -637,3 +637,38 @@ def test_finish_waits_for_the_host_by_default(
         f"Default finish() must wait for the host with its own timeout, "
         f"got {waits}"
     )
+
+
+def test_get_bus_does_not_resurrect_during_interpreter_finalization(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stray atexit-time emit must not rebuild the transport.
+
+    After ``finish()``, an emit from another module's atexit handler
+    (e.g. a node logging in its own shutdown hook) calls ``get_bus()``
+    on a dead singleton. Rebuilding it would reconnect to the
+    winding-down host and re-arm the backstop that finish() disarmed --
+    serializing the host's whole background drain into interpreter
+    exit. The dead transport is returned instead; its ``emit`` no-ops.
+    """
+    bus = gg.get_bus()
+    gg.finish(wait_for_host=False)
+    monkeypatch.setattr(routing.sys, "is_finalizing", lambda: True)
+
+    resurrected = gg.get_bus()
+
+    assert resurrected is bus, (
+        "get_bus() during interpreter finalization must return the dead "
+        "singleton, not build a new transport"
+    )
+    assert not resurrected.is_running, (
+        "The returned transport must stay shut down so emits no-op"
+    )
+    waits: list[float | None] = []
+    monkeypatch.setattr(
+        routing, "_await_host_finalize", lambda timeout: waits.append(timeout)
+    )
+    routing._atexit_terminate_host()
+    assert waits == [], (
+        f"The backstop must stay disarmed after finish(), got {waits}"
+    )
