@@ -590,3 +590,85 @@ def test_atexit_backstop_arms_again_after_a_new_transport(
         )
     finally:
         bus.shutdown(timeout=10.0)
+
+
+def test_finish_without_host_wait_skips_the_finalize_wait(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``finish(wait_for_host=False)`` returns at the end of the handoff.
+
+    The local queue drain has an exact, naturally terminating end; the
+    host outlives this process and finalizes its handlers on its own
+    schedule, so a caller that needs no sync guarantee must not pay for
+    the host's (online-latency-bound) wind-down.
+    """
+    gg.get_bus()
+    waits: list[float | None] = []
+    monkeypatch.setattr(
+        routing, "_await_host_finalize", lambda timeout: waits.append(timeout)
+    )
+
+    gg.finish(wait_for_host=False)
+
+    assert waits == [], (
+        f"finish(wait_for_host=False) must not wait for the host, "
+        f"waited with timeouts {waits}"
+    )
+    routing._atexit_terminate_host()
+    assert waits == [], (
+        "Declining the host wait still counts as an explicit finish; the "
+        f"atexit backstop must not wait either, got {waits}"
+    )
+
+
+def test_finish_waits_for_the_host_by_default(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plain ``finish()`` keeps the delivered-and-finalized guarantee."""
+    gg.get_bus()
+    waits: list[float | None] = []
+    monkeypatch.setattr(
+        routing, "_await_host_finalize", lambda timeout: waits.append(timeout)
+    )
+
+    gg.finish(timeout=10.0)
+
+    assert waits == [10.0], (
+        f"Default finish() must wait for the host with its own timeout, "
+        f"got {waits}"
+    )
+
+
+def test_get_bus_does_not_resurrect_during_interpreter_finalization(
+    default_host_socket: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stray atexit-time emit must not rebuild the transport.
+
+    After ``finish()``, an emit from another module's atexit handler
+    (e.g. a node logging in its own shutdown hook) calls ``get_bus()``
+    on a dead singleton. Rebuilding it would reconnect to the
+    winding-down host and re-arm the backstop that finish() disarmed --
+    serializing the host's whole background drain into interpreter
+    exit. The dead transport is returned instead; its ``emit`` no-ops.
+    """
+    bus = gg.get_bus()
+    gg.finish(wait_for_host=False)
+    monkeypatch.setattr(routing.sys, "is_finalizing", lambda: True)
+
+    resurrected = gg.get_bus()
+
+    assert resurrected is bus, (
+        "get_bus() during interpreter finalization must return the dead "
+        "singleton, not build a new transport"
+    )
+    assert not resurrected.is_running, (
+        "The returned transport must stay shut down so emits no-op"
+    )
+    waits: list[float | None] = []
+    monkeypatch.setattr(
+        routing, "_await_host_finalize", lambda timeout: waits.append(timeout)
+    )
+    routing._atexit_terminate_host()
+    assert waits == [], (
+        f"The backstop must stay disarmed after finish(), got {waits}"
+    )
