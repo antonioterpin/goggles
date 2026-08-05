@@ -590,6 +590,7 @@ def test_atexit_backstop_arms_again_after_a_new_transport(
         )
     finally:
         bus.shutdown(timeout=10.0)
+<<<<<<< HEAD
 
 
 def test_finish_without_host_wait_skips_the_finalize_wait(
@@ -672,3 +673,5 @@ def test_get_bus_does_not_resurrect_during_interpreter_finalization(
     assert waits == [], (
         f"The backstop must stay disarmed after finish(), got {waits}"
     )
+=======
+>>>>>>> origin/main

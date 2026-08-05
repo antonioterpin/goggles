@@ -1275,11 +1275,17 @@ def finish(timeout: float | None = None, *, wait_for_host: bool = True) -> None:
         _mark_finished,
     )
 
+<<<<<<< HEAD
     if wait_for_host:
         _await_host_finalize(timeout)
     # The atexit backstop has nothing left to guarantee: the transport is
     # flushed, and the host wait either ran with the caller's own timeout
     # or was explicitly declined.
+=======
+    _await_host_finalize(timeout)
+    # The atexit backstop has nothing left to guarantee: the transport is
+    # flushed and the host wait above ran with the caller's own timeout.
+>>>>>>> origin/main
     _mark_finished()
 
 
