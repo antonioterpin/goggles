@@ -66,6 +66,45 @@ _log = logging.getLogger(__name__)
 
 _SENTINEL = object()  # "stop draining / sending" marker
 
+
+class _AttachControl:
+    """ATTACH control op queued behind the events that preceded it.
+
+    Control frames ride ``_drain_queue`` with the event stream so they
+    take effect in the order the client sent them: applying an ATTACH or
+    DETACH directly on the reader thread would let it overtake events
+    still queued behind a slow handler.
+    """
+
+    __slots__ = ("handlers", "scopes")
+
+    def __init__(self, handlers: list[dict], scopes: list[str]) -> None:
+        """Capture one ATTACH operation.
+
+        Args:
+            handlers: Serialized handler dicts (see ``Handler.to_dict``).
+            scopes: Scopes under which to attach.
+        """
+        self.handlers = handlers
+        self.scopes = scopes
+
+
+class _DetachControl:
+    """DETACH control op queued behind the events that preceded it."""
+
+    __slots__ = ("handler_name", "scope")
+
+    def __init__(self, handler_name: str, scope: str) -> None:
+        """Capture one DETACH operation.
+
+        Args:
+            handler_name: Name of the handler to detach.
+            scope: Scope to detach from.
+        """
+        self.handler_name = handler_name
+        self.scope = scope
+
+
 _DEFAULT_HOST_IDLE_TIMEOUT_S = 5.0
 # Small delay before reaping after a clean last-client disconnect: long enough
 # that the accept loop registers (and so cancels the reap for) a client that
@@ -520,15 +559,23 @@ class LocalTransport:
         elif kind == _MSG_ATTACH:
             try:
                 handlers, scopes = pickle.loads(body)
-                self._bus.attach(handlers, scopes)
             except Exception:
-                _log.exception("Failed to handle ATTACH frame")
+                _log.exception("Failed to unpack ATTACH frame")
+                return
+            # Queued, not applied inline: an attach applied on the reader
+            # thread would overtake events still queued behind a slow
+            # handler and start routing events emitted before it.
+            self._drain_queue.put(_AttachControl(handlers, scopes))
         elif kind == _MSG_DETACH:
             try:
                 handler_name, scope = pickle.loads(body)
-                self._bus.detach(handler_name, scope)
             except Exception:
-                _log.exception("Failed to handle DETACH frame")
+                _log.exception("Failed to unpack DETACH frame")
+                return
+            # Queued, not applied inline: a detach applied on the reader
+            # thread closes the handler while events sent before it are
+            # still queued, silently dropping them once dispatched.
+            self._drain_queue.put(_DetachControl(handler_name, scope))
         elif kind == _MSG_BYE:
             # Client announced graceful disconnect; reader will hit EOF
             # after all queued frames have been consumed.
@@ -537,7 +584,7 @@ class LocalTransport:
             _log.warning("Unknown frame kind %d", kind)
 
     def _drain_loop(self) -> None:
-        """Drain queued events on the host and call ``EventBus.emit``."""
+        """Drain queued events and control ops in arrival order."""
         while True:
             item = self._drain_queue.get()
             if item is _SENTINEL:
@@ -545,6 +592,18 @@ class LocalTransport:
             if self._drain_aborted.is_set():
                 # Bounded shutdown timed out: discard the remaining queue
                 # rather than dispatching it concurrently with close().
+                continue
+            if isinstance(item, _AttachControl):
+                try:
+                    self._bus.attach(item.handlers, item.scopes)
+                except Exception:
+                    _log.exception("Failed to handle ATTACH frame")
+                continue
+            if isinstance(item, _DetachControl):
+                try:
+                    self._bus.detach(item.handler_name, item.scope)
+                except Exception:
+                    _log.exception("Failed to handle DETACH frame")
                 continue
             try:
                 self._bus.emit(item)
@@ -736,7 +795,10 @@ class LocalTransport:
             scopes: Scopes under which to attach.
         """
         if self._is_host:
-            self._bus.attach(handlers, scopes)
+            # Queued with the event stream: host-mode ``emit`` rides
+            # ``_drain_queue``, so an inline attach would overtake events
+            # emitted before it (see ``_AttachControl``).
+            self._drain_queue.put(_AttachControl(handlers, scopes))
             return
         if not self._running:
             return
@@ -751,7 +813,10 @@ class LocalTransport:
             scope: Scope to detach from.
         """
         if self._is_host:
-            self._bus.detach(handler_name, scope)
+            # Queued with the event stream: an inline detach would close
+            # the handler while events emitted before it are still queued,
+            # silently dropping them (see ``_DetachControl``).
+            self._drain_queue.put(_DetachControl(handler_name, scope))
             return
         if not self._running:
             return
