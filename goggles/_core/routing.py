@@ -56,6 +56,12 @@ __atexit_registered = False
 # nothing left to guarantee and must not wait again.
 __finish_completed = False
 
+# Set when interpreter-exit processing has begun. ``sys.is_finalizing`` is
+# False while atexit handlers run, so goggles marks the phase itself: a
+# no-op hook registered at finish() time runs ahead of hooks registered
+# earlier in the program's life (atexit is LIFO) and flips this flag.
+__exit_phase = False
+
 _DEDICATED_HOST_ENV = "GOGGLES_DEDICATED_HOST"
 # How long to wait for a freshly spawned host to bind + signal readiness
 # before falling back to an in-process host. Binding is normally well under a
@@ -94,12 +100,14 @@ def get_bus() -> Transport:
     global __singleton_transport, __finish_completed  # noqa: PLW0603
     current = __singleton_transport
     if current is None or not current.is_running:
-        # No resurrection while the interpreter is shutting down: stray
-        # emits from other modules' atexit handlers (their emit() no-ops on
-        # a dead transport) must not rebuild the transport, reconnect to a
-        # winding-down host, and re-arm the backstop a completed finish()
-        # disarmed.
-        if current is not None and sys.is_finalizing():
+        # No rebuild once interpreter-exit processing has begun: a stray
+        # emit from another module's atexit handler (a node logging in its
+        # shutdown hook) must not rebuild the transport, reconnect to the
+        # winding-down host, and re-arm the backstop that finish()
+        # disarmed. ``sys.is_finalizing`` alone misses the atexit window,
+        # hence the finish()-registered ``__exit_phase`` marker. Runtime
+        # resume after finish() (before exit) still rebuilds normally.
+        if current is not None and (__exit_phase or sys.is_finalizing()):
             return current
         from goggles._core.transport import LocalTransport  # noqa: PLC0415
 
@@ -118,9 +126,10 @@ def reset_bus() -> None:
     Intended for tests and long-running processes that need to rebuild
     the transport after :meth:`Transport.shutdown` has been called.
     """
-    global __singleton_transport, __finish_completed  # noqa: PLW0603
+    global __singleton_transport, __finish_completed, __exit_phase  # noqa: PLW0603
     __singleton_transport = None
     __finish_completed = False
+    __exit_phase = False
 
 
 # ----- dedicated host process ---------------------------------------------
@@ -408,6 +417,17 @@ def _await_host_finalize(timeout: float | None) -> None:
         pass
 
 
+def _enter_exit_phase() -> None:
+    """Record that interpreter-exit processing has begun.
+
+    Registered by :func:`_mark_finished` so it runs ahead of atexit hooks
+    registered earlier in the program's life; from this point ``get_bus``
+    returns the dead singleton instead of rebuilding.
+    """
+    global __exit_phase  # noqa: PLW0603
+    __exit_phase = True
+
+
 def _mark_finished() -> None:
     """Record that an explicit ``finish()`` completed.
 
@@ -418,6 +438,10 @@ def _mark_finished() -> None:
     """
     global __finish_completed  # noqa: PLW0603
     __finish_completed = True
+    # LIFO: registering at finish() time places this ahead of atexit hooks
+    # registered earlier (node shutdown hooks that may log); repeated
+    # registration is harmless.
+    atexit.register(_enter_exit_phase)
 
 
 def _atexit_terminate_host() -> None:
