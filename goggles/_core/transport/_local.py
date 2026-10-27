@@ -675,7 +675,8 @@ class LocalTransport:
             failing: The send item whose sendall just errored; its shm
                 needs unlinking too.
         """
-        self._running = False
+        with self._state_lock:
+            self._running = False
         names: list[str] = []
         if failing.shm_name is not None:
             names.append(failing.shm_name)
@@ -798,6 +799,36 @@ class LocalTransport:
                 flush=True,
             )
 
+    def _submit_client_frame(
+        self, item: _SendItem, *, control: bool = False
+    ) -> bool:
+        """Admit a completed frame only while the sender accepts new work.
+
+        Encoding happens outside the state lock. Shutdown may finish while
+        a producer encodes, so admission must recheck the state atomically
+        with the queue write. Never hold shutdown behind serialization.
+
+        Args:
+            item: Completed frame, optionally owning shared memory.
+            control: Whether the frame bypasses the event-count limit.
+
+        Returns:
+            False if shutdown won the race. True otherwise, including an
+            event discarded by the configured overload policy.
+        """
+        with self._state_lock:
+            if self._running:
+                if control:
+                    self._send_queue.put(item)
+                else:
+                    self._enqueue_event(item)
+                return True
+        if item.shm_name is not None:
+            _try_unlink_shm(item.shm_name)
+            with self._pending_shm_lock:
+                self._pending_shm.discard(item.shm_name)
+        return False
+
     # ----- public API ------------------------------------------------------
 
     def emit(self, event: Event) -> None:
@@ -809,14 +840,16 @@ class LocalTransport:
         if not self._running:
             return
         if self._is_host:
-            self._enqueue_event(event)
+            with self._state_lock:
+                if self._running:
+                    self._enqueue_event(event)
             return
         try:
             item = self._encode_event(event)
         except Exception:
             _log.exception("Failed to encode event for transport")
             return
-        self._enqueue_event(item)
+        self._submit_client_frame(item)
 
     def emit_sync(self, event: Event) -> None:
         """Route an event and (host) block until the bus has seen it.
@@ -841,7 +874,8 @@ class LocalTransport:
         except Exception:
             _log.exception("Failed to encode event for transport")
             return
-        self._enqueue_event(item)
+        if not self._submit_client_frame(item):
+            return
         # Wait until the sender has caught up with this item.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -864,12 +898,16 @@ class LocalTransport:
             # Queued with the event stream: host-mode ``emit`` rides
             # ``_drain_queue``, so an inline attach would overtake events
             # emitted before it (see ``_AttachControl``).
-            self._drain_queue.put(_AttachControl(handlers, scopes))
+            with self._state_lock:
+                if self._running:
+                    self._drain_queue.put(_AttachControl(handlers, scopes))
             return
         if not self._running:
             return
         body = pickle.dumps((handlers, scopes), protocol=5)
-        self._send_queue.put(_SendItem(frame=self._frame(_MSG_ATTACH, body)))
+        self._submit_client_frame(
+            _SendItem(frame=self._frame(_MSG_ATTACH, body)), control=True
+        )
 
     def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
@@ -882,12 +920,16 @@ class LocalTransport:
             # Queued with the event stream: an inline detach would close
             # the handler while events emitted before it are still queued,
             # silently dropping them (see ``_DetachControl``).
-            self._drain_queue.put(_DetachControl(handler_name, scope))
+            with self._state_lock:
+                if self._running:
+                    self._drain_queue.put(_DetachControl(handler_name, scope))
             return
         if not self._running:
             return
         body = pickle.dumps((handler_name, scope), protocol=5)
-        self._send_queue.put(_SendItem(frame=self._frame(_MSG_DETACH, body)))
+        self._submit_client_frame(
+            _SendItem(frame=self._frame(_MSG_DETACH, body)), control=True
+        )
 
     def shutdown(self, timeout: float | None = None) -> None:
         """Flush pending work and release resources.

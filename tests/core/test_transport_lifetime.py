@@ -228,3 +228,69 @@ def test_idle_socket_worker_releases_last_frame(
         )
     finally:
         client.shutdown(timeout=3.0)
+
+
+@pytest.mark.parametrize("shm", [False, True])
+@pytest.mark.parametrize("synchronous", [False, True])
+@pytest.mark.parametrize("allocate_before_shutdown", [False, True])
+def test_shutdown_rejects_an_inflight_encoded_frame(
+    host: LocalTransport,
+    monkeypatch: pytest.MonkeyPatch,
+    shm: bool,
+    synchronous: bool,
+    allocate_before_shutdown: bool,
+) -> None:
+    """Finishing encoding after shutdown must not orphan a queued frame."""
+    client = LocalTransport(
+        socket_path=host._socket_path, shm_threshold=1 if shm else 0
+    )
+    encoding, release = threading.Event(), threading.Event()
+    encode = client._encode_event
+    names = []
+
+    def delayed_encode(event: Event) -> _local._SendItem:
+        if not allocate_before_shutdown:
+            encoding.set()
+            assert release.wait(3.0), "Test must release the producer"
+        item = encode(event)
+        if item.shm_name is not None:
+            names.append(item.shm_name)
+        if allocate_before_shutdown:
+            encoding.set()
+            assert release.wait(3.0), "Test must release the producer"
+        return item
+
+    monkeypatch.setattr(client, "_encode_event", delayed_encode)
+    emit = client.emit_sync if synchronous else client.emit
+    producer = threading.Thread(
+        target=emit,
+        args=(Event("image", "global", np.zeros((128, 128)), __file__, 0),),
+    )
+    try:
+        producer.start()
+        assert encoding.wait(3.0), (
+            "Producer must enter encoding before shutdown"
+        )
+        client.shutdown(timeout=3.0)
+        release.set()
+        producer.join(timeout=3.0)
+        assert not producer.is_alive(), "Do not wait on a stopped sender"
+        assert client._send_queue.empty(), (
+            "Shutdown must not leave frames behind its consumed sentinel"
+        )
+        assert not client._pending_shm, "Release all encoded shared memory"
+        for name in names:
+            with pytest.raises(FileNotFoundError):
+                shared_memory.SharedMemory(name=name)
+    finally:
+        release.set()
+        producer.join(timeout=6.0)
+        client.shutdown(timeout=3.0)
+
+
+def test_closed_host_rejects_control_operations(host: LocalTransport) -> None:
+    """Controls sent after shutdown must not accumulate without a drainer."""
+    host.shutdown(timeout=3.0)
+    host.attach([], ["global"])
+    host.detach("missing", "global")
+    assert host._drain_queue.empty(), "A stopped host cannot consume controls"

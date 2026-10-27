@@ -132,3 +132,9 @@ A limit does not increase storage throughput or guarantee complete data.
 Once work completes, idle send, receive, and dispatch workers release their
 last frame or payload. Disconnected readers leave the host's thread registry,
 so a long-lived host does not retain a thread object for every past client.
+
+Shutdown also closes admission before stopping workers. A client that finishes
+encoding after shutdown discards the frame and releases its shared memory;
+it cannot leave data behind the sender's stop marker. Host reader threads
+still drain frames already received from clients during graceful shutdown.
+Controls submitted after shutdown do not accumulate on a stopped host.
