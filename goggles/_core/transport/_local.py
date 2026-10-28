@@ -25,6 +25,7 @@ import pickle
 import queue
 import socket
 import struct
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -194,10 +195,27 @@ class LocalTransport:
             shm_threshold: Payload size threshold (bytes) at or above which
                 numpy payloads travel through shared memory. Defaults to
                 ``GOGGLES_SHM_THRESHOLD`` or 64 KiB. ``0`` disables shm.
+
+        Raises:
+            ValueError: If ``GOGGLES_MAX_PENDING_EVENTS`` is not a
+                nonnegative integer.
         """
         # Lazy import to avoid a cycle with goggles/__init__.py.
         from goggles import EventBus  # noqa: PLC0415
 
+        raw_limit = os.getenv("GOGGLES_MAX_PENDING_EVENTS", "0")
+        try:
+            self._max_pending_events = int(raw_limit)
+        except ValueError as exc:
+            raise ValueError(
+                "GOGGLES_MAX_PENDING_EVENTS must be a nonnegative integer"
+            ) from exc
+        if self._max_pending_events < 0:
+            raise ValueError(
+                "GOGGLES_MAX_PENDING_EVENTS must be a nonnegative integer"
+            )
+        self._enqueue_lock = threading.Lock()
+        self._dropped_events = 0
         self._socket_path = socket_path or _default_socket_path()
         self._shm_threshold = (
             shm_threshold
@@ -475,8 +493,10 @@ class LocalTransport:
                 daemon=True,
                 name=f"goggles-reader-{conn.fileno()}",
             )
-            reader.start()
-            self._reader_threads.append(reader)
+            with self._client_sockets_lock:
+                self._reader_threads.append(reader)
+                reader.start()
+            del reader, conn
 
     def _reader_loop(self, conn: socket.socket) -> None:
         """Read framed messages from ``conn`` and route them to the bus.
@@ -512,7 +532,10 @@ class LocalTransport:
                     return
                 if kind == _MSG_BYE:
                     clean = True  # the client is leaving gracefully
-                self._dispatch_incoming(kind, body)
+                try:
+                    self._dispatch_incoming(kind, body)
+                finally:
+                    del body
         finally:
             try:
                 conn.shutdown(socket.SHUT_RDWR)
@@ -527,6 +550,7 @@ class LocalTransport:
                     self._client_sockets.remove(conn)
                 except ValueError:
                     pass
+                self._reader_threads.remove(threading.current_thread())
                 if not self._client_sockets and self._idle_callback is not None:
                     # Last client gone: reap quickly on a clean BYE (so its
                     # finish() can finalize handlers), else keep the full grace
@@ -548,14 +572,14 @@ class LocalTransport:
             except Exception:
                 _log.exception("Failed to unpack small frame")
                 return
-            self._drain_queue.put(event)
+            self._enqueue_event(event)
         elif kind == _MSG_LARGE:
             try:
                 event = _unpack_large(body)
             except Exception:
                 _log.exception("Failed to unpack large frame")
                 return
-            self._drain_queue.put(event)
+            self._enqueue_event(event)
         elif kind == _MSG_ATTACH:
             try:
                 handlers, scopes = pickle.loads(body)
@@ -589,26 +613,29 @@ class LocalTransport:
             item = self._drain_queue.get()
             if item is _SENTINEL:
                 return
-            if self._drain_aborted.is_set():
-                # Bounded shutdown timed out: discard the remaining queue
-                # rather than dispatching it concurrently with close().
-                continue
-            if isinstance(item, _AttachControl):
-                try:
-                    self._bus.attach(item.handlers, item.scopes)
-                except Exception:
-                    _log.exception("Failed to handle ATTACH frame")
-                continue
-            if isinstance(item, _DetachControl):
-                try:
-                    self._bus.detach(item.handler_name, item.scope)
-                except Exception:
-                    _log.exception("Failed to handle DETACH frame")
-                continue
             try:
-                self._bus.emit(item)
-            except Exception:
-                _log.exception("Handler raised while dispatching event")
+                if self._drain_aborted.is_set():
+                    # Bounded shutdown timed out: discard the remaining queue
+                    # rather than dispatching it concurrently with close().
+                    continue
+                if isinstance(item, _AttachControl):
+                    try:
+                        self._bus.attach(item.handlers, item.scopes)
+                    except Exception:
+                        _log.exception("Failed to handle ATTACH frame")
+                    continue
+                if isinstance(item, _DetachControl):
+                    try:
+                        self._bus.detach(item.handler_name, item.scope)
+                    except Exception:
+                        _log.exception("Failed to handle DETACH frame")
+                    continue
+                try:
+                    self._bus.emit(item)
+                except Exception:
+                    _log.exception("Handler raised while dispatching event")
+            finally:
+                del item
 
     # ----- client loop -----------------------------------------------------
 
@@ -621,21 +648,25 @@ class LocalTransport:
                 return
             assert isinstance(item, _SendItem)
             try:
-                self._client_sock.sendall(item.frame)
-            except (BrokenPipeError, ConnectionResetError, OSError) as exc:
-                _log.warning(
-                    "Goggles client socket closed (%s); dropping queued events",
-                    exc,
-                )
-                self._fail_pending(item)
-                return
-            else:
-                # Frame reached the kernel; host will unlink the shm after
-                # it processes the frame. If the frame carried a shm name,
-                # we can drop our tracking entry.
-                if item.shm_name is not None:
-                    with self._pending_shm_lock:
-                        self._pending_shm.discard(item.shm_name)
+                try:
+                    self._client_sock.sendall(item.frame)
+                except (BrokenPipeError, ConnectionResetError, OSError) as exc:
+                    _log.warning(
+                        "Goggles client socket closed (%s); "
+                        "dropping queued events",
+                        exc,
+                    )
+                    self._fail_pending(item)
+                    return
+                else:
+                    # Frame reached the kernel; host will unlink the shm after
+                    # it processes the frame. If the frame carried a shm name,
+                    # we can drop our tracking entry.
+                    if item.shm_name is not None:
+                        with self._pending_shm_lock:
+                            self._pending_shm.discard(item.shm_name)
+            finally:
+                del item
 
     def _fail_pending(self, failing: _SendItem) -> None:
         """Unlink any shm blocks we created that won't be delivered.
@@ -644,7 +675,8 @@ class LocalTransport:
             failing: The send item whose sendall just errored; its shm
                 needs unlinking too.
         """
-        self._running = False
+        with self._state_lock:
+            self._running = False
         names: list[str] = []
         if failing.shm_name is not None:
             names.append(failing.shm_name)
@@ -732,6 +764,71 @@ class LocalTransport:
             )
         return _SendItem(frame=_pack_small_frame(event))
 
+    def _enqueue_event(self, item: Event | _SendItem) -> None:
+        """Queue an event or discard it when the configured budget is full.
+
+        Control operations bypass this admission gate so an overloaded
+        stream can still attach, detach, and shut down in FIFO order.
+
+        Args:
+            item: Host event or encoded client frame.
+        """
+        target = self._drain_queue if self._is_host else self._send_queue
+        if not self._max_pending_events:
+            target.put(item)
+            return
+        with self._enqueue_lock:
+            if target.qsize() < self._max_pending_events:
+                target.put(item)
+                return
+            self._dropped_events += 1
+            dropped = self._dropped_events
+        if isinstance(item, _SendItem) and item.shm_name is not None:
+            _try_unlink_shm(item.shm_name)
+            with self._pending_shm_lock:
+                self._pending_shm.discard(item.shm_name)
+        # Report exponentially rather than generating another log per drop.
+        if dropped & (dropped - 1) == 0:
+            # The library's default NullHandler hides Python log warnings.
+            # Loss diagnostics must remain visible without logging setup.
+            role = "host" if self._is_host else "client"
+            print(
+                f"Goggles {role} queue full "
+                f"(limit={self._max_pending_events}); dropped {dropped} events",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def _submit_client_frame(
+        self, item: _SendItem, *, control: bool = False
+    ) -> bool:
+        """Admit a completed frame only while the sender accepts new work.
+
+        Encoding happens outside the state lock. Shutdown may finish while
+        a producer encodes, so admission must recheck the state atomically
+        with the queue write. Never hold shutdown behind serialization.
+
+        Args:
+            item: Completed frame, optionally owning shared memory.
+            control: Whether the frame bypasses the event-count limit.
+
+        Returns:
+            False if shutdown won the race. True otherwise, including an
+            event discarded by the configured overload policy.
+        """
+        with self._state_lock:
+            if self._running:
+                if control:
+                    self._send_queue.put(item)
+                else:
+                    self._enqueue_event(item)
+                return True
+        if item.shm_name is not None:
+            _try_unlink_shm(item.shm_name)
+            with self._pending_shm_lock:
+                self._pending_shm.discard(item.shm_name)
+        return False
+
     # ----- public API ------------------------------------------------------
 
     def emit(self, event: Event) -> None:
@@ -743,14 +840,16 @@ class LocalTransport:
         if not self._running:
             return
         if self._is_host:
-            self._drain_queue.put(event)
+            with self._state_lock:
+                if self._running:
+                    self._enqueue_event(event)
             return
         try:
             item = self._encode_event(event)
         except Exception:
             _log.exception("Failed to encode event for transport")
             return
-        self._send_queue.put(item)
+        self._submit_client_frame(item)
 
     def emit_sync(self, event: Event) -> None:
         """Route an event and (host) block until the bus has seen it.
@@ -775,7 +874,8 @@ class LocalTransport:
         except Exception:
             _log.exception("Failed to encode event for transport")
             return
-        self._send_queue.put(item)
+        if not self._submit_client_frame(item):
+            return
         # Wait until the sender has caught up with this item.
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -798,12 +898,16 @@ class LocalTransport:
             # Queued with the event stream: host-mode ``emit`` rides
             # ``_drain_queue``, so an inline attach would overtake events
             # emitted before it (see ``_AttachControl``).
-            self._drain_queue.put(_AttachControl(handlers, scopes))
+            with self._state_lock:
+                if self._running:
+                    self._drain_queue.put(_AttachControl(handlers, scopes))
             return
         if not self._running:
             return
         body = pickle.dumps((handlers, scopes), protocol=5)
-        self._send_queue.put(_SendItem(frame=self._frame(_MSG_ATTACH, body)))
+        self._submit_client_frame(
+            _SendItem(frame=self._frame(_MSG_ATTACH, body)), control=True
+        )
 
     def detach(self, handler_name: str, scope: str) -> None:
         """Detach a handler from the given scope.
@@ -816,12 +920,16 @@ class LocalTransport:
             # Queued with the event stream: an inline detach would close
             # the handler while events emitted before it are still queued,
             # silently dropping them (see ``_DetachControl``).
-            self._drain_queue.put(_DetachControl(handler_name, scope))
+            with self._state_lock:
+                if self._running:
+                    self._drain_queue.put(_DetachControl(handler_name, scope))
             return
         if not self._running:
             return
         body = pickle.dumps((handler_name, scope), protocol=5)
-        self._send_queue.put(_SendItem(frame=self._frame(_MSG_DETACH, body)))
+        self._submit_client_frame(
+            _SendItem(frame=self._frame(_MSG_DETACH, body)), control=True
+        )
 
     def shutdown(self, timeout: float | None = None) -> None:
         """Flush pending work and release resources.
@@ -840,6 +948,14 @@ class LocalTransport:
             self._shutdown_host(timeout)
         else:
             self._shutdown_client(timeout)
+        if self._dropped_events:
+            role = "host" if self._is_host else "client"
+            print(
+                f"Goggles {role} shutdown: dropped {self._dropped_events} "
+                "events due to queue limits",
+                file=sys.stderr,
+                flush=True,
+            )
 
     def _shutdown_host(self, timeout: float | None) -> None:
         """Host-side shutdown: close listen socket, drain queue, close bus.
@@ -888,7 +1004,9 @@ class LocalTransport:
             except OSError:
                 pass
 
-        for t in self._reader_threads:
+        with self._client_sockets_lock:
+            readers = list(self._reader_threads)
+        for t in readers:
             t.join(timeout=timeout)
 
         depth = self._drain_queue.qsize()

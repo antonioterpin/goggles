@@ -2139,7 +2139,7 @@ wheels = [
 
 [[package]]
 name = "robo-goggles"
-version = "0.3.6"
+version = "0.3.7"
 source = { editable = "." }
 dependencies = [
     { name = "imageio" },

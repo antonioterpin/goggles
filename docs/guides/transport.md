@@ -103,3 +103,38 @@ If you add a new symbol that callers should access via
   bus/routing/handler pipeline.
 - [environment-variables.md](environment-variables.md) for the runtime
   knobs.
+
+## Queue lifetime and overload
+
+The client owns serialized frames waiting for its sender. The host owns
+reconstructed events waiting for handlers. These are independent queues: a
+slow handler can grow the host queue while the client queue is empty. A slow
+socket reader can instead grow the client queue. Queue-held data remains
+reachable, so garbage collection cannot release a backlog.
+
+By default both queues remain unbounded to preserve existing delivery
+behavior. Set `GOGGLES_MAX_PENDING_EVENTS` to a positive integer before
+starting the application and its dedicated host to opt into a per-process
+pending-event limit. For example, `GOGGLES_MAX_PENDING_EVENTS=128` keeps at
+most 128 pending events in each queue, plus in-flight work. Producers never
+wait for room: when full, new events are discarded, and Goggles reports
+cumulative drops on stderr at exponentially spaced counts and at shutdown.
+Rejected client frames release any shared-memory segment they allocated.
+
+This is an event-count limit, **not a byte or RSS limit**. Choose it using
+your largest payload and acceptable logging loss. Control operations
+(attach, detach, shutdown) bypass the limit and retain FIFO order with
+accepted events. They can temporarily increase the queue beyond the limit.
+Synchronous host emission runs inline and does not enter the queue;
+synchronous client emission uses the same admission limit as async emission.
+A limit does not increase storage throughput or guarantee complete data.
+
+Once work completes, idle send, receive, and dispatch workers release their
+last frame or payload. Disconnected readers leave the host's thread registry,
+so a long-lived host does not retain a thread object for every past client.
+
+Shutdown also closes admission before stopping workers. A client that finishes
+encoding after shutdown discards the frame and releases its shared memory;
+it cannot leave data behind the sender's stop marker. Host reader threads
+still drain frames already received from clients during graceful shutdown.
+Controls submitted after shutdown do not accumulate on a stopped host.
