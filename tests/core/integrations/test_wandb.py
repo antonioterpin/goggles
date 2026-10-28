@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import wandb as _real_wandb
+from google.protobuf.message import Message
 from wandb.proto import wandb_internal_pb2 as pb
 from wandb.sdk.internal.datastore import DataStore
 
@@ -366,10 +367,10 @@ def test_distinct_names_coexist_on_bus(mock_wandb):
     assert bus.scopes["global"] == {"wandb.train", "wandb.eval"}, (
         "Both handlers must be routed under the attached scope"
     )
-    assert bus.handlers["wandb.train"]._project == "train", (
-        "Each registered handler must keep its own configuration"
-    )
-    assert bus.handlers["wandb.eval"]._project == "eval", (
+    assert (
+        bus.handlers["wandb.train"].to_dict()["data"]["project"] == "train"
+    ), "Each registered handler must keep its own configuration"
+    assert bus.handlers["wandb.eval"].to_dict()["data"]["project"] == "eval", (
         "Each registered handler must keep its own configuration"
     )
 
@@ -1200,6 +1201,9 @@ def test_example_04_logs_all_keys_at_step_100_offline(
         if rec_data is None:
             break
         rec = pb.Record()
+        assert isinstance(rec, Message), (
+            "W&B records use the protobuf message API"
+        )
         rec.ParseFromString(rec_data[1])
         kind = rec.WhichOneof("record_type")
         if kind not in ("history", "partial_history"):
