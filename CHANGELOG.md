@@ -7,6 +7,30 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-28
+
+### Fixed
+
+- Idle transport senders, readers, and dispatchers release their last frame
+  or payload. Disconnected reader threads leave the host registry, avoiding
+  retained resources in long-running hosts. (#251)
+- Final frame admission is atomic with shutdown and socket failure. Encoders
+  finishing after the sender stops discard their frame and release shared
+  memory, including allocations made after shutdown. Synchronous emission
+  no longer waits on that stopped sender. (#251)
+- Closed hosts reject new attach/detach controls instead of accumulating
+  operations without a running dispatcher. Graceful shutdown still drains
+  frames already received from clients. (#251)
+
+### Added
+
+- Opt-in `GOGGLES_MAX_PENDING_EVENTS` limits pending data events per transport
+  queue. The default remains unbounded. At capacity, new events are dropped;
+  rejected client frames release their shared memory. Cumulative drop counts
+  are printed to stderr at exponentially spaced counts and at shutdown.
+  Ordered control operations bypass the limit. This limits event counts,
+  not bytes, and is unsuitable when complete capture is required. (#251)
+
 ## [0.3.2] - 2026-08-03
 
 ### Added
@@ -240,6 +264,7 @@ the old behavior.
 - **Filters**: initialize ring-buffer index in `__init__`. (#144)
 - **Typing**: covariant `Metrics` type. (#135)
 
-[Unreleased]: https://github.com/antonioterpin/goggles/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/antonioterpin/goggles/compare/v0.3.7...HEAD
+[0.3.7]: https://github.com/antonioterpin/goggles/compare/v0.3.6...v0.3.7
 [0.2.1]: https://github.com/antonioterpin/goggles/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/antonioterpin/goggles/compare/v0.1.9...v0.2.0
